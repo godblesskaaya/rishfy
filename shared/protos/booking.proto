@@ -1,0 +1,234 @@
+syntax = "proto3";
+
+package rishfy.booking.v1;
+
+import "common.proto";
+
+option go_package = "github.com/rishfy/protos/booking";
+
+// =============================================================================
+// BOOKING SERVICE — Internal gRPC API
+// =============================================================================
+// Owned by: Ezekiel Mazwa
+// Exposed on: booking-service:50054
+// Consumers: mobile app (via API Gateway), payment-service (for callbacks),
+// notification-service (for event replay), admin dashboard.
+// =============================================================================
+
+service BookingService {
+  // Create a new booking. Saga-orchestrated:
+  //   1. Reserve seats via route-service (synchronous)
+  //   2. Initiate payment via payment-service (synchronous)
+  //   3. Emit booking.created event (Kafka)
+  //   4. On payment callback: confirm or rollback
+  rpc CreateBooking(CreateBookingRequest) returns (CreateBookingResponse);
+
+  rpc GetBooking(GetBookingRequest) returns (Booking);
+  rpc GetBookingsBatch(GetBookingsBatchRequest) returns (GetBookingsBatchResponse);
+
+  // List bookings for a user (as passenger or driver).
+  rpc ListUserBookings(ListUserBookingsRequest) returns (ListUserBookingsResponse);
+
+  // List all bookings on a given route (driver dashboard).
+  rpc ListRouteBookings(ListRouteBookingsRequest) returns (ListRouteBookingsResponse);
+
+  // Cancel a booking. Refund logic is handled by payment-service based on
+  // the cancellation policy (2-hour window for free cancellation).
+  rpc CancelBooking(CancelBookingRequest) returns (CancelBookingResponse);
+
+  // Confirm booking after payment success (called by payment-service).
+  rpc ConfirmBooking(ConfirmBookingRequest) returns (ConfirmBookingResponse);
+
+  // Start the trip (driver action). Transitions booking to IN_PROGRESS.
+  rpc StartTrip(StartTripRequest) returns (StartTripResponse);
+
+  // Complete the trip (driver action). Transitions booking to COMPLETED,
+  // triggers driver earnings settlement.
+  rpc CompleteTrip(CompleteTripRequest) returns (CompleteTripResponse);
+
+  // Submit a rating for a completed booking (passenger or driver).
+  rpc SubmitRating(SubmitRatingRequest) returns (SubmitRatingResponse);
+
+  // LATRA compliance — get completed trips for reporting.
+  // Only callable by service tokens with "latra:read" scope.
+  rpc GetTripsForLATRAReport(GetTripsForLATRAReportRequest) returns (GetTripsForLATRAReportResponse);
+}
+
+// -----------------------------------------------------------------------------
+// Messages
+// -----------------------------------------------------------------------------
+
+message Booking {
+  string booking_id = 1;
+  string confirmation_code = 2;             // 8-char, user-facing
+
+  string route_id = 3;
+  string passenger_user_id = 4;
+  string driver_user_id = 5;                // Denormalized for queries
+
+  int32 seat_count = 6;
+  rishfy.common.Money total_amount = 7;
+  rishfy.common.Money driver_earnings = 8;  // total - 15% platform fee
+  rishfy.common.Money platform_fee = 9;
+
+  rishfy.common.BookingStatus status = 10;
+  rishfy.common.TripStatus trip_status = 11;
+
+  // Pickup details — may differ slightly from route origin
+  rishfy.common.Coordinates pickup_coordinates = 12;
+  string pickup_address = 13;
+  string pickup_notes = 14;                 // "Waiting at the gate"
+
+  // Dropoff details
+  rishfy.common.Coordinates dropoff_coordinates = 15;
+  string dropoff_address = 16;
+
+  // Lifecycle timestamps
+  rishfy.common.Timestamp created_at = 17;
+  rishfy.common.Timestamp confirmed_at = 18;
+  rishfy.common.Timestamp cancelled_at = 19;
+  rishfy.common.Timestamp trip_started_at = 20;
+  rishfy.common.Timestamp trip_completed_at = 21;
+
+  string cancellation_reason = 22;
+  string cancellation_policy_applied = 23;  // "FREE" | "PENALTY_50" | "NO_REFUND"
+
+  // Rating state (only populated after trip completes)
+  int32 passenger_rating = 24;              // Rating given by passenger (1-5, 0 if none)
+  int32 driver_rating = 25;                 // Rating given by driver
+  string passenger_review = 26;
+  string driver_review = 27;
+
+  string payment_id = 28;                   // Reference to payment-service record
+  string trip_id = 29;                      // Reference to location-service trip
+}
+
+// -----------------------------------------------------------------------------
+// Requests & Responses
+// -----------------------------------------------------------------------------
+
+message CreateBookingRequest {
+  string passenger_user_id = 1;
+  string route_id = 2;
+  int32 seat_count = 3;                     // Must be >= 1
+  rishfy.common.Coordinates pickup_coordinates = 4;
+  string pickup_address = 5;
+  string pickup_notes = 6;
+  rishfy.common.Coordinates dropoff_coordinates = 7;
+  string dropoff_address = 8;
+  rishfy.common.PaymentMethod payment_method = 9;
+  string idempotency_key = 10;              // Client-generated UUID for retry safety
+}
+
+message CreateBookingResponse {
+  Booking booking = 1;
+  string payment_checkout_url = 2;          // For redirect flows if applicable
+  string payment_instructions = 3;          // Human-readable, per-provider
+}
+
+message GetBookingRequest {
+  string booking_id = 1;
+  string confirmation_code = 2;             // Either one must be provided
+}
+
+message GetBookingsBatchRequest { repeated string booking_ids = 1; }
+message GetBookingsBatchResponse { repeated Booking bookings = 1; }
+
+message ListUserBookingsRequest {
+  string user_id = 1;
+  enum Role {
+    ROLE_UNSPECIFIED = 0;
+    ROLE_PASSENGER = 1;
+    ROLE_DRIVER = 2;
+    ROLE_BOTH = 3;
+  }
+  Role role = 2;
+  repeated rishfy.common.BookingStatus statuses = 3;
+  rishfy.common.Timestamp from_date = 4;
+  rishfy.common.Timestamp to_date = 5;
+  rishfy.common.PaginationRequest pagination = 6;
+}
+message ListUserBookingsResponse {
+  repeated Booking bookings = 1;
+  rishfy.common.PaginationResponse pagination = 2;
+}
+
+message ListRouteBookingsRequest {
+  string route_id = 1;
+  repeated rishfy.common.BookingStatus statuses = 2;
+}
+message ListRouteBookingsResponse { repeated Booking bookings = 1; }
+
+message CancelBookingRequest {
+  string booking_id = 1;
+  string cancelling_user_id = 2;            // Could be passenger or driver
+  string reason = 3;
+}
+message CancelBookingResponse {
+  Booking booking = 1;
+  rishfy.common.Money refund_amount = 2;
+  string refund_reference = 3;
+}
+
+message ConfirmBookingRequest {
+  string booking_id = 1;
+  string payment_id = 2;
+  rishfy.common.Timestamp payment_completed_at = 3;
+}
+message ConfirmBookingResponse { Booking booking = 1; }
+
+message StartTripRequest {
+  string booking_id = 1;
+  string driver_user_id = 2;                // For authorization
+  rishfy.common.Coordinates current_location = 3;
+}
+message StartTripResponse {
+  Booking booking = 1;
+  string trip_id = 2;                       // New trip record in location-service
+}
+
+message CompleteTripRequest {
+  string booking_id = 1;
+  string driver_user_id = 2;
+  rishfy.common.Coordinates final_location = 3;
+  int32 final_distance_meters = 4;
+}
+message CompleteTripResponse {
+  Booking booking = 1;
+  rishfy.common.Money settlement_amount = 2;
+}
+
+message SubmitRatingRequest {
+  string booking_id = 1;
+  string rater_user_id = 2;
+  int32 rating = 3;                         // 1-5
+  string review = 4;                        // Optional, max 500 chars
+}
+message SubmitRatingResponse {
+  Booking booking = 1;
+  bool rating_complete = 2;                 // Both parties have rated
+}
+
+message GetTripsForLATRAReportRequest {
+  rishfy.common.Timestamp start_date = 1;
+  rishfy.common.Timestamp end_date = 2;
+  int32 limit = 3;                          // Max 1000
+  string cursor = 4;                        // For pagination
+}
+message GetTripsForLATRAReportResponse {
+  message LATRATripRecord {
+    int64 trip_id = 1;
+    string origin_coordinates = 2;          // "lat,lng"
+    string end_coordinates = 3;
+    string start_time = 4;                  // "YYYY-MM-DD HH:MM:SS"
+    string end_time = 5;
+    int64 total_fare_amount = 6;
+    int64 trip_distance = 7;                // meters
+    int32 rating = 8;
+    int64 driver_earning = 9;
+    string driver_license_number = 10;
+    string vehicle_registration = 11;
+  }
+  repeated LATRATripRecord trips = 1;
+  string next_cursor = 2;
+}

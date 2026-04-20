@@ -1,0 +1,187 @@
+syntax = "proto3";
+
+package rishfy.route.v1;
+
+import "common.proto";
+
+option go_package = "github.com/rishfy/protos/route";
+
+// =============================================================================
+// ROUTE SERVICE — Internal gRPC API
+// =============================================================================
+// Owned by: Godbless Kaaya
+// Exposed on: route-service:50053
+// Consumers: booking-service, mobile app (via API Gateway REST)
+// Notes: Uses PostGIS for geospatial indexing. Google S2 cells for coarse
+// matching. See docs/ARCHITECTURE.md for matching algorithm details.
+// =============================================================================
+
+service RouteService {
+  // Get a single route with full details, including driver info.
+  rpc GetRoute(GetRouteRequest) returns (Route);
+
+  // Batch fetch routes by ID. Used when resolving route data for bookings.
+  rpc GetRoutesBatch(GetRoutesBatchRequest) returns (GetRoutesBatchResponse);
+
+  // Search routes by origin/destination proximity.
+  // The heavy-lifting endpoint — uses PostGIS ST_DWithin for filtering.
+  rpc SearchRoutes(SearchRoutesRequest) returns (SearchRoutesResponse);
+
+  // Decrement available seats atomically. Called by booking-service.
+  // Uses row-level locking to prevent oversell.
+  rpc ReserveSeats(ReserveSeatsRequest) returns (ReserveSeatsResponse);
+
+  // Release previously-reserved seats (on booking cancellation).
+  rpc ReleaseSeats(ReleaseSeatsRequest) returns (ReleaseSeatsResponse);
+
+  // Get available seat count for a route (read-through cached).
+  rpc GetRouteAvailability(GetRouteAvailabilityRequest) returns (GetRouteAvailabilityResponse);
+
+  // List routes currently posted by a specific driver.
+  rpc ListDriverRoutes(ListDriverRoutesRequest) returns (ListDriverRoutesResponse);
+}
+
+// -----------------------------------------------------------------------------
+// Messages
+// -----------------------------------------------------------------------------
+
+message Route {
+  string route_id = 1;
+  string driver_user_id = 2;
+  string vehicle_id = 3;
+
+  Location origin = 4;
+  Location destination = 5;
+  repeated Waypoint waypoints = 6;
+
+  rishfy.common.Timestamp departure_time = 7;
+  rishfy.common.Timestamp estimated_arrival = 8;
+
+  int32 total_seats = 9;
+  int32 available_seats = 10;
+  rishfy.common.Money price_per_seat = 11;
+
+  RouteStatus status = 12;
+  string polyline = 13;                     // Google Maps encoded polyline
+
+  // Matching metadata (computed fields for ranking)
+  double distance_meters = 14;
+  int32 duration_seconds = 15;
+
+  // Driver preferences
+  bool smoking_allowed = 16;
+  bool pets_allowed = 17;
+  bool music_preference = 18;
+  string notes = 19;                        // Free-text, max 500 chars
+
+  rishfy.common.Timestamp created_at = 20;
+  rishfy.common.Timestamp updated_at = 21;
+}
+
+message Location {
+  rishfy.common.Coordinates coordinates = 1;
+  string formatted_address = 2;
+  string place_id = 3;                      // Google Places ID (if resolved)
+  string city = 4;
+  string region = 5;
+}
+
+message Waypoint {
+  Location location = 1;
+  int32 sequence = 2;
+  int32 estimated_wait_seconds = 3;
+}
+
+enum RouteStatus {
+  ROUTE_STATUS_UNSPECIFIED = 0;
+  ROUTE_STATUS_DRAFT = 1;
+  ROUTE_STATUS_POSTED = 2;
+  ROUTE_STATUS_FULL = 3;
+  ROUTE_STATUS_IN_PROGRESS = 4;
+  ROUTE_STATUS_COMPLETED = 5;
+  ROUTE_STATUS_CANCELLED = 6;
+}
+
+// -----------------------------------------------------------------------------
+// Requests & Responses
+// -----------------------------------------------------------------------------
+
+message GetRouteRequest { string route_id = 1; }
+
+message GetRoutesBatchRequest { repeated string route_ids = 1; }
+message GetRoutesBatchResponse { repeated Route routes = 1; }
+
+message SearchRoutesRequest {
+  rishfy.common.Coordinates origin = 1;
+  rishfy.common.Coordinates destination = 2;
+  int32 origin_radius_meters = 3;           // default 1000m
+  int32 destination_radius_meters = 4;      // default 1000m
+
+  rishfy.common.Timestamp departure_after = 5;
+  rishfy.common.Timestamp departure_before = 6;
+
+  int32 min_available_seats = 7;            // default 1
+  int64 max_price_tzs = 8;                  // 0 = no limit
+
+  // Filters
+  bool verified_drivers_only = 9;
+  double min_driver_rating = 10;            // e.g., 4.0
+  repeated string excluded_driver_ids = 11; // For blocked users
+
+  rishfy.common.PaginationRequest pagination = 12;
+}
+
+message SearchRoutesResponse {
+  message RouteMatch {
+    Route route = 1;
+    double match_score = 2;                 // 0.0 - 1.0
+    int32 detour_meters = 3;                // Additional distance vs straight line
+    int32 origin_distance_meters = 4;       // Distance from requested origin
+    int32 destination_distance_meters = 5;
+  }
+  repeated RouteMatch matches = 1;
+  rishfy.common.PaginationResponse pagination = 2;
+}
+
+message ReserveSeatsRequest {
+  string route_id = 1;
+  int32 seat_count = 2;
+  string booking_id = 3;                    // For idempotency
+  int32 timeout_seconds = 4;                // Soft hold duration (default 900 = 15min)
+}
+
+message ReserveSeatsResponse {
+  bool success = 1;
+  int32 seats_remaining = 2;
+  string reservation_id = 3;
+  rishfy.common.Timestamp expires_at = 4;
+  string failure_reason = 5;                // e.g., "INSUFFICIENT_SEATS"
+}
+
+message ReleaseSeatsRequest {
+  string reservation_id = 1;
+  string booking_id = 2;
+  string reason = 3;
+}
+message ReleaseSeatsResponse {
+  bool success = 1;
+  int32 seats_remaining = 2;
+}
+
+message GetRouteAvailabilityRequest { string route_id = 1; }
+message GetRouteAvailabilityResponse {
+  int32 total_seats = 1;
+  int32 available_seats = 2;
+  int32 pending_reservations = 3;
+  rishfy.common.Timestamp as_of = 4;
+}
+
+message ListDriverRoutesRequest {
+  string driver_user_id = 1;
+  repeated RouteStatus statuses = 2;        // Empty = all
+  rishfy.common.PaginationRequest pagination = 3;
+}
+message ListDriverRoutesResponse {
+  repeated Route routes = 1;
+  rishfy.common.PaginationResponse pagination = 2;
+}

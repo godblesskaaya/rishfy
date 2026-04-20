@@ -1,0 +1,158 @@
+syntax = "proto3";
+
+package rishfy.location.v1;
+
+import "common.proto";
+
+option go_package = "github.com/rishfy/protos/location";
+
+// =============================================================================
+// LOCATION SERVICE — Internal gRPC API
+// =============================================================================
+// Owned by: Godbless Kaaya
+// Exposed on: location-service:50056
+// Notes: Uses TimescaleDB hypertables for location_points. Real-time updates
+// broadcast via WebSocket (separate server on port 8086).
+// =============================================================================
+
+service LocationService {
+  // Start tracking a new trip. Creates a trip record.
+  rpc StartTrip(StartTripRequest) returns (StartTripResponse);
+
+  // Ingest a single location point. Low-frequency path (REST preferred).
+  rpc RecordLocation(RecordLocationRequest) returns (RecordLocationResponse);
+
+  // Batch ingest (for offline-recovery scenarios).
+  rpc RecordLocationBatch(RecordLocationBatchRequest) returns (RecordLocationBatchResponse);
+
+  // Get latest known location for a driver (read-through from cache).
+  rpc GetDriverLocation(GetDriverLocationRequest) returns (GetDriverLocationResponse);
+
+  // Get location for multiple drivers (e.g., for map view).
+  rpc GetDriversLocations(GetDriversLocationsRequest) returns (GetDriversLocationsResponse);
+
+  // Get full trip trace for a completed booking.
+  rpc GetTripTrace(GetTripTraceRequest) returns (GetTripTraceResponse);
+
+  // Complete a trip. Finalizes the trip record with end location & distance.
+  rpc CompleteTrip(CompleteTripRequest) returns (CompleteTripResponse);
+
+  // ETA estimation to a destination. Uses Google Distance Matrix with caching.
+  rpc EstimateETA(EstimateETARequest) returns (EstimateETAResponse);
+}
+
+// -----------------------------------------------------------------------------
+// Messages
+// -----------------------------------------------------------------------------
+
+message LocationPoint {
+  rishfy.common.Coordinates coordinates = 1;
+  double accuracy_meters = 2;
+  double speed_mps = 3;                     // meters per second
+  double heading_degrees = 4;
+  double altitude_meters = 5;
+  rishfy.common.Timestamp recorded_at = 6;  // Client-side timestamp
+}
+
+message Trip {
+  string trip_id = 1;
+  string booking_id = 2;
+  string route_id = 3;
+  string driver_user_id = 4;
+
+  rishfy.common.TripStatus status = 5;
+
+  rishfy.common.Coordinates start_location = 6;
+  rishfy.common.Coordinates end_location = 7;
+  rishfy.common.Timestamp start_time = 8;
+  rishfy.common.Timestamp end_time = 9;
+  int32 distance_meters = 10;
+  int32 duration_seconds = 11;
+}
+
+// -----------------------------------------------------------------------------
+// Requests & Responses
+// -----------------------------------------------------------------------------
+
+message StartTripRequest {
+  string booking_id = 1;
+  string route_id = 2;
+  string driver_user_id = 3;
+  rishfy.common.Coordinates start_location = 4;
+}
+message StartTripResponse { Trip trip = 1; }
+
+message RecordLocationRequest {
+  string trip_id = 1;
+  string driver_user_id = 2;
+  LocationPoint point = 3;
+}
+message RecordLocationResponse {
+  bool accepted = 1;
+  int32 points_received_this_trip = 2;
+}
+
+message RecordLocationBatchRequest {
+  string trip_id = 1;
+  string driver_user_id = 2;
+  repeated LocationPoint points = 3;
+}
+message RecordLocationBatchResponse {
+  int32 accepted_count = 1;
+  int32 rejected_count = 2;
+  repeated string rejection_reasons = 3;
+}
+
+message GetDriverLocationRequest {
+  string driver_user_id = 1;
+  int32 max_age_seconds = 2;                // Stale threshold, default 60s
+}
+message GetDriverLocationResponse {
+  LocationPoint point = 1;
+  bool is_stale = 2;
+  int32 age_seconds = 3;
+}
+
+message GetDriversLocationsRequest { repeated string driver_user_ids = 1; }
+message GetDriversLocationsResponse {
+  message DriverLocation {
+    string driver_user_id = 1;
+    LocationPoint point = 2;
+    bool is_online = 3;
+  }
+  repeated DriverLocation locations = 1;
+}
+
+message GetTripTraceRequest {
+  string trip_id = 1;
+  int32 simplify_tolerance_meters = 2;      // Douglas-Peucker tolerance, 0=no simplify
+}
+message GetTripTraceResponse {
+  Trip trip = 1;
+  repeated LocationPoint points = 2;
+  string encoded_polyline = 3;              // For efficient rendering
+}
+
+message CompleteTripRequest {
+  string trip_id = 1;
+  rishfy.common.Coordinates end_location = 2;
+  rishfy.common.Timestamp end_time = 3;
+}
+message CompleteTripResponse {
+  Trip trip = 1;
+  int32 total_distance_meters = 2;
+  int32 total_duration_seconds = 3;
+  int32 location_points_recorded = 4;
+}
+
+message EstimateETARequest {
+  rishfy.common.Coordinates origin = 1;
+  rishfy.common.Coordinates destination = 2;
+  rishfy.common.Timestamp departure_time = 3;
+}
+message EstimateETAResponse {
+  int32 duration_seconds = 1;
+  int32 duration_in_traffic_seconds = 2;
+  int32 distance_meters = 3;
+  string cache_source = 4;                  // "hit" | "miss"
+}

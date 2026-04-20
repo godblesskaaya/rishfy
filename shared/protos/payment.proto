@@ -1,0 +1,152 @@
+syntax = "proto3";
+
+package rishfy.payment.v1;
+
+import "common.proto";
+
+option go_package = "github.com/rishfy/protos/payment";
+
+// =============================================================================
+// PAYMENT SERVICE — Internal gRPC API
+// =============================================================================
+// Owned by: Ezekiel Mazwa
+// Exposed on: payment-service:50055
+// Providers: M-Pesa, TigoPesa, Airtel Money (via abstract PaymentProvider)
+// =============================================================================
+
+service PaymentService {
+  // Initiate a payment for a booking. Returns a payment record with
+  // provider-specific instructions (e.g., USSD push prompt).
+  rpc InitiatePayment(InitiatePaymentRequest) returns (InitiatePaymentResponse);
+
+  rpc GetPayment(GetPaymentRequest) returns (Payment);
+
+  // List payments for reconciliation.
+  rpc ListPayments(ListPaymentsRequest) returns (ListPaymentsResponse);
+
+  // Process a provider callback (webhook). Normalizes different providers.
+  // Called internally by the webhook controller.
+  rpc ProcessProviderCallback(ProcessProviderCallbackRequest) returns (ProcessProviderCallbackResponse);
+
+  // Initiate a refund. Partial refunds supported.
+  rpc RefundPayment(RefundPaymentRequest) returns (RefundPaymentResponse);
+
+  // Driver settlement — pay out accumulated earnings.
+  rpc CreateSettlement(CreateSettlementRequest) returns (CreateSettlementResponse);
+
+  rpc GetDriverEarnings(GetDriverEarningsRequest) returns (GetDriverEarningsResponse);
+}
+
+// -----------------------------------------------------------------------------
+// Messages
+// -----------------------------------------------------------------------------
+
+message Payment {
+  string payment_id = 1;
+  string booking_id = 2;
+  string user_id = 3;                       // Payer
+
+  rishfy.common.Money amount = 4;
+  rishfy.common.PaymentMethod method = 5;
+  rishfy.common.PaymentStatus status = 6;
+
+  string provider_reference = 7;            // e.g., M-Pesa confirmation code
+  string internal_reference = 8;            // Our own transaction ID
+
+  string payer_phone = 9;                   // E.164
+  string failure_code = 10;
+  string failure_message = 11;
+
+  rishfy.common.Timestamp initiated_at = 12;
+  rishfy.common.Timestamp completed_at = 13;
+  rishfy.common.Timestamp failed_at = 14;
+
+  rishfy.common.Money refunded_amount = 15;
+  rishfy.common.Timestamp last_refund_at = 16;
+}
+
+// -----------------------------------------------------------------------------
+// Requests & Responses
+// -----------------------------------------------------------------------------
+
+message InitiatePaymentRequest {
+  string booking_id = 1;
+  string user_id = 2;
+  rishfy.common.Money amount = 3;
+  rishfy.common.PaymentMethod method = 4;
+  string payer_phone = 5;
+  string idempotency_key = 6;
+}
+
+message InitiatePaymentResponse {
+  Payment payment = 1;
+  string checkout_url = 2;                  // Optional, for redirect flows
+  string instructions = 3;                  // "Enter your M-Pesa PIN on your phone"
+  int32 expires_in_seconds = 4;
+}
+
+message GetPaymentRequest { string payment_id = 1; }
+
+message ListPaymentsRequest {
+  string user_id = 1;                       // Optional filter
+  string booking_id = 2;                    // Optional filter
+  repeated rishfy.common.PaymentStatus statuses = 3;
+  rishfy.common.Timestamp from_date = 4;
+  rishfy.common.Timestamp to_date = 5;
+  rishfy.common.PaginationRequest pagination = 6;
+}
+message ListPaymentsResponse {
+  repeated Payment payments = 1;
+  rishfy.common.PaginationResponse pagination = 2;
+}
+
+message ProcessProviderCallbackRequest {
+  string provider = 1;                      // "mpesa" | "tigopesa" | "airtel"
+  string raw_payload = 2;                   // Raw webhook body (for audit)
+  string signature = 3;                     // For verification
+}
+message ProcessProviderCallbackResponse {
+  bool processed = 1;
+  string payment_id = 2;
+  rishfy.common.PaymentStatus new_status = 3;
+  string error = 4;
+}
+
+message RefundPaymentRequest {
+  string payment_id = 1;
+  rishfy.common.Money amount = 2;           // If partial
+  string reason = 3;
+  string initiated_by_user_id = 4;
+}
+message RefundPaymentResponse {
+  Payment payment = 1;
+  string refund_reference = 2;
+  rishfy.common.Money refunded_now = 3;
+}
+
+message CreateSettlementRequest {
+  string driver_user_id = 1;
+  rishfy.common.Timestamp period_start = 2;
+  rishfy.common.Timestamp period_end = 3;
+  rishfy.common.PaymentMethod payout_method = 4;
+  string payout_phone = 5;
+}
+message CreateSettlementResponse {
+  string settlement_id = 1;
+  rishfy.common.Money total_amount = 2;
+  int32 booking_count = 3;
+  rishfy.common.PaymentStatus status = 4;
+}
+
+message GetDriverEarningsRequest {
+  string driver_user_id = 1;
+  rishfy.common.Timestamp from_date = 2;
+  rishfy.common.Timestamp to_date = 3;
+}
+message GetDriverEarningsResponse {
+  rishfy.common.Money total_earnings = 1;   // Gross from bookings
+  rishfy.common.Money total_platform_fees = 2;
+  rishfy.common.Money total_settled = 3;
+  rishfy.common.Money pending_balance = 4;  // Unsettled
+  int32 trip_count = 5;
+}

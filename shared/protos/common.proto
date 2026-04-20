@@ -1,0 +1,104 @@
+syntax = "proto3";
+
+package rishfy.common;
+
+option go_package = "github.com/rishfy/protos/common";
+
+// =============================================================================
+// COMMON TYPES — shared across all Rishfy services
+// =============================================================================
+
+// Standardized timestamp. Use UTC ISO-8601 formatting at the edge.
+message Timestamp {
+  int64 seconds = 1;
+  int32 nanos = 2;
+}
+
+// Geographic coordinates in WGS84 (EPSG:4326).
+message Coordinates {
+  double latitude = 1;
+  double longitude = 2;
+}
+
+// Monetary amount, always in Tanzanian Shillings (TZS, minor units = 0).
+// Amount is stored as integer (e.g., 5000 = 5,000 TZS).
+message Money {
+  int64 amount = 1;
+  string currency = 2; // ISO 4217 code, default "TZS"
+}
+
+// Pagination request for list endpoints.
+message PaginationRequest {
+  int32 page = 1;            // 1-indexed
+  int32 page_size = 2;       // max 100, default 20
+  string sort_by = 3;        // field name, optional
+  string sort_order = 4;     // "asc" | "desc", default "desc"
+}
+
+// Pagination response metadata.
+message PaginationResponse {
+  int32 page = 1;
+  int32 page_size = 2;
+  int64 total_count = 3;
+  int32 total_pages = 4;
+  bool has_next = 5;
+  bool has_previous = 6;
+}
+
+// Standard error detail returned in all gRPC status details.
+message ErrorDetail {
+  string code = 1;           // Machine-readable: "USER_NOT_FOUND"
+  string message = 2;        // Human-readable message
+  map<string, string> metadata = 3;
+  string trace_id = 4;       // OpenTelemetry trace ID for debugging
+}
+
+// Standard reference to another entity across services.
+// Since we use database-per-service, cross-service FKs are by UUID only.
+message EntityRef {
+  string id = 1;             // UUID string
+  string type = 2;           // e.g., "USER", "VEHICLE", "ROUTE"
+}
+
+enum UserRole {
+  USER_ROLE_UNSPECIFIED = 0;
+  USER_ROLE_PASSENGER = 1;
+  USER_ROLE_DRIVER = 2;
+  USER_ROLE_ADMIN = 3;
+  USER_ROLE_SUPPORT = 4;
+}
+
+enum BookingStatus {
+  BOOKING_STATUS_UNSPECIFIED = 0;
+  BOOKING_STATUS_PENDING = 1;
+  BOOKING_STATUS_CONFIRMED = 2;
+  BOOKING_STATUS_CANCELLED = 3;
+  BOOKING_STATUS_COMPLETED = 4;
+  BOOKING_STATUS_NO_SHOW = 5;
+}
+
+enum PaymentStatus {
+  PAYMENT_STATUS_UNSPECIFIED = 0;
+  PAYMENT_STATUS_INITIATED = 1;
+  PAYMENT_STATUS_PROCESSING = 2;
+  PAYMENT_STATUS_COMPLETED = 3;
+  PAYMENT_STATUS_FAILED = 4;
+  PAYMENT_STATUS_REFUNDED = 5;
+}
+
+enum PaymentMethod {
+  PAYMENT_METHOD_UNSPECIFIED = 0;
+  PAYMENT_METHOD_MPESA = 1;
+  PAYMENT_METHOD_TIGOPESA = 2;
+  PAYMENT_METHOD_AIRTEL_MONEY = 3;
+  PAYMENT_METHOD_CASH = 4; // For driver settlement only
+}
+
+enum TripStatus {
+  TRIP_STATUS_UNSPECIFIED = 0;
+  TRIP_STATUS_SCHEDULED = 1;
+  TRIP_STATUS_STARTED = 2;
+  TRIP_STATUS_IN_PROGRESS = 3;
+  TRIP_STATUS_COMPLETED = 4;
+  TRIP_STATUS_CANCELLED = 5;
+}

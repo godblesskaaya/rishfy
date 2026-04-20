@@ -1,0 +1,522 @@
+# =============================================================================
+# RISHFY — Development Environment
+# =============================================================================
+# Spin up the full stack locally:
+#   docker compose up -d
+#
+# Health check:
+#   curl http://localhost/health
+#
+# Service URLs (see nginx.conf for full routing):
+#   API Gateway:         http://localhost
+#   Swagger UI:          http://localhost/docs
+#   Kafka UI:            http://localhost:8090
+#   Grafana:             http://localhost:3001   (admin/admin)
+#   Prometheus:          http://localhost:9090
+#   pgAdmin:             http://localhost:5050   (admin@rishfy.dev/admin)
+# =============================================================================
+
+name: rishfy
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # DATA LAYER
+  # ---------------------------------------------------------------------------
+
+  postgres:
+    image: timescale/timescaledb-ha:pg16-latest
+    container_name: rishfy-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: rishfy_root
+      POSTGRES_PASSWORD: ${POSTGRES_ROOT_PASSWORD:-dev_root_password}
+      POSTGRES_DB: postgres
+      # Tune for local dev — raise for prod
+      POSTGRES_MAX_CONNECTIONS: 200
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infrastructure/init-databases.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rishfy_root"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [rishfy_net]
+
+  redis:
+    image: redis:7-alpine
+    container_name: rishfy-redis
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --maxmemory
+      - 512mb
+      - --maxmemory-policy
+      - allkeys-lru
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks: [rishfy_net]
+
+  # ---------------------------------------------------------------------------
+  # MESSAGING
+  # ---------------------------------------------------------------------------
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: rishfy-kafka
+    restart: unless-stopped
+    environment:
+      # KRaft mode — no Zookeeper required
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,PLAINTEXT_HOST://0.0.0.0:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      CLUSTER_ID: rishfy-dev-cluster
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    ports:
+      - "29092:29092"
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics --bootstrap-server localhost:9092 --list"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    networks: [rishfy_net]
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: rishfy-kafka-ui
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_CLUSTERS_0_NAME: rishfy-dev
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+    ports:
+      - "8090:8080"
+    networks: [rishfy_net]
+
+  # ---------------------------------------------------------------------------
+  # APPLICATION SERVICES
+  # ---------------------------------------------------------------------------
+  # Each service exposes:
+  #   - HTTP REST on its internal port (routed via NGINX gateway)
+  #   - gRPC on port 500XX (internal-only)
+  # ---------------------------------------------------------------------------
+
+  auth-service:
+    build:
+      context: ./services/auth
+      dockerfile: Dockerfile
+      target: development
+    container_name: rishfy-auth
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis:    { condition: service_healthy }
+      kafka:    { condition: service_healthy }
+    environment:
+      NODE_ENV: development
+      SERVICE_NAME: auth-service
+      HTTP_PORT: 8081
+      GRPC_PORT: 50051
+      DATABASE_URL: postgres://auth_user:${AUTH_DB_PASSWORD:-dev_auth_password}@postgres:5432/auth_db
+      REDIS_URL: redis://redis:6379/0
+      KAFKA_BROKERS: kafka:9092
+      JWT_PRIVATE_KEY_PATH: /run/secrets/jwt_private_key
+      JWT_PUBLIC_KEY_PATH: /run/secrets/jwt_public_key
+      JWT_ACCESS_TTL: 900           # 15 minutes
+      JWT_REFRESH_TTL: 604800       # 7 days
+      OTP_TTL: 300
+      OTP_LENGTH: 6
+      LOG_LEVEL: debug
+    volumes:
+      - ./services/auth:/app
+      - /app/node_modules
+      - ./infrastructure/secrets/jwt_private_key.pem:/run/secrets/jwt_private_key:ro
+      - ./infrastructure/secrets/jwt_public_key.pem:/run/secrets/jwt_public_key:ro
+    ports:
+      - "8081:8081"
+      - "50051:50051"
+    networks: [rishfy_net]
+
+  user-service:
+    build:
+      context: ./services/user
+      dockerfile: Dockerfile
+      target: development
+    container_name: rishfy-user
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis:    { condition: service_healthy }
+      kafka:    { condition: service_healthy }
+    environment:
+      NODE_ENV: development
+      SERVICE_NAME: user-service
+      HTTP_PORT: 8082
+      GRPC_PORT: 50052
+      DATABASE_URL: postgres://user_user:${USER_DB_PASSWORD:-dev_user_password}@postgres:5432/user_db
+      REDIS_URL: redis://redis:6379/1
+      KAFKA_BROKERS: kafka:9092
+      AUTH_GRPC_URL: auth-service:50051
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: rishfy-user-uploads
+      LOG_LEVEL: debug
+    volumes:
+      - ./services/user:/app
+      - /app/node_modules
+    ports:
+      - "8082:8082"
+      - "50052:50052"
+    networks: [rishfy_net]
+
+  route-service:
+    build:
+      context: ./services/route
+      dockerfile: Dockerfile
+      target: development
+    container_name: rishfy-route
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis:    { condition: service_healthy }
+      kafka:    { condition: service_healthy }
+    environment:
+      NODE_ENV: development
+      SERVICE_NAME: route-service
+      HTTP_PORT: 8083
+      GRPC_PORT: 50053
+      DATABASE_URL: postgres://route_user:${ROUTE_DB_PASSWORD:-dev_route_password}@postgres:5432/route_db
+      REDIS_URL: redis://redis:6379/2
+      KAFKA_BROKERS: kafka:9092
+      USER_GRPC_URL: user-service:50052
+      GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY:-}
+      S2_CELL_LEVEL: 13             # ~1.2km cells
+      LOG_LEVEL: debug
+    volumes:
+      - ./services/route:/app
+      - /app/node_modules
+    ports:
+      - "8083:8083"
+      - "50053:50053"
+    networks: [rishfy_net]
+
+  booking-service:
+    build:
+      context: ./services/booking
+      dockerfile: Dockerfile
+      target: development
+    container_name: rishfy-booking
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis:    { condition: service_healthy }
+      kafka:    { condition: service_healthy }
+    environment:
+      NODE_ENV: development
+      SERVICE_NAME: booking-service
+      HTTP_PORT: 8084
+      GRPC_PORT: 50054
+      DATABASE_URL: postgres://booking_user:${BOOKING_DB_PASSWORD:-dev_booking_password}@postgres:5432/booking_db
+      REDIS_URL: redis://redis:6379/3
+      KAFKA_BROKERS: kafka:9092
+      USER_GRPC_URL: user-service:50052
+      ROUTE_GRPC_URL: route-service:50053
+      PAYMENT_GRPC_URL: payment-service:50055
+      PLATFORM_FEE_PCT: 15
+      CANCELLATION_FREE_WINDOW_HOURS: 2
+      LOG_LEVEL: debug
+    volumes:
+      - ./services/booking:/app
+      - /app/node_modules
+    ports:
+      - "8084:8084"
+      - "50054:50054"
+    networks: [rishfy_net]
+
+  payment-service:
+    build:
+      context: ./services/payment
+      dockerfile: Dockerfile
+      target: development
+    container_name: rishfy-payment
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis:    { condition: service_healthy }
+      kafka:    { condition: service_healthy }
+    environment:
+      NODE_ENV: development
+      SERVICE_NAME: payment-service
+      HTTP_PORT: 8085
+      GRPC_PORT: 50055
+      DATABASE_URL: postgres://payment_user:${PAYMENT_DB_PASSWORD:-dev_payment_password}@postgres:5432/payment_db
+      REDIS_URL: redis://redis:6379/4
+      KAFKA_BROKERS: kafka:9092
+      BOOKING_GRPC_URL: booking-service:50054
+      # Mobile money sandbox creds — NEVER commit real keys
+      MPESA_API_KEY: ${MPESA_API_KEY:-sandbox_key}
+      MPESA_API_SECRET: ${MPESA_API_SECRET:-sandbox_secret}
+      MPESA_BASE_URL: https://openapi.m-pesa.com/sandbox
+      TIGOPESA_API_KEY: ${TIGOPESA_API_KEY:-sandbox_key}
+      AIRTEL_API_KEY: ${AIRTEL_API_KEY:-sandbox_key}
+      # Webhook verification
+      WEBHOOK_SIGNATURE_SECRET: ${WEBHOOK_SIGNATURE_SECRET:-dev_webhook_secret}
+      LOG_LEVEL: debug
+    volumes:
+      - ./services/payment:/app
+      - /app/node_modules
+    ports:
+      - "8085:8085"
+      - "50055:50055"
+    networks: [rishfy_net]
+
+  location-service:
+    build:
+      context: ./services/location
+      dockerfile: Dockerfile
+      target: development
+    container_name: rishfy-location
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis:    { condition: service_healthy }
+      kafka:    { condition: service_healthy }
+    environment:
+      NODE_ENV: development
+      SERVICE_NAME: location-service
+      HTTP_PORT: 8086
+      GRPC_PORT: 50056
+      WS_PORT: 8186
+      DATABASE_URL: postgres://location_user:${LOCATION_DB_PASSWORD:-dev_location_password}@postgres:5432/location_db
+      REDIS_URL: redis://redis:6379/5
+      KAFKA_BROKERS: kafka:9092
+      BOOKING_GRPC_URL: booking-service:50054
+      GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY:-}
+      LOCATION_RETENTION_DAYS: 90
+      LOCATION_SAMPLING_SECONDS: 30
+      LOG_LEVEL: debug
+    volumes:
+      - ./services/location:/app
+      - /app/node_modules
+    ports:
+      - "8086:8086"
+      - "8186:8186"
+      - "50056:50056"
+    networks: [rishfy_net]
+
+  notification-service:
+    build:
+      context: ./services/notification
+      dockerfile: Dockerfile
+      target: development
+    container_name: rishfy-notification
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis:    { condition: service_healthy }
+      kafka:    { condition: service_healthy }
+    environment:
+      NODE_ENV: development
+      SERVICE_NAME: notification-service
+      HTTP_PORT: 8087
+      GRPC_PORT: 50057
+      DATABASE_URL: postgres://notification_user:${NOTIFICATION_DB_PASSWORD:-dev_notification_password}@postgres:5432/notification_db
+      REDIS_URL: redis://redis:6379/6
+      KAFKA_BROKERS: kafka:9092
+      USER_GRPC_URL: user-service:50052
+      FCM_SERVICE_ACCOUNT_PATH: /run/secrets/fcm_service_account
+      AFRICASTALKING_API_KEY: ${AFRICASTALKING_API_KEY:-sandbox_key}
+      AFRICASTALKING_USERNAME: ${AFRICASTALKING_USERNAME:-sandbox}
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
+      LOG_LEVEL: debug
+    volumes:
+      - ./services/notification:/app
+      - /app/node_modules
+      - ./infrastructure/secrets/fcm_service_account.json:/run/secrets/fcm_service_account:ro
+    ports:
+      - "8087:8087"
+      - "50057:50057"
+    networks: [rishfy_net]
+
+  # ---------------------------------------------------------------------------
+  # API GATEWAY (NGINX)
+  # ---------------------------------------------------------------------------
+
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: rishfy-nginx
+    restart: unless-stopped
+    depends_on:
+      - auth-service
+      - user-service
+      - route-service
+      - booking-service
+      - payment-service
+      - location-service
+      - notification-service
+    volumes:
+      - ./infrastructure/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./infrastructure/nginx.d:/etc/nginx/conf.d:ro
+      - ./docs/openapi:/usr/share/nginx/html/docs:ro
+    ports:
+      - "80:80"
+      - "443:443"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks: [rishfy_net]
+
+  # ---------------------------------------------------------------------------
+  # STORAGE (S3-compatible, for profile photos & attachments)
+  # ---------------------------------------------------------------------------
+
+  minio:
+    image: minio/minio:latest
+    container_name: rishfy-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    networks: [rishfy_net]
+
+  # ---------------------------------------------------------------------------
+  # OBSERVABILITY STACK
+  # ---------------------------------------------------------------------------
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: rishfy-prometheus
+    restart: unless-stopped
+    volumes:
+      - ./infrastructure/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    networks: [rishfy_net]
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: rishfy-grafana
+    restart: unless-stopped
+    depends_on: [prometheus]
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./infrastructure/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./infrastructure/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+    ports:
+      - "3001:3000"
+    networks: [rishfy_net]
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.55
+    container_name: rishfy-jaeger
+    restart: unless-stopped
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"   # UI
+      - "4317:4317"     # OTLP gRPC
+      - "4318:4318"     # OTLP HTTP
+    networks: [rishfy_net]
+
+  # ---------------------------------------------------------------------------
+  # DATABASE ADMIN (optional convenience)
+  # ---------------------------------------------------------------------------
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: rishfy-pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@rishfy.dev
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    ports:
+      - "5050:80"
+    profiles: [dev-tools]   # Only runs with: docker compose --profile dev-tools up
+    networks: [rishfy_net]
+
+  # ---------------------------------------------------------------------------
+  # ADMIN DASHBOARD (Next.js 14)
+  # ---------------------------------------------------------------------------
+
+  admin:
+    build:
+      context: ./admin
+      dockerfile: Dockerfile
+      target: development
+    container_name: rishfy-admin
+    restart: unless-stopped
+    depends_on:
+      - nginx
+    environment:
+      NODE_ENV: development
+      NEXTAUTH_URL: http://localhost:3000
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-dev_nextauth_secret_replace_me_with_32_bytes}
+      # Server-side calls bypass NGINX (same Docker network)
+      RISHFY_API_URL: http://nginx
+      RISHFY_ADMIN_SERVICE_TOKEN: ${RISHFY_ADMIN_SERVICE_TOKEN:-}
+      NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY:-}
+      NEXT_PUBLIC_APP_ENV: development
+    volumes:
+      - ./admin:/app
+      - /app/node_modules
+      - /app/.next
+    ports:
+      - "3000:3000"
+    networks: [rishfy_net]
+
+# =============================================================================
+# NETWORKS & VOLUMES
+# =============================================================================
+
+networks:
+  rishfy_net:
+    driver: bridge
+    name: rishfy_network
+
+volumes:
+  postgres_data:
+  redis_data:
+  kafka_data:
+  minio_data:
+  prometheus_data:
+  grafana_data:
+  pgadmin_data:

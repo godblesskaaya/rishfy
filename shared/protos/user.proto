@@ -1,0 +1,164 @@
+syntax = "proto3";
+
+package rishfy.user.v1;
+
+import "common.proto";
+
+option go_package = "github.com/rishfy/protos/user";
+
+// =============================================================================
+// USER SERVICE — Internal gRPC API
+// =============================================================================
+// Owned by: Stella Kahungo
+// Exposed on: user-service:50052
+// Consumers: booking-service, route-service, notification-service, admin
+// =============================================================================
+
+service UserService {
+  // Get a single user's public profile. Used by route/booking services.
+  // Response excludes PII not needed by consumers (phone, email).
+  rpc GetUserProfile(GetUserProfileRequest) returns (UserProfile);
+
+  // Batch fetch profiles. Prefer this over N individual calls.
+  // Max 100 IDs per request.
+  rpc GetUsersBatch(GetUsersBatchRequest) returns (GetUsersBatchResponse);
+
+  // Get driver-specific profile including ratings and vehicle summary.
+  // Used when displaying route listings.
+  rpc GetDriverProfile(GetDriverProfileRequest) returns (DriverProfile);
+
+  // Get full vehicle record. Used by booking-service for fare validation
+  // and by route-service when listing available seats.
+  rpc GetVehicle(GetVehicleRequest) returns (Vehicle);
+
+  // List all vehicles belonging to a driver. Used in driver dashboard.
+  rpc ListDriverVehicles(ListDriverVehiclesRequest) returns (ListDriverVehiclesResponse);
+
+  // Check whether a driver is currently approved to post routes.
+  // Fast path for route-service validation — should be cached.
+  rpc CheckDriverEligibility(CheckDriverEligibilityRequest) returns (CheckDriverEligibilityResponse);
+
+  // Update user rating (called by booking-service after trip completion).
+  // Updates the aggregate rating_average and rating_count.
+  rpc UpdateUserRating(UpdateUserRatingRequest) returns (UpdateUserRatingResponse);
+
+  // Get notification preferences for a user.
+  rpc GetNotificationPreferences(GetNotificationPreferencesRequest) returns (NotificationPreferences);
+
+  // Get emergency contacts for a user (used by LATRA safety feature).
+  rpc GetEmergencyContacts(GetEmergencyContactsRequest) returns (GetEmergencyContactsResponse);
+}
+
+// -----------------------------------------------------------------------------
+// Messages
+// -----------------------------------------------------------------------------
+
+message UserProfile {
+  string user_id = 1;
+  string first_name = 2;
+  string last_name = 3;
+  string profile_picture_url = 4;
+  rishfy.common.UserRole role = 5;
+  double rating_average = 6;
+  int32 rating_count = 7;
+  bool is_verified = 8;
+  string language = 9;                      // "en" | "sw"
+  rishfy.common.Timestamp created_at = 10;
+}
+
+message DriverProfile {
+  UserProfile user = 1;
+  string license_number = 2;
+  bool license_verified = 3;
+  rishfy.common.Timestamp license_expiry = 4;
+  int32 total_trips = 5;
+  int32 total_seats_offered = 6;
+  bool accepting_routes = 7;                // Driver currently open for business
+  repeated VehicleSummary vehicles = 8;
+}
+
+message VehicleSummary {
+  string vehicle_id = 1;
+  string registration_number = 2;
+  string make = 3;
+  string model = 4;
+  string color = 5;
+  int32 seat_capacity = 6;
+  bool latra_verified = 7;
+}
+
+message Vehicle {
+  string vehicle_id = 1;
+  string owner_user_id = 2;
+  string registration_number = 3;
+  string make = 4;
+  string model = 5;
+  int32 year = 6;
+  string color = 7;
+  int32 seat_capacity = 8;
+  bool latra_verified = 9;
+  string latra_license_number = 10;
+  rishfy.common.Timestamp latra_expiry = 11;
+  bool insurance_valid = 12;
+  rishfy.common.Timestamp insurance_expiry = 13;
+  repeated string photo_urls = 14;
+  rishfy.common.Timestamp created_at = 15;
+}
+
+message NotificationPreferences {
+  bool push_enabled = 1;
+  bool sms_enabled = 2;
+  bool email_enabled = 3;
+  bool booking_notifications = 4;
+  bool trip_notifications = 5;
+  bool promotional = 6;
+  string preferred_language = 7;            // "en" | "sw"
+  string quiet_hours_start = 8;             // "22:00"
+  string quiet_hours_end = 9;               // "07:00"
+}
+
+message EmergencyContact {
+  string contact_id = 1;
+  string name = 2;
+  string phone_number = 3;
+  string relationship = 4;
+  bool is_primary = 5;
+}
+
+// -----------------------------------------------------------------------------
+// Requests & Responses
+// -----------------------------------------------------------------------------
+
+message GetUserProfileRequest { string user_id = 1; }
+
+message GetUsersBatchRequest { repeated string user_ids = 1; }
+message GetUsersBatchResponse { repeated UserProfile users = 1; }
+
+message GetDriverProfileRequest { string user_id = 1; }
+
+message GetVehicleRequest { string vehicle_id = 1; }
+
+message ListDriverVehiclesRequest { string driver_user_id = 1; }
+message ListDriverVehiclesResponse { repeated Vehicle vehicles = 1; }
+
+message CheckDriverEligibilityRequest { string user_id = 1; }
+message CheckDriverEligibilityResponse {
+  bool eligible = 1;
+  repeated string blockers = 2;             // e.g., ["LICENSE_EXPIRED", "INSURANCE_EXPIRED"]
+  rishfy.common.Timestamp checked_at = 3;
+}
+
+message UpdateUserRatingRequest {
+  string user_id = 1;
+  int32 new_rating = 2;                     // 1-5
+  string booking_id = 3;                    // For idempotency
+}
+message UpdateUserRatingResponse {
+  double new_average = 1;
+  int32 new_count = 2;
+}
+
+message GetNotificationPreferencesRequest { string user_id = 1; }
+
+message GetEmergencyContactsRequest { string user_id = 1; }
+message GetEmergencyContactsResponse { repeated EmergencyContact contacts = 1; }

@@ -1,0 +1,176 @@
+syntax = "proto3";
+
+package rishfy.notification.v1;
+
+import "common.proto";
+
+option go_package = "github.com/rishfy/protos/notification";
+
+// =============================================================================
+// NOTIFICATION SERVICE — Internal gRPC API
+// =============================================================================
+// Owned by: Fatma Abdallah
+// Exposed on: notification-service:50057
+// Channels: FCM (push), SMS (AfricasTalking), Email (SendGrid)
+// Primary consumer path is Kafka events — this gRPC API is for on-demand sends.
+// =============================================================================
+
+service NotificationService {
+  // Send a notification on-demand (bypass event flow).
+  // Use for admin-initiated messages, test sends, etc.
+  rpc SendNotification(SendNotificationRequest) returns (SendNotificationResponse);
+
+  // Batch send (e.g., marketing or announcements).
+  rpc SendBatchNotification(SendBatchNotificationRequest) returns (SendBatchNotificationResponse);
+
+  // Register a device token for push notifications.
+  rpc RegisterDevice(RegisterDeviceRequest) returns (RegisterDeviceResponse);
+
+  // Unregister a device (on logout).
+  rpc UnregisterDevice(UnregisterDeviceRequest) returns (UnregisterDeviceResponse);
+
+  // Get notification history for a user.
+  rpc GetNotificationHistory(GetNotificationHistoryRequest) returns (GetNotificationHistoryResponse);
+
+  // Mark notifications as read (used by mobile app inbox).
+  rpc MarkAsRead(MarkAsReadRequest) returns (MarkAsReadResponse);
+
+  // Send OTP via SMS (used by auth-service during registration).
+  rpc SendOTP(SendOTPRequest) returns (SendOTPResponse);
+}
+
+// -----------------------------------------------------------------------------
+// Messages
+// -----------------------------------------------------------------------------
+
+enum NotificationChannel {
+  NOTIFICATION_CHANNEL_UNSPECIFIED = 0;
+  NOTIFICATION_CHANNEL_PUSH = 1;
+  NOTIFICATION_CHANNEL_SMS = 2;
+  NOTIFICATION_CHANNEL_EMAIL = 3;
+  NOTIFICATION_CHANNEL_IN_APP = 4;
+}
+
+enum NotificationCategory {
+  NOTIFICATION_CATEGORY_UNSPECIFIED = 0;
+  NOTIFICATION_CATEGORY_BOOKING = 1;
+  NOTIFICATION_CATEGORY_TRIP = 2;
+  NOTIFICATION_CATEGORY_PAYMENT = 3;
+  NOTIFICATION_CATEGORY_SECURITY = 4;
+  NOTIFICATION_CATEGORY_PROMOTIONAL = 5;
+  NOTIFICATION_CATEGORY_SYSTEM = 6;
+}
+
+enum NotificationStatus {
+  NOTIFICATION_STATUS_UNSPECIFIED = 0;
+  NOTIFICATION_STATUS_QUEUED = 1;
+  NOTIFICATION_STATUS_SENT = 2;
+  NOTIFICATION_STATUS_DELIVERED = 3;
+  NOTIFICATION_STATUS_READ = 4;
+  NOTIFICATION_STATUS_FAILED = 5;
+}
+
+message Notification {
+  string notification_id = 1;
+  string user_id = 2;
+  NotificationChannel channel = 3;
+  NotificationCategory category = 4;
+  NotificationStatus status = 5;
+
+  string title = 6;
+  string body = 7;
+  map<string, string> data = 8;             // Deep-link payload
+
+  string locale = 9;                        // "en" | "sw"
+  string template_id = 10;                  // Template used, if any
+
+  rishfy.common.Timestamp queued_at = 11;
+  rishfy.common.Timestamp sent_at = 12;
+  rishfy.common.Timestamp delivered_at = 13;
+  rishfy.common.Timestamp read_at = 14;
+
+  string failure_reason = 15;
+  int32 retry_count = 16;
+}
+
+// -----------------------------------------------------------------------------
+// Requests & Responses
+// -----------------------------------------------------------------------------
+
+message SendNotificationRequest {
+  string user_id = 1;
+  repeated NotificationChannel channels = 2; // Multiple channels = fan-out
+  NotificationCategory category = 3;
+  string template_id = 4;                    // Optional; if set, title/body ignored
+  map<string, string> template_variables = 5;
+  string title = 6;                          // Direct-send fallback
+  string body = 7;
+  map<string, string> data = 8;
+  string idempotency_key = 9;
+  string locale = 10;                        // Override user preference
+}
+
+message SendNotificationResponse {
+  repeated Notification notifications = 1;   // One per channel
+}
+
+message SendBatchNotificationRequest {
+  repeated string user_ids = 1;
+  repeated NotificationChannel channels = 2;
+  NotificationCategory category = 3;
+  string template_id = 4;
+  map<string, string> template_variables = 5;
+  string batch_id = 6;                       // Client-generated for tracking
+}
+
+message SendBatchNotificationResponse {
+  string batch_id = 1;
+  int32 queued_count = 2;
+  int32 rejected_count = 3;
+  repeated string rejection_user_ids = 4;
+}
+
+message RegisterDeviceRequest {
+  string user_id = 1;
+  string device_id = 2;                      // Client-generated UUID
+  string fcm_token = 3;                      // Firebase token
+  string platform = 4;                       // "ios" | "android"
+  string app_version = 5;
+  string device_model = 6;
+}
+message RegisterDeviceResponse { bool registered = 1; }
+
+message UnregisterDeviceRequest {
+  string user_id = 1;
+  string device_id = 2;
+}
+message UnregisterDeviceResponse { bool unregistered = 1; }
+
+message GetNotificationHistoryRequest {
+  string user_id = 1;
+  repeated NotificationCategory categories = 2;
+  bool unread_only = 3;
+  rishfy.common.PaginationRequest pagination = 4;
+}
+message GetNotificationHistoryResponse {
+  repeated Notification notifications = 1;
+  int32 unread_count = 2;
+  rishfy.common.PaginationResponse pagination = 3;
+}
+
+message MarkAsReadRequest {
+  string user_id = 1;
+  repeated string notification_ids = 2;      // Empty = mark all as read
+}
+message MarkAsReadResponse { int32 marked_count = 1; }
+
+message SendOTPRequest {
+  string phone_number = 1;                   // E.164
+  string purpose = 2;                        // "registration" | "password_reset" | "login"
+  string locale = 3;
+}
+message SendOTPResponse {
+  string otp_reference = 1;                  // Used to verify later
+  int32 expires_in_seconds = 2;              // Default 300 (5min)
+  int32 cooldown_seconds = 3;                // Before another OTP can be requested
+}

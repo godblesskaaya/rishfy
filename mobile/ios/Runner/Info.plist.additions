@@ -1,0 +1,40 @@
+<!--
+  KEYS TO ADD to Info.plist during iOS project generation.
+  Copy these into ios/Runner/Info.plist when you run `flutter create .`
+-->
+
+<key>NSLocationWhenInUseUsageDescription</key>
+<string>Rishfy needs your location to match you with nearby routes and track your trip.</string>
+
+<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+<string>Rishfy tracks your trip in the background so passengers and drivers can coordinate pickups.</string>
+
+<key>NSCameraUsageDescription</key>
+<string>Take a profile photo or photograph your vehicle for verification.</string>
+
+<key>NSPhotoLibraryUsageDescription</key>
+<string>Choose a profile photo or vehicle photo.</string>
+
+<key>NSFaceIDUsageDescription</key>
+<string>Use Face ID to secure your Rishfy account.</string>
+
+<key>NSContactsUsageDescription</key>
+<string>Select emergency contacts from your address book.</string>
+
+<!-- Google Maps API key (replace with yours) -->
+<key>GMSApiKey</key>
+<string>REPLACE_WITH_YOUR_IOS_GOOGLE_MAPS_KEY</string>
+
+<!-- Deep linking -->
+<key>CFBundleURLTypes</key>
+<array>
+    <dict>
+        <key>CFBundleURLSchemes</key>
+        <array>
+            <string>rishfy</string>
+        </array>
+    </dict>
+</array>
+
+<key>FlutterDeepLinkingEnabled</key>
+<true/>
