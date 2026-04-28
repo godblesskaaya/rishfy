@@ -1190,68 +1190,65 @@ CREATE TABLE notification_templates (
 
 ## 10. Migration Strategy
 
-### 10.1 Tool
+### 10.1 Bootstrap vs. migrations
 
-Use **node-pg-migrate** for all migrations.
+`infrastructure/init-databases.sql` is intentionally limited to cluster bootstrap:
+
+- creates one database/user pair per service (`auth_db`/`auth_user`, etc.)
+- grants baseline privileges for service-owned schemas
+- enables database-level extensions for `location_db`
+
+Service tables are owned by versioned migrations under `services/<service>/migrations`. Do not add application tables directly to the bootstrap script.
+
+### 10.2 Tool
+
+Use **node-pg-migrate** for all service migrations. Each service package exposes the same commands:
 
 ```bash
-npm install -g node-pg-migrate
+cd services/auth
+npm run migrate:up
+npm run migrate:down
+npm run migrate:create -- add-locked-until-to-auth-users
 ```
 
-### 10.2 Migration Files
+From the repository root, use the dev helper once Docker services are running:
 
-Each service has its own `migrations/` directory:
+```bash
+./scripts/dev.sh migrate auth  # one service
+./scripts/dev.sh migrate       # all services
+```
+
+### 10.3 Migration Files
+
+Each service has its own `migrations/` directory. Sprint 1 ships the initial `auth_db` migration:
 
 ```
 services/auth/migrations/
-├── 1700000000001_initial_schema.js
-├── 1700000000002_add_device_info_to_refresh_tokens.js
-└── 1700000000003_add_locked_until_to_auth_users.js
+└── 1700000000001_initial_schema.js
 ```
 
-### 10.3 Migration Template
+The auth migration creates:
+
+- `auth_users`
+- `verification_codes`
+- `refresh_tokens`
+- `password_resets`
+- indexes and the `updated_at` trigger function
+
+### 10.4 Migration Template
 
 ```javascript
-// migrations/1700000000001_initial_schema.js
+// migrations/TIMESTAMP_descriptive_name.js
 exports.up = (pgm) => {
-    pgm.createTable('auth_users', {
-        id: 'id',
-        phone: { type: 'varchar(20)', notNull: true, unique: true },
-        email: { type: 'varchar(255)', unique: true },
-        password_hash: { type: 'varchar(255)', notNull: true },
-        user_type: {
-            type: 'varchar(20)',
-            notNull: true,
-            check: "user_type IN ('driver', 'rider', 'admin')"
-        },
-        verified: { type: 'boolean', notNull: true, default: false },
-        created_at: { type: 'timestamptz', notNull: true, default: pgm.func('NOW()') },
-        updated_at: { type: 'timestamptz', notNull: true, default: pgm.func('NOW()') }
-    });
-
-    pgm.createIndex('auth_users', 'phone');
-    pgm.createIndex('auth_users', 'email', { where: 'email IS NOT NULL' });
+  pgm.createTable('example_table', {
+    id: 'id',
+    created_at: { type: 'timestamptz', notNull: true, default: pgm.func('NOW()') },
+  });
 };
 
 exports.down = (pgm) => {
-    pgm.dropTable('auth_users');
+  pgm.dropTable('example_table');
 };
-```
-
-### 10.4 Running Migrations
-
-```bash
-# Run all pending migrations
-npm run migrate up
-
-# Rollback last migration
-npm run migrate down
-
-# Create new migration
-npm run migrate create add-locked-until-to-auth-users
-
-# Migration status
-npm run migrate status
 ```
 
 ### 10.5 Migration Rules
@@ -1269,31 +1266,29 @@ npm run migrate status
 
 ### 11.1 Development Seeds
 
-Located in `scripts/seeds/` — run via `npm run seed`.
+Development seeds live in `scripts/seeds/` and are run from the repository root:
 
-**Example**: `seeds/01_admin_user.sql`
+```bash
+npm run seed          # defaults to auth
+bash scripts/seed.sh auth
+```
+
+Sprint 1 includes `scripts/seeds/01_admin_user.sql`, which seeds one verified admin identity into `auth_db.public.auth_users`. The script is idempotent via `ON CONFLICT (email) DO NOTHING`.
 
 ```sql
--- Create admin user for development
-INSERT INTO auth_db.auth_users (phone, email, password_hash, user_type, verified, status)
+INSERT INTO auth_users (phone, email, password_hash, user_type, verified, status)
 VALUES (
-    '+255700000001',
-    'admin@rishfy.co.tz',
-    '$2b$10$...', -- bcrypt hash of 'Admin@123'
-    'admin',
-    TRUE,
-    'active'
-);
-
-INSERT INTO user_db.users (auth_id, first_name, last_name, phone, email)
-VALUES (
-    (SELECT id FROM auth_db.auth_users WHERE email = 'admin@rishfy.co.tz'),
-    'Admin',
-    'User',
-    '+255700000001',
-    'admin@rishfy.co.tz'
-);
+  '+255700000001',
+  'admin@rishfy.co.tz',
+  '$2b$10$...',
+  'admin',
+  TRUE,
+  'active'
+)
+ON CONFLICT (email) DO NOTHING;
 ```
+
+User-profile seed rows belong in a future user-service seed after `user_db` migrations are implemented.
 
 ### 11.2 Test Data Generators
 

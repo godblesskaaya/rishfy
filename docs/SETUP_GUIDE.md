@@ -472,18 +472,18 @@ git push origin feature/RSHFY-123-short-description
 cd services/auth
 
 # Create a new migration
-npm run migrate create add-locked-until-to-auth-users
+npm run migrate:create -- add-locked-until-to-auth-users
 
 # This generates: migrations/TIMESTAMP_add-locked-until-to-auth-users.js
 # Edit the file, then run:
 
-npm run migrate up
+npm run migrate:up
 
 # Rollback if needed
-npm run migrate down
+npm run migrate:down
 
 # Check status
-npm run migrate status
+npx node-pg-migrate status
 ```
 
 ### 6.3 Database Access
@@ -491,17 +491,17 @@ npm run migrate status
 #### Via CLI
 ```bash
 # Connect to PostgreSQL container
-docker compose exec postgres psql -U rishfy -d auth_db
+docker compose exec postgres psql -U auth_user -d auth_db
 
 # Or from host (if psql installed)
-psql -h localhost -U rishfy -d auth_db
+psql -h localhost -U auth_user -d auth_db
 ```
 
 #### Via DBeaver
 1. Open DBeaver → New Connection → PostgreSQL
 2. Host: `localhost`, Port: `5432`
 3. Database: `auth_db` (or `user_db`, `route_db`, etc.)
-4. Username: `rishfy`, Password: from `.env`
+4. Username: `<service>_user` (for example `auth_user`), Password: matching `<SERVICE>_DB_PASSWORD` from `.env`
 
 ### 6.4 Redis Access
 
@@ -620,7 +620,7 @@ sudo usermod -aG docker $USER
 **Solution**:
 ```bash
 # Re-run the initialization
-docker compose exec postgres psql -U postgres -f /docker-entrypoint-initdb.d/init-databases.sql
+docker compose exec postgres psql -U rishfy_root -d postgres -f /docker-entrypoint-initdb.d/01-init.sql
 ```
 
 **Problem**: "Connection refused" when connecting from service to postgres
@@ -730,8 +730,8 @@ npm run test:coverage   # With coverage report
 
 ### Database
 ```bash
-npm run migrate up      # Apply migrations
-npm run migrate down    # Rollback
+npm run migrate:up      # Apply migrations
+npm run migrate:down    # Rollback
 npm run seed            # Seed test data
 ```
 

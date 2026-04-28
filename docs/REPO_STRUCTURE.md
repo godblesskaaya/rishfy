@@ -2,6 +2,8 @@
 
 > **Monorepo layout and conventions**
 > Repository: `github.com/rishfy/platform`
+>
+> **Status note (2026-04-28):** this document mixes current scaffolding with intended target-state structure. For the audited Sprint 1 reality check, see [SPRINT1_STATUS_REVIEW.md](./SPRINT1_STATUS_REVIEW.md).
 
 ---
 

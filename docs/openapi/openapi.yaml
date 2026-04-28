@@ -1,0 +1,119 @@
+openapi: 3.0.3
+info:
+  title: Rishfy API
+  version: 0.1.0
+  description: |
+    Rishfy platform API. Sprint 1 surface: Auth service.
+    Additional services land in subsequent sprints.
+servers:
+  - url: http://localhost/api/v1
+    description: Local gateway
+
+tags:
+  - name: auth
+    description: Authentication, OTP, JWT issuance
+
+paths:
+  /auth/register:
+    post:
+      tags: [auth]
+      summary: Register a new user (issues OTP)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password]
+              properties:
+                email: { type: string, format: email }
+                phoneNumber: { type: string }
+                password: { type: string, minLength: 8 }
+      responses:
+        '201': { description: User created, OTP dispatched }
+        '400': { description: Validation error }
+        '429': { description: Rate limited }
+
+  /auth/verify-otp:
+    post:
+      tags: [auth]
+      summary: Verify OTP and issue tokens
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [userId, otpCode]
+              properties:
+                userId: { type: string, format: uuid }
+                otpCode: { type: string }
+      responses:
+        '200': { description: Tokens issued }
+        '400': { description: Invalid OTP }
+
+  /auth/login:
+    post:
+      tags: [auth]
+      summary: Password login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [identifier, password]
+              properties:
+                identifier: { type: string, description: email or phone }
+                password: { type: string }
+      responses:
+        '200': { description: Tokens issued }
+        '401': { description: Invalid credentials }
+        '423': { description: Account locked }
+
+  /auth/refresh-token:
+    post:
+      tags: [auth]
+      summary: Rotate refresh token, issue new access token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken: { type: string }
+      responses:
+        '200': { description: New token pair }
+        '401': { description: Refresh token invalid or revoked }
+
+  /auth/logout:
+    post:
+      tags: [auth]
+      summary: Revoke a refresh token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken: { type: string }
+      responses:
+        '200': { description: Token revoked }
+
+  /auth/reset-password:
+    post:
+      tags: [auth]
+      summary: Reset password via OTP
+      responses:
+        '200': { description: Password reset }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
