@@ -1,0 +1,11 @@
+{
+  "extends": ["../../.eslintrc.json"],
+  "parserOptions": {
+    "project": ["../../tsconfig.base.json", "./tsconfig.json"]
+  },
+  "rules": {
+    "import/no-unresolved": "off",
+    "@typescript-eslint/require-await": "off",
+    "@typescript-eslint/no-misused-promises": "off"
+  }
+}

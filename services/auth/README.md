@@ -24,6 +24,20 @@ cp .env.example .env
 npm run dev
 ```
 
+
+## Database Migrations and Seeds
+
+```bash
+# Start dependencies, then run the auth migration from the repo root
+./scripts/dev.sh up
+./scripts/dev.sh migrate auth
+
+# Seed the development admin auth identity
+npm run seed
+```
+
+The initial auth migration lives at `services/auth/migrations/1700000000001_initial_schema.js` and owns all `auth_db` application tables.
+
 ## Testing
 
 ```bash

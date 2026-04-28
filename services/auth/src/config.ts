@@ -11,6 +11,8 @@ const configSchema = z.object({
   DATABASE_URL: z.string().url(),
   REDIS_URL: z.string().url(),
   KAFKA_BROKERS: z.string(),
+  JWT_PRIVATE_KEY: z.string().optional(),
+  JWT_PUBLIC_KEY: z.string().optional(),
 
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().url().optional(),
 });
