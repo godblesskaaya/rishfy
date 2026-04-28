@@ -22,6 +22,7 @@
     "dev:down": "docker compose down",
     "dev:logs": "docker compose logs -f",
     "migrate:all": "bash scripts/dev.sh migrate",
+    "seed": "bash scripts/seed.sh",
     "audit:fix": "npm audit fix --workspaces"
   },
   "devDependencies": {

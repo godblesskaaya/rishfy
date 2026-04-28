@@ -151,6 +151,7 @@ services:
       OTP_TTL: 300
       OTP_LENGTH: 6
       LOG_LEVEL: debug
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
     volumes:
       - ./services/auth:/app
       - /app/node_modules
@@ -184,6 +185,7 @@ services:
       S3_ENDPOINT: http://minio:9000
       S3_BUCKET: rishfy-user-uploads
       LOG_LEVEL: debug
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
     volumes:
       - ./services/user:/app
       - /app/node_modules
@@ -215,6 +217,7 @@ services:
       GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY:-}
       S2_CELL_LEVEL: 13             # ~1.2km cells
       LOG_LEVEL: debug
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
     volumes:
       - ./services/route:/app
       - /app/node_modules
@@ -248,6 +251,7 @@ services:
       PLATFORM_FEE_PCT: 15
       CANCELLATION_FREE_WINDOW_HOURS: 2
       LOG_LEVEL: debug
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
     volumes:
       - ./services/booking:/app
       - /app/node_modules
@@ -285,6 +289,7 @@ services:
       # Webhook verification
       WEBHOOK_SIGNATURE_SECRET: ${WEBHOOK_SIGNATURE_SECRET:-dev_webhook_secret}
       LOG_LEVEL: debug
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
     volumes:
       - ./services/payment:/app
       - /app/node_modules
@@ -318,6 +323,7 @@ services:
       LOCATION_RETENTION_DAYS: 90
       LOCATION_SAMPLING_SECONDS: 30
       LOG_LEVEL: debug
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
     volumes:
       - ./services/location:/app
       - /app/node_modules
@@ -352,6 +358,7 @@ services:
       AFRICASTALKING_USERNAME: ${AFRICASTALKING_USERNAME:-sandbox}
       SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
       LOG_LEVEL: debug
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
     volumes:
       - ./services/notification:/app
       - /app/node_modules
@@ -381,6 +388,7 @@ services:
       - ./infrastructure/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./infrastructure/nginx.d:/etc/nginx/conf.d:ro
       - ./docs/openapi:/usr/share/nginx/html/docs:ro
+      - nginx_logs:/var/log/nginx
     ports:
       - "80:80"
       - "443:443"
@@ -389,6 +397,18 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
+    networks: [rishfy_net]
+
+
+  nginx-exporter:
+    image: nginx/nginx-prometheus-exporter:1.1.0
+    container_name: rishfy-nginx-exporter
+    restart: unless-stopped
+    depends_on: [nginx]
+    command:
+      - -nginx.scrape-uri=http://nginx/nginx_status
+    ports:
+      - "9113:9113"
     networks: [rishfy_net]
 
   # ---------------------------------------------------------------------------
@@ -429,7 +449,7 @@ services:
     image: grafana/grafana:latest
     container_name: rishfy-grafana
     restart: unless-stopped
-    depends_on: [prometheus]
+    depends_on: [prometheus, loki]
     environment:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: admin
@@ -452,6 +472,31 @@ services:
       - "16686:16686"   # UI
       - "4317:4317"     # OTLP gRPC
       - "4318:4318"     # OTLP HTTP
+    networks: [rishfy_net]
+
+  loki:
+    image: grafana/loki:2.9.8
+    container_name: rishfy-loki
+    restart: unless-stopped
+    command: ["-config.file=/etc/loki/config.yml"]
+    volumes:
+      - ./infrastructure/loki-config.yml:/etc/loki/config.yml:ro
+      - loki_data:/loki
+    ports:
+      - "3100:3100"
+    networks: [rishfy_net]
+
+  promtail:
+    image: grafana/promtail:2.9.8
+    container_name: rishfy-promtail
+    restart: unless-stopped
+    depends_on: [loki, nginx]
+    command: ["-config.file=/etc/promtail/config.yml"]
+    volumes:
+      - ./infrastructure/promtail-config.yml:/etc/promtail/config.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - nginx_logs:/var/log/nginx:ro
     networks: [rishfy_net]
 
   # ---------------------------------------------------------------------------
@@ -519,4 +564,6 @@ volumes:
   minio_data:
   prometheus_data:
   grafana_data:
+  loki_data:
+  nginx_logs:
   pgadmin_data:

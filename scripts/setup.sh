@@ -291,11 +291,9 @@ if [ "$SKIP_DOCKER" = false ]; then
 
     log_ok "Migrations complete"
 
-    # Optional: seed dev data
-    if [ -f scripts/seed-dev-data.sh ]; then
-        log_info "Seeding development data..."
-        bash scripts/seed-dev-data.sh
-    fi
+    log_info "Seeding auth development data..."
+    bash scripts/seed.sh auth
+    log_ok "Seed data loaded"
 fi
 
 # -----------------------------------------------------------------------------

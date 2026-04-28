@@ -26,6 +26,25 @@ SERVICE="${2:-}"
 
 SERVICES="auth user route booking payment location notification"
 
+validate_service() {
+    local service="$1"
+    for candidate in $SERVICES; do
+        if [ "$candidate" = "$service" ]; then
+            return 0
+        fi
+    done
+    echo "Unknown service: $service" >&2
+    echo "Available: $SERVICES" >&2
+    exit 1
+}
+
+run_migrations() {
+    local service="$1"
+    validate_service "$service"
+    docker compose exec -T "${service}-service" npm run migrate:up
+}
+
+
 # -----------------------------------------------------------------------------
 case "$COMMAND" in
     up)
@@ -67,6 +86,7 @@ case "$COMMAND" in
             echo "Available: $SERVICES"
             exit 1
         fi
+        validate_service "$SERVICE"
         docker compose exec postgres psql \
             -U "${SERVICE}_user" \
             -d "${SERVICE}_db"
@@ -77,10 +97,10 @@ case "$COMMAND" in
             echo "Migrating all services..."
             for svc in $SERVICES; do
                 echo "  → $svc"
-                docker compose exec -T "${svc}-service" npm run migrate:up || true
+                run_migrations "$svc"
             done
         else
-            docker compose exec "${SERVICE}-service" npm run migrate:up
+            run_migrations "$SERVICE"
         fi
         ;;
 

@@ -1,9 +1,11 @@
 import { buildApp } from './app.js';
 import { config } from './config.js';
 import { logger } from './logger.js';
+import { startTracing, stopTracing } from './tracing.js';
 // import { startGrpcServer } from './grpc/server.js';
 
 async function main(): Promise<void> {
+  startTracing();
   const app = await buildApp();
 
   // Start HTTP server
@@ -24,6 +26,7 @@ async function main(): Promise<void> {
     logger.info({ signal }, 'Shutting down...');
     try {
       await app.close();
+      await stopTracing();
       // TODO: close DB pool, Redis, Kafka
       process.exit(0);
     } catch (err) {

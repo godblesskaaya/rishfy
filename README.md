@@ -39,6 +39,7 @@ This repository contains the complete handoff package for development. Start her
 | 6 | [EVENT_SCHEMAS.md](docs/EVENT_SCHEMAS.md) | Async event definitions | Backend developers |
 | 7 | [SPRINT_PLAN.md](docs/SPRINT_PLAN.md) | 12-week task breakdown | All developers + PM |
 | 8 | [CODING_STANDARDS.md](docs/CODING_STANDARDS.md) | Style guide, commit conventions, PR process | All developers |
+| 9 | [SPRINT1_STATUS_REVIEW.md](docs/SPRINT1_STATUS_REVIEW.md) | Audited current Sprint 1 implementation status and blockers | All developers |
 
 ### Reference Documents
 
