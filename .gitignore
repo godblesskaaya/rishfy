@@ -47,3 +47,5 @@ shared/protos/generated/
 
 # Testcontainers
 .testcontainers/
+.ssh-keys/
+team-ssh-keys.txt

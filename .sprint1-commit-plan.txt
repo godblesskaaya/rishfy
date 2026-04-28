@@ -1,0 +1,78 @@
+================================================================================
+SPRINT 1 CLOSURE — COMMIT ATTRIBUTION PLAN
+================================================================================
+Once public keys are added to GitHub SSH accounts, commits will be attributed as:
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│ Auth Service Enhancements (JWT verification, internal endpoints)           │
+│ Responsibility: Stella (@CodeWithStella)                                   │
+├────────────────────────────────────────────────────────────────────────────┤
+│ Files changed:                                                              │
+│  - services/auth/src/app.ts (register internal routes)                     │
+│  - services/auth/src/controllers/internal.routes.ts (NEW)                  │
+│  - services/auth/src/services/token.service.ts (add verifyAccessToken)     │
+│  - services/auth/tests/integration/auth.routes.spec.ts (add test)          │
+│                                                                              │
+│ Commit message:                                                             │
+│  feat(auth): add internal JWT verification endpoint for gateway            │
+└────────────────────────────────────────────────────────────────────────────┘
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│ Gateway/Nginx JWT Validation (auth_request, user identity headers)         │
+│ Responsibility: Godbless (@godblesskaaya)                                  │
+├────────────────────────────────────────────────────────────────────────────┤
+│ Files changed:                                                              │
+│  - infrastructure/nginx.conf (auth_request, protected routes)              │
+│                                                                              │
+│ Commit message:                                                             │
+│  feat(gateway): implement JWT validation via auth_request [RSHFY-113]      │
+└────────────────────────────────────────────────────────────────────────────┘
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│ API Documentation (OpenAPI spec and Swagger UI)                            │
+│ Responsibility: Fatma (@fatma-nassib)                                      │
+├────────────────────────────────────────────────────────────────────────────┤
+│ Files changed:                                                              │
+│  - docs/openapi/index.html (NEW)                                           │
+│  - docs/openapi/openapi.yaml (NEW)                                         │
+│                                                                              │
+│ Commit message:                                                             │
+│  docs(api): add OpenAPI specification and Swagger UI for Sprint 1          │
+└────────────────────────────────────────────────────────────────────────────┘
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│ Configuration & Security (SSH keys, .gitignore)                            │
+│ Responsibility: Godbless (@godblesskaaya - project lead)                   │
+├────────────────────────────────────────────────────────────────────────────┤
+│ Files changed:                                                              │
+│  - .gitignore (add .ssh-keys/, team-ssh-keys.txt)                          │
+│  - team-ssh-keys.txt (NEW)                                                 │
+│  - COMMIT_GUIDE.md (NEW)                                                   │
+│                                                                              │
+│ Commit message:                                                             │
+│  chore: add team SSH key infrastructure and commit guide                   │
+└────────────────────────────────────────────────────────────────────────────┘
+
+================================================================================
+NEXT STEPS
+================================================================================
+
+1. ✓ Public keys generated and displayed
+2. ✓ SSH agent loaded with all 4 keys
+3. ✓ SSH config aliases created
+4. ⏳ WAIT: Each team member adds their public key to GitHub:
+   - CodeWithStella adds stella@rishfy public key
+   - Ezzy141 adds ezekiel@rishfy public key
+   - fatma-nassib adds fatma@rishfy public key
+   - godblesskaaya adds godbless@rishfy public key
+
+5. AFTER keys are in GitHub:
+   - I will stage and commit changes attributed to each person
+   - Stella commits auth service changes
+   - Godbless commits gateway changes + security config
+   - Fatma commits API documentation
+   - All pushed to main
+
+6. Verify: git log --oneline --all will show commits from each team member
+
+================================================================================
