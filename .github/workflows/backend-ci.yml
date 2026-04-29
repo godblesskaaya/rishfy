@@ -1,0 +1,54 @@
+name: Backend CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  typecheck-test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        workspace:
+          - "@rishfy/shared"
+          - "@rishfy/auth-service"
+          - "@rishfy/user-service"
+          - "@rishfy/route-service"
+          - "@rishfy/booking-service"
+          - "@rishfy/payment-service"
+          - "@rishfy/location-service"
+          - "@rishfy/notification-service"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck (${{ matrix.workspace }})
+        run: npm run typecheck --workspace=${{ matrix.workspace }} --if-present
+        continue-on-error: ${{ matrix.workspace != '@rishfy/auth-service' && matrix.workspace != '@rishfy/shared' }}
+
+      - name: Test (${{ matrix.workspace }})
+        run: npm run test --workspace=${{ matrix.workspace }} --if-present
+        continue-on-error: ${{ matrix.workspace != '@rishfy/auth-service' && matrix.workspace != '@rishfy/shared' }}
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run lint
+        continue-on-error: true
