@@ -13,6 +13,11 @@ const configSchema = z.object({
   KAFKA_BROKERS: z.string(),
 
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().url().optional(),
+
+  MINIO_ENDPOINT: z.string().default('http://localhost:9000'),
+  MINIO_ACCESS_KEY: z.string().default('minioadmin'),
+  MINIO_SECRET_KEY: z.string().default('minioadmin'),
+  MINIO_BUCKET_USER_UPLOADS: z.string().default('rishfy-user-uploads'),
 });
 
 export type Config = z.infer<typeof configSchema>;
