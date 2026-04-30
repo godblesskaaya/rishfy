@@ -13,6 +13,11 @@ const configSchema = z.object({
   KAFKA_BROKERS: z.string(),
 
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().url().optional(),
+
+  GOOGLE_MAPS_API_KEY: z.string().min(1),
+  USER_SERVICE_GRPC_URL: z.string().default('user-service:50052'),
+  SEARCH_RADIUS_METERS: z.coerce.number().int().default(5000),
+  ROUTE_CACHE_TTL_SECONDS: z.coerce.number().int().default(300),
 });
 
 export type Config = z.infer<typeof configSchema>;
