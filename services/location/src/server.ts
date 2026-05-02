@@ -3,6 +3,7 @@ import { config } from './config.js';
 import { logger } from './logger.js';
 import IORedis from 'ioredis';
 import { startWsServer } from './websocket/ws.server.js';
+import { startGrpcServer } from './grpc/location.server.js';
 
 async function main(): Promise<void> {
   const app = await buildApp();
@@ -18,6 +19,9 @@ async function main(): Promise<void> {
 
   const redis = new IORedis(config.REDIS_URL, { maxRetriesPerRequest: null });
   startWsServer(redis);
+
+  // Start gRPC server
+  startGrpcServer();
 
   // Graceful shutdown
   const shutdown = async (signal: string): Promise<void> => {
