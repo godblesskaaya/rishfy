@@ -1,9 +1,9 @@
 openapi: 3.0.3
 info:
   title: Rishfy API
-  version: 0.3.0
+  version: 0.4.0
   description: |
-    Rishfy platform API. Sprint 3: Booking saga, Payment (Azampay), Notification service.
+    Rishfy platform API. Sprint 4: Location service, WebSocket gateway, Admin dashboard.
 servers:
   - url: http://localhost/api/v1
     description: Local gateway
@@ -17,6 +17,10 @@ tags:
     description: Mobile money payments, settlements, refunds
   - name: notifications
     description: In-app, push, and SMS notifications
+  - name: location
+    description: Driver location, trip trace, ETA estimation
+  - name: admin
+    description: Admin dashboard — KPIs, user management, LATRA
 
 paths:
   /auth/register:
@@ -662,6 +666,250 @@ paths:
       responses:
         '204': { description: All marked read }
 
+  # ---------------------------------------------------------------------------
+  # Location service
+  # ---------------------------------------------------------------------------
+
+  /locations/driver/{driverId}:
+    get:
+      tags: [location]
+      summary: Get latest known location for a driver
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: driverId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: query
+          name: max_age_seconds
+          schema: { type: integer, default: 60 }
+      responses:
+        '200':
+          description: Last known location
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DriverLocation' }
+        '404': { description: No location found }
+
+  /locations/nearby:
+    get:
+      tags: [location]
+      summary: Get nearby active drivers
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: query
+          name: lat
+          required: true
+          schema: { type: number }
+        - in: query
+          name: lng
+          required: true
+          schema: { type: number }
+        - in: query
+          name: radius_meters
+          schema: { type: integer, default: 5000 }
+      responses:
+        '200':
+          description: Nearby drivers
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/DriverLocation' }
+
+  /trips:
+    post:
+      tags: [location]
+      summary: Create a trip record (called when driver starts)
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [booking_id, driver_id, origin_lat, origin_lng]
+              properties:
+                booking_id: { type: string, format: uuid }
+                driver_id: { type: string, format: uuid }
+                origin_lat: { type: number }
+                origin_lng: { type: number }
+                destination_lat: { type: number }
+                destination_lng: { type: number }
+      responses:
+        '201':
+          description: Trip created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Trip' }
+
+  /trips/{bookingId}/start:
+    post:
+      tags: [location]
+      summary: Mark trip as started
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: bookingId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200': { description: Trip started }
+        '404': { description: Trip not found }
+
+  /trips/{bookingId}/complete:
+    post:
+      tags: [location]
+      summary: Mark trip as completed
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: bookingId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200': { description: Trip completed }
+        '404': { description: Trip not found }
+
+  # ---------------------------------------------------------------------------
+  # WebSocket — documented for reference (not part of HTTP spec)
+  # ---------------------------------------------------------------------------
+
+  /ws/driver:
+    get:
+      tags: [location]
+      summary: "[WebSocket] Driver location broadcast — upgrade to WS, send GPS JSON frames"
+      description: |
+        Upgrade to WebSocket at `ws://<host>/ws/driver?token=<jwt>`.
+        Send frames: `{"lat": 0.0, "lng": 0.0, "bearing": 0, "speed": 0, "tripId": "uuid"}`.
+        Server fans out to all `/ws/location` subscribers for the same driver.
+      responses:
+        '101': { description: Switching Protocols }
+
+  /ws/location:
+    get:
+      tags: [location]
+      summary: "[WebSocket] Passenger location subscribe — upgrade to WS, receive driver position updates"
+      description: |
+        Upgrade to WebSocket at `ws://<host>/ws/location?driverId=<uuid>&token=<jwt>`.
+        Receive frames: `{"driverId": "uuid", "lat": 0.0, "lng": 0.0, "bearing": 0, "arrived": false}`.
+      responses:
+        '101': { description: Switching Protocols }
+
+  # ---------------------------------------------------------------------------
+  # Payment refund
+  # ---------------------------------------------------------------------------
+
+  /payments/{id}/refund:
+    post:
+      tags: [payments]
+      summary: Refund a payment — cancellation policy applied
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string }
+                departureTime: { type: string, format: date-time }
+                cancelledAt: { type: string, format: date-time }
+                forceFullRefund: { type: boolean, description: Admin only }
+      responses:
+        '200':
+          description: Refund applied
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  paymentId: { type: string, format: uuid }
+                  refundedAmountTzs: { type: integer }
+                  policy: { type: string, enum: [FULL_REFUND, PENALTY_50, NO_REFUND] }
+                  status: { type: string }
+        '422': { description: Not refundable or already refunded }
+
+  # ---------------------------------------------------------------------------
+  # Admin dashboard
+  # ---------------------------------------------------------------------------
+
+  /admin/overview/kpis:
+    get:
+      tags: [admin]
+      summary: Platform KPIs — users, drivers, bookings today, gross revenue
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: KPIs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total_users: { type: integer }
+                  active_drivers: { type: integer }
+                  bookings_today: { type: integer }
+                  gross_revenue_tzs: { type: integer }
+                  delta_vs_last_week:
+                    type: object
+                    properties:
+                      users: { type: number }
+                      bookings: { type: number }
+                      revenue: { type: number }
+
+  /admin/overview/bookings-timeseries:
+    get:
+      tags: [admin]
+      summary: Bookings and revenue timeseries
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: query
+          name: days
+          schema: { type: integer, default: 30 }
+      responses:
+        '200':
+          description: Daily series
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    date: { type: string, format: date }
+                    bookings: { type: integer }
+                    revenue: { type: integer }
+
+  /admin/overview/top-routes:
+    get:
+      tags: [admin]
+      summary: Top routes by booking volume (last 30 days)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, default: 10 }
+      responses:
+        '200':
+          description: Top routes
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    origin: { type: string }
+                    destination: { type: string }
+                    bookings: { type: integer }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -881,4 +1129,36 @@ components:
         data: { type: object, additionalProperties: true, nullable: true }
         is_read: { type: boolean }
         delivered_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+
+    DriverLocation:
+      type: object
+      properties:
+        driver_id: { type: string, format: uuid }
+        lat: { type: number }
+        lng: { type: number }
+        bearing: { type: number, nullable: true }
+        speed_kmh: { type: number, nullable: true }
+        accuracy_meters: { type: number, nullable: true }
+        updated_at: { type: string, format: date-time }
+        is_stale: { type: boolean }
+        age_seconds: { type: integer }
+
+    Trip:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        booking_id: { type: string, format: uuid }
+        driver_id: { type: string, format: uuid }
+        passenger_id: { type: string, format: uuid }
+        status: { type: string, enum: [pending, in_progress, completed, cancelled] }
+        origin_lat: { type: number }
+        origin_lng: { type: number }
+        destination_lat: { type: number, nullable: true }
+        destination_lng: { type: number, nullable: true }
+        total_distance_meters: { type: integer, nullable: true }
+        total_duration_seconds: { type: integer, nullable: true }
+        path_encoded: { type: string, nullable: true }
+        started_at: { type: string, format: date-time, nullable: true }
+        completed_at: { type: string, format: date-time, nullable: true }
         created_at: { type: string, format: date-time }
