@@ -13,6 +13,11 @@ const configSchema = z.object({
   KAFKA_BROKERS: z.string(),
 
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().url().optional(),
+
+  ROUTE_SERVICE_GRPC_URL: z.string().default('route-service:50053'),
+  PAYMENT_SERVICE_GRPC_URL: z.string().default('payment-service:50055'),
+  BOOKING_EXPIRY_SECONDS: z.coerce.number().int().default(120),
+  PLATFORM_FEE_PERCENT: z.coerce.number().default(15),
 });
 
 export type Config = z.infer<typeof configSchema>;

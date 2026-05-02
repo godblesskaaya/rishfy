@@ -13,6 +13,14 @@ const configSchema = z.object({
   KAFKA_BROKERS: z.string(),
 
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().url().optional(),
+
+  PAYMENT_PROVIDER: z.enum(['azampay', 'mock']).default('mock'),
+  AZAMPAY_BASE_URL: z.string().default('https://sandbox.azampay.co.tz'),
+  AZAMPAY_AUTH_URL: z.string().default('https://authenticator.sandbox.azampay.co.tz'),
+  AZAMPAY_APP_NAME: z.string().default(''),
+  AZAMPAY_CLIENT_ID: z.string().default(''),
+  AZAMPAY_CLIENT_SECRET: z.string().default(''),
+  AZAMPAY_CALLBACK_SECRET: z.string().default(''),
 });
 
 export type Config = z.infer<typeof configSchema>;

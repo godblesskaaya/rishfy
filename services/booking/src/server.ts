@@ -1,7 +1,9 @@
 import { buildApp } from './app.js';
 import { config } from './config.js';
 import { logger } from './logger.js';
-// import { startGrpcServer } from './grpc/server.js';
+import IORedis from 'ioredis';
+import { startExpiryWorker } from './jobs/booking-expiry.worker.js';
+import { startKafkaConsumers } from './consumers/booking.consumers.js';
 
 async function main(): Promise<void> {
   const app = await buildApp();
@@ -15,9 +17,12 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // Start gRPC server
-  // await startGrpcServer(config.GRPC_PORT);
-  logger.info(`gRPC server will listen on :${config.GRPC_PORT} (not yet wired)`);
+  // Start BullMQ expiry worker
+  const redis = new IORedis(config.REDIS_URL, { maxRetriesPerRequest: null });
+  startExpiryWorker(redis);
+
+  // Start Kafka consumers
+  await startKafkaConsumers();
 
   // Graceful shutdown
   const shutdown = async (signal: string): Promise<void> => {
