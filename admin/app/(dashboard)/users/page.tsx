@@ -77,7 +77,7 @@ const columns: ColumnDef<User>[] = [
 
 export default function UsersPage() {
   const [search, setSearch] = useState('');
-  const [page, setPage] = useState(1);
+  const [page] = useState(1);
 
   const { data, isLoading } = useQuery({
     queryKey: ['users', page, search],

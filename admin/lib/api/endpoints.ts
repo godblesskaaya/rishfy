@@ -195,31 +195,26 @@ export const latraApi = {
 
 export const overviewApi = {
   getKpis: async () => {
-    const { data } = await apiClient.get<{
+    const res = await fetch('/api/admin/overview/kpis', { credentials: 'include' });
+    if (!res.ok) throw new Error('KPIs fetch failed');
+    return res.json() as Promise<{
       total_users: number;
       active_drivers: number;
       bookings_today: number;
       gross_revenue_tzs: number;
-      delta_vs_last_week: {
-        users: number;
-        bookings: number;
-        revenue: number;
-      };
-    }>('/admin/overview/kpis');
-    return data;
+      delta_vs_last_week: { users: number; bookings: number; revenue: number };
+    }>;
   },
 
   getBookingsTimeseries: async (days = 30) => {
-    const { data } = await apiClient.get<
-      Array<{ date: string; bookings: number; revenue: number }>
-    >('/admin/overview/bookings-timeseries', { params: { days } });
-    return data;
+    const res = await fetch(`/api/admin/overview/bookings-timeseries?days=${days}`, { credentials: 'include' });
+    if (!res.ok) throw new Error('Timeseries fetch failed');
+    return res.json() as Promise<Array<{ date: string; bookings: number; revenue: number }>>;
   },
 
   getTopRoutes: async (limit = 10) => {
-    const { data } = await apiClient.get<
-      Array<{ origin: string; destination: string; bookings: number }>
-    >('/admin/overview/top-routes', { params: { limit } });
-    return data;
+    const res = await fetch(`/api/admin/overview/top-routes?limit=${limit}`, { credentials: 'include' });
+    if (!res.ok) throw new Error('Top routes fetch failed');
+    return res.json() as Promise<Array<{ origin: string; destination: string; bookings: number }>>;
   },
 };

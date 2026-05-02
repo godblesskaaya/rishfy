@@ -1,10 +1,8 @@
 'use client';
 
 import {
-  BarChart3,
   Car,
   CreditCard,
-  FileText,
   LayoutDashboard,
   Map,
   Receipt,

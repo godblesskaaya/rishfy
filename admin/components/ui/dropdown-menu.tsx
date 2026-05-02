@@ -1,7 +1,8 @@
 'use client';
 
 import * as DropdownMenuPrimitive from '@radix-ui/react-dropdown-menu';
-import { Check, ChevronRight, Circle } from 'lucide-react';
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+import { Check as _Check, ChevronRight as _ChevronRight, Circle as _Circle } from 'lucide-react';
 import * as React from 'react';
 
 import { cn } from '@/lib/utils';
