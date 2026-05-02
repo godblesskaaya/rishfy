@@ -54,6 +54,47 @@ export async function paymentRoutes(app: FastifyInstance): Promise<void> {
     });
   });
 
+  // POST /api/v1/payments/:id/refund
+  app.post('/api/v1/payments/:id/refund', async (req, reply) => {
+    const userId = req.headers['x-user-id'] as string;
+    const userRole = req.headers['x-user-role'] as string;
+    if (!userId) return reply.status(401).send({ error: 'UNAUTHORIZED' });
+
+    const { id } = req.params as { id: string };
+    const body = req.body as {
+      reason: string;
+      departureTime?: string;
+      cancelledAt?: string;
+      forceFullRefund?: boolean;
+    };
+
+    const forceFullRefund = userRole === 'admin' ? (body.forceFullRefund ?? true) : false;
+
+    try {
+      const result = await service.refund({
+        paymentId: id,
+        reason: body.reason ?? 'PASSENGER_CANCELLED',
+        initiatedBy: userId,
+        departuretime: body.departureTime ? new Date(body.departureTime) : undefined,
+        cancelledAt: body.cancelledAt ? new Date(body.cancelledAt) : new Date(),
+        forceFullRefund,
+      });
+      return reply.send({
+        paymentId: result.payment.id,
+        refundedAmountTzs: result.refundedAmount,
+        policy: result.policy,
+        status: result.payment.status,
+      });
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === 'NOT_FOUND') return reply.status(404).send({ error: 'NOT_FOUND' });
+      if (code === 'NOT_REFUNDABLE') return reply.status(422).send({ error: 'NOT_REFUNDABLE' });
+      if (code === 'ALREADY_REFUNDED') return reply.status(422).send({ error: 'ALREADY_REFUNDED' });
+      logger.error({ err }, 'POST /payments/:id/refund failed');
+      return reply.status(500).send({ error: 'INTERNAL_ERROR' });
+    }
+  });
+
   // Webhook — no auth, signature verified in service
   app.post('/api/v1/webhooks/azampay', async (req, reply) => {
     const rawBody = JSON.stringify(req.body);

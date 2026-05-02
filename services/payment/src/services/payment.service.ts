@@ -104,4 +104,73 @@ export class PaymentService {
   async getByBooking(bookingId: string): Promise<PaymentRow | null> {
     return this.repo.findByBookingId(bookingId);
   }
+
+  /**
+   * Refund policy:
+   *   - Cancelled >= 2 hours before booking departure  → full refund
+   *   - Cancelled < 2 hours before departure           → 50% refund
+   *   - Driver-cancelled or platform error             → full refund (forced)
+   *
+   * `forceFullRefund` bypasses the policy (admin-initiated or driver-cancel).
+   */
+  async refund(params: {
+    paymentId: string;
+    reason: string;
+    initiatedBy: string;
+    departuretime?: Date;
+    cancelledAt?: Date;
+    forceFullRefund?: boolean;
+  }): Promise<{ payment: PaymentRow; refundedAmount: number; policy: string }> {
+    const payment = await this.repo.findById(params.paymentId);
+    if (!payment) throw Object.assign(new Error('Payment not found'), { code: 'NOT_FOUND' });
+    if (!['completed', 'processing'].includes(payment.status)) {
+      throw Object.assign(new Error('Payment is not refundable'), { code: 'NOT_REFUNDABLE' });
+    }
+
+    const eligibleAmount = payment.amount_tzs - payment.refunded_amount_tzs;
+    if (eligibleAmount <= 0) {
+      throw Object.assign(new Error('Payment already fully refunded'), { code: 'ALREADY_REFUNDED' });
+    }
+
+    let refundAmount = eligibleAmount;
+    let policy = 'FULL_REFUND';
+
+    if (!params.forceFullRefund && params.departuretime && params.cancelledAt) {
+      const msUntilDeparture = params.departuretime.getTime() - params.cancelledAt.getTime();
+      const twoHoursMs = 2 * 60 * 60 * 1000;
+      if (msUntilDeparture < twoHoursMs) {
+        refundAmount = Math.round(eligibleAmount * 0.5);
+        policy = 'PENALTY_50';
+      }
+    }
+
+    if (refundAmount === 0) {
+      policy = 'NO_REFUND';
+      const updated = await this.repo.markRefunded(payment.id, 0, false);
+      return { payment: updated, refundedAmount: 0, policy };
+    }
+
+    const partial = refundAmount < eligibleAmount;
+    let providerRef: string | undefined;
+
+    try {
+      const result = await this.provider.refund({
+        providerReference: payment.provider_reference ?? payment.internal_reference,
+        amountTzs: refundAmount,
+        reason: params.reason,
+        payeePhone: payment.payer_phone,
+      });
+      providerRef = result.refundReference;
+    } catch (err) {
+      logger.warn({ err, paymentId: payment.id }, 'Provider refund call failed, marking refunded locally');
+    }
+
+    const updated = await this.repo.markRefunded(payment.id, refundAmount, partial);
+    if (providerRef) {
+      await this.repo.setProviderReference(payment.id, providerRef);
+    }
+
+    logger.info({ paymentId: payment.id, refundAmount, policy, initiatedBy: params.initiatedBy }, 'Refund applied');
+    return { payment: updated, refundedAmount: refundAmount, policy };
+  }
 }
