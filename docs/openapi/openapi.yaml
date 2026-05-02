@@ -1,9 +1,9 @@
 openapi: 3.0.3
 info:
   title: Rishfy API
-  version: 0.2.0
+  version: 0.3.0
   description: |
-    Rishfy platform API. Sprint 2: Auth + User + Route services.
+    Rishfy platform API. Sprint 3: Booking saga, Payment (Azampay), Notification service.
 servers:
   - url: http://localhost/api/v1
     description: Local gateway
@@ -11,6 +11,12 @@ servers:
 tags:
   - name: auth
     description: Authentication, OTP, JWT issuance
+  - name: bookings
+    description: Booking saga, trip lifecycle, ratings
+  - name: payments
+    description: Mobile money payments, settlements, refunds
+  - name: notifications
+    description: In-app, push, and SMS notifications
 
 paths:
   /auth/register:
@@ -405,6 +411,257 @@ paths:
       responses:
         '204': { description: Cancelled }
 
+  # ===========================================================================
+  # BOOKING SERVICE
+  # ===========================================================================
+  /bookings:
+    post:
+      tags: [bookings]
+      summary: Create a booking (saga — reserves seats + initiates payment)
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateBookingRequest' }
+      responses:
+        '201': { description: Booking created, expiry job scheduled }
+        '409': { description: Insufficient seats or route not active }
+
+  /bookings/me:
+    get:
+      tags: [bookings]
+      summary: List my bookings (as passenger or driver based on role)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: query, name: limit, schema: { type: integer, default: 20 } }
+        - { in: query, name: offset, schema: { type: integer, default: 0 } }
+      responses:
+        '200':
+          description: Booking list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  bookings: { type: array, items: { $ref: '#/components/schemas/Booking' } }
+
+  /bookings/{id}:
+    get:
+      tags: [bookings]
+      summary: Get booking by ID
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Booking detail, content: { application/json: { schema: { $ref: '#/components/schemas/Booking' } } } }
+        '404': { description: Not found }
+
+  /bookings/{id}/cancel:
+    post:
+      tags: [bookings]
+      summary: Cancel a booking
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string }
+      responses:
+        '200': { description: Booking cancelled }
+        '403': { description: Not the passenger }
+        '409': { description: Cannot cancel in current state }
+
+  /bookings/{id}/start-trip:
+    post:
+      tags: [bookings]
+      summary: Driver starts the trip
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Trip started }
+        '409': { description: Invalid state }
+
+  /bookings/{id}/complete-trip:
+    post:
+      tags: [bookings]
+      summary: Driver marks trip complete
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Trip completed }
+
+  /bookings/{id}/rate:
+    post:
+      tags: [bookings]
+      summary: Submit rating after completed trip
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rating]
+              properties:
+                rating: { type: integer, minimum: 1, maximum: 5 }
+                review: { type: string, maxLength: 500 }
+      responses:
+        '200': { description: Rating submitted }
+
+  # ===========================================================================
+  # PAYMENT SERVICE
+  # ===========================================================================
+  /payments/initiate:
+    post:
+      tags: [payments]
+      summary: Initiate mobile money payment for a booking
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [bookingId, amountTzs, method, payerPhone, idempotencyKey]
+              properties:
+                bookingId: { type: string, format: uuid }
+                amountTzs: { type: integer }
+                method: { type: string, enum: [mpesa_tz, tigopesa, airtel_money, halopesa] }
+                payerPhone: { type: string, description: 'E.164 format' }
+                idempotencyKey: { type: string, format: uuid }
+      responses:
+        '201':
+          description: Payment initiated — user receives USSD push
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  paymentId: { type: string, format: uuid }
+                  status: { type: string }
+                  instructions: { type: string }
+                  expiresInSeconds: { type: integer }
+
+  /payments/{id}/status:
+    get:
+      tags: [payments]
+      summary: Get payment status
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Payment status
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Payment' }
+
+  /webhooks/azampay:
+    post:
+      tags: [payments]
+      summary: Azampay payment callback webhook
+      description: 'Provider posts here on payment completion. Signature verified via HMAC-SHA256.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200': { description: Callback processed }
+
+  /drivers/{driverId}/earnings:
+    get:
+      tags: [payments]
+      summary: Get driver earnings summary for a period
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: path, name: driverId, required: true, schema: { type: string, format: uuid } }
+        - { in: query, name: from, schema: { type: string, format: date-time } }
+        - { in: query, name: to, schema: { type: string, format: date-time } }
+      responses:
+        '200': { description: Earnings summary }
+
+  /drivers/{driverId}/settlements:
+    post:
+      tags: [payments]
+      summary: Create a settlement obligation (MVP — recorded, manual payout)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: path, name: driverId, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [periodStart, periodEnd, payoutMethod, payoutPhone, bookingIds]
+              properties:
+                periodStart: { type: string, format: date-time }
+                periodEnd: { type: string, format: date-time }
+                payoutMethod: { type: string, enum: [mpesa_tz, tigopesa, airtel_money, halopesa] }
+                payoutPhone: { type: string }
+                bookingIds:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      bookingId: { type: string, format: uuid }
+                      driverEarningsTzs: { type: integer }
+      responses:
+        '201': { description: Settlement created }
+
+  # ===========================================================================
+  # NOTIFICATION SERVICE
+  # ===========================================================================
+  /notifications:
+    get:
+      tags: [notifications]
+      summary: List my notifications
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: query, name: limit, schema: { type: integer, default: 30 } }
+        - { in: query, name: offset, schema: { type: integer, default: 0 } }
+      responses:
+        '200':
+          description: Notification list with unread count
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  notifications:
+                    type: array
+                    items: { $ref: '#/components/schemas/Notification' }
+                  unread: { type: integer }
+
+  /notifications/{id}/read:
+    patch:
+      tags: [notifications]
+      summary: Mark notification as read
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204': { description: Marked read }
+
+  /notifications/read-all:
+    patch:
+      tags: [notifications]
+      summary: Mark all notifications as read
+      security: [{ bearerAuth: [] }]
+      responses:
+        '204': { description: All marked read }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -510,3 +767,118 @@ components:
         recurrence: { type: string, enum: [none, daily, weekdays, weekly, custom], default: none }
         recurrence_days: { type: array, items: { type: integer } }
         recurrence_end_date: { type: string, format: date }
+
+    Booking:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        passenger_id: { type: string, format: uuid }
+        driver_id: { type: string, format: uuid }
+        route_id: { type: string, format: uuid }
+        seat_count: { type: integer }
+        status:
+          type: string
+          enum: [pending, confirmed, cancelled, completed, expired]
+        total_price_tzs: { type: integer }
+        platform_fee_tzs: { type: integer }
+        driver_earnings_tzs: { type: integer }
+        confirmation_code: { type: string }
+        expires_at: { type: string, format: date-time, nullable: true }
+        pickup_lat: { type: number, nullable: true }
+        pickup_lng: { type: number, nullable: true }
+        dropoff_lat: { type: number, nullable: true }
+        dropoff_lng: { type: number, nullable: true }
+        passenger_rating: { type: integer, minimum: 1, maximum: 5, nullable: true }
+        driver_rating: { type: integer, minimum: 1, maximum: 5, nullable: true }
+        payment_id: { type: string, format: uuid, nullable: true }
+        trip_started_at: { type: string, format: date-time, nullable: true }
+        trip_completed_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+
+    CreateBookingRequest:
+      type: object
+      required: [route_id, seat_count, idempotency_key]
+      properties:
+        route_id: { type: string, format: uuid }
+        seat_count: { type: integer, minimum: 1, maximum: 6 }
+        pickup_lat: { type: number }
+        pickup_lng: { type: number }
+        dropoff_lat: { type: number }
+        dropoff_lng: { type: number }
+        idempotency_key: { type: string }
+
+    RateRequest:
+      type: object
+      required: [role, rating]
+      properties:
+        role: { type: string, enum: [passenger, driver] }
+        rating: { type: integer, minimum: 1, maximum: 5 }
+        comment: { type: string }
+
+    Payment:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        booking_id: { type: string, format: uuid }
+        passenger_user_id: { type: string, format: uuid }
+        amount_tzs: { type: integer }
+        provider: { type: string, enum: [azampay, mock] }
+        mno: { type: string, enum: [mpesa, tigopesa, airtelmoney, halopesa] }
+        phone: { type: string }
+        status:
+          type: string
+          enum: [pending, completed, failed, refunded]
+        provider_reference: { type: string, nullable: true }
+        failure_reason: { type: string, nullable: true }
+        idempotency_key: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    InitiatePaymentRequest:
+      type: object
+      required: [booking_id, phone, mno, idempotency_key]
+      properties:
+        booking_id: { type: string, format: uuid }
+        phone: { type: string, example: '255712345678' }
+        mno: { type: string, enum: [mpesa, tigopesa, airtelmoney, halopesa] }
+        idempotency_key: { type: string }
+
+    Settlement:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        driver_user_id: { type: string, format: uuid }
+        period_start: { type: string, format: date-time }
+        period_end: { type: string, format: date-time }
+        total_amount_tzs: { type: integer }
+        platform_fee_tzs: { type: integer }
+        net_amount_tzs: { type: integer }
+        booking_count: { type: integer }
+        payout_method: { type: string }
+        payout_phone: { type: string }
+        status: { type: string, enum: [pending, processing, completed, failed] }
+        provider_reference: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+
+    EarningsSummary:
+      type: object
+      properties:
+        total_earnings_tzs: { type: integer }
+        total_platform_fees_tzs: { type: integer }
+        total_settled_tzs: { type: integer }
+        pending_balance_tzs: { type: integer }
+        trip_count: { type: integer }
+
+    Notification:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        template_key: { type: string }
+        channel: { type: string, enum: [in_app, push, sms] }
+        title: { type: string }
+        body: { type: string }
+        data: { type: object, additionalProperties: true, nullable: true }
+        is_read: { type: boolean }
+        delivered_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
