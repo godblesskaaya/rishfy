@@ -1,14 +1,14 @@
 import fastifyCors from '@fastify/cors';
 import fastifyHelmet from '@fastify/helmet';
 import fastifySensible from '@fastify/sensible';
-import fastify, { type FastifyInstance } from 'fastify';
+import fastify, { type FastifyBaseLogger, type FastifyInstance, type RawServerDefault } from 'fastify';
 
 import { config } from './config.js';
 import { logger } from './logger.js';
 
-export async function buildApp(): Promise<FastifyInstance> {
-  const app = fastify({
-    logger,
+export async function buildApp(): Promise<FastifyInstance<RawServerDefault>> {
+  const app: FastifyInstance<RawServerDefault> = fastify({
+    logger: logger as unknown as FastifyBaseLogger,
     requestIdHeader: 'x-request-id',
     disableRequestLogging: false,
     bodyLimit: 1024 * 1024, // 1MB
@@ -41,8 +41,8 @@ export async function buildApp(): Promise<FastifyInstance> {
     return register.metrics();
   });
 
-  // TODO: Register route modules
-  // await app.register(authRoutes, { prefix: '/api/v1/auth' });
+  const { notificationRoutes } = await import('./controllers/notification.routes.js');
+  await app.register(notificationRoutes);
 
   return app;
 }
