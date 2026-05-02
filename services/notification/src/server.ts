@@ -4,6 +4,7 @@ import { logger } from './logger.js';
 import IORedis from 'ioredis';
 import { NotificationService } from './services/notification.service.js';
 import { startNotificationConsumers } from './consumers/notification.consumers.js';
+import { startGrpcServer } from './grpc/notification.server.js';
 
 async function main(): Promise<void> {
   const app = await buildApp();
@@ -21,6 +22,9 @@ async function main(): Promise<void> {
   const svc = new NotificationService();
   await svc.startQueue(redis);
   await startNotificationConsumers(redis);
+
+  // Start gRPC server
+  startGrpcServer();
 
   // Graceful shutdown
   const shutdown = async (signal: string): Promise<void> => {
