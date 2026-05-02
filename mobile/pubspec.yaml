@@ -63,6 +63,9 @@ dependencies:
   # Phone input
   intl_phone_field: ^3.2.0
 
+  # WebSocket
+  web_socket_channel: ^3.0.1
+
   # Connectivity
   connectivity_plus: ^6.0.3
 
