@@ -4,6 +4,7 @@ import { logger } from './logger.js';
 import IORedis from 'ioredis';
 import { startExpiryWorker } from './jobs/booking-expiry.worker.js';
 import { startKafkaConsumers } from './consumers/booking.consumers.js';
+import { startGrpcServer } from './grpc/booking.server.js';
 
 async function main(): Promise<void> {
   const app = await buildApp();
@@ -23,6 +24,9 @@ async function main(): Promise<void> {
 
   // Start Kafka consumers
   await startKafkaConsumers();
+
+  // Start gRPC server
+  startGrpcServer();
 
   // Graceful shutdown
   const shutdown = async (signal: string): Promise<void> => {

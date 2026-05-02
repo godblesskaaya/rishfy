@@ -1,7 +1,7 @@
 import { buildApp } from './app.js';
 import { config } from './config.js';
 import { logger } from './logger.js';
-// import { startGrpcServer } from './grpc/server.js';
+import { startGrpcServer } from './grpc/payment.server.js';
 
 async function main(): Promise<void> {
   const app = await buildApp();
@@ -16,8 +16,7 @@ async function main(): Promise<void> {
   }
 
   // Start gRPC server
-  // await startGrpcServer(config.GRPC_PORT);
-  logger.info(`gRPC server will listen on :${config.GRPC_PORT} (not yet wired)`);
+  startGrpcServer();
 
   // Graceful shutdown
   const shutdown = async (signal: string): Promise<void> => {
