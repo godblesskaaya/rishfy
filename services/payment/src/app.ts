@@ -44,5 +44,8 @@ export async function buildApp(): Promise<FastifyInstance<RawServerDefault>> {
   const { paymentRoutes } = await import('./controllers/payment.routes.js');
   await app.register(paymentRoutes);
 
+  const { settlementRoutes } = await import('./controllers/settlement.routes.js');
+  await app.register(settlementRoutes);
+
   return app;
 }
