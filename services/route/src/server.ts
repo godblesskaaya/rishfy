@@ -2,12 +2,15 @@ import { buildApp } from './app.js';
 import { config } from './config.js';
 import { pgPool } from './db.js';
 import { logger } from './logger.js';
+import { startGrpcServer } from './grpc/route.server.js';
 
 async function main(): Promise<void> {
   const app = await buildApp();
 
   await app.listen({ port: config.HTTP_PORT, host: '0.0.0.0' });
   logger.info(`HTTP server listening on :${config.HTTP_PORT}`);
+
+  startGrpcServer();
 
   const shutdown = async (signal: string): Promise<void> => {
     logger.info({ signal }, 'Shutting down...');

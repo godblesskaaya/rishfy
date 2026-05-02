@@ -13,6 +13,11 @@ const configSchema = z.object({
   KAFKA_BROKERS: z.string(),
 
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().url().optional(),
+
+  WS_PORT: z.coerce.number().int().default(8186),
+  ARRIVAL_RADIUS_METERS: z.coerce.number().int().default(100),
+  LOCATION_KAFKA_THROTTLE_MS: z.coerce.number().int().default(5000),
+  DRIVER_ACTIVE_TTL_SECONDS: z.coerce.number().int().default(300),
 });
 
 export type Config = z.infer<typeof configSchema>;

@@ -185,4 +185,67 @@ export class RouteRepository {
       [id, seats],
     );
   }
+
+  async reserveSeats(routeId: string, seatCount: number, _bookingId: string): Promise<{
+    success: boolean;
+    seatsRemaining: number;
+    failureReason?: string;
+  }> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      const { rows } = await client.query<{ available_seats: number; booked_seats: number; status: string }>(
+        `SELECT available_seats, booked_seats, status FROM routes WHERE id = $1 FOR UPDATE`,
+        [routeId],
+      );
+      const route = rows[0];
+      if (!route) {
+        await client.query('ROLLBACK');
+        return { success: false, seatsRemaining: 0, failureReason: 'ROUTE_NOT_FOUND' };
+      }
+      if (route.status !== 'active') {
+        await client.query('ROLLBACK');
+        return { success: false, seatsRemaining: route.available_seats - route.booked_seats, failureReason: 'ROUTE_NOT_ACTIVE' };
+      }
+      const free = route.available_seats - route.booked_seats;
+      if (free < seatCount) {
+        await client.query('ROLLBACK');
+        return { success: false, seatsRemaining: free, failureReason: 'INSUFFICIENT_SEATS' };
+      }
+      const newBooked = route.booked_seats + seatCount;
+      const newStatus = newBooked >= route.available_seats ? 'full' : 'active';
+      await client.query(
+        `UPDATE routes SET booked_seats = $2, status = $3, updated_at = now() WHERE id = $1`,
+        [routeId, newBooked, newStatus],
+      );
+      await client.query('COMMIT');
+      return { success: true, seatsRemaining: route.available_seats - newBooked };
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  async releaseSeats(routeId: string, seatCount: number): Promise<{
+    success: boolean;
+    seatsRemaining: number;
+  }> {
+    const { rows } = await this.pool.query<{ available_seats: number; booked_seats: number }>(
+      `UPDATE routes
+       SET booked_seats = GREATEST(0, booked_seats - $2),
+           status = CASE
+             WHEN status = 'full' AND booked_seats - $2 < available_seats THEN 'active'
+             ELSE status
+           END,
+           updated_at = now()
+       WHERE id = $1 AND status NOT IN ('cancelled','completed')
+       RETURNING available_seats, booked_seats`,
+      [routeId, seatCount],
+    );
+    if (!rows[0]) return { success: false, seatsRemaining: 0 };
+    const r = rows[0];
+    return { success: true, seatsRemaining: r.available_seats - r.booked_seats };
+  }
 }
