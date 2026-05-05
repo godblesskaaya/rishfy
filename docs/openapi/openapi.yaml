@@ -421,7 +421,7 @@ paths:
   /bookings:
     post:
       tags: [bookings]
-      summary: Create a booking (saga — reserves seats + initiates payment)
+      summary: Create a booking (reserves seats + schedules expiry)
       security: [{ bearerAuth: [] }]
       requestBody:
         required: true
@@ -429,7 +429,11 @@ paths:
           application/json:
             schema: { $ref: '#/components/schemas/CreateBookingRequest' }
       responses:
-        '201': { description: Booking created, expiry job scheduled }
+        '201':
+          description: Booking created, expiry job scheduled
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Booking' }
         '409': { description: Insufficient seats or route not active }
 
   /bookings/me:
@@ -476,9 +480,44 @@ paths:
               properties:
                 reason: { type: string }
       responses:
-        '200': { description: Booking cancelled }
+        '200':
+          description: Booking cancelled (refund orchestration attempted when eligible)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/Booking' }
+                  - type: object
+                    properties:
+                      refund:
+                        type: object
+                        properties:
+                          attempted: { type: boolean }
+                          applied: { type: boolean }
+                          refundedAmountTzs: { type: integer }
+                          refundReference: { type: string }
         '403': { description: Not the passenger }
         '409': { description: Cannot cancel in current state }
+
+  /bookings/{id}/emergency:
+    post:
+      tags: [bookings]
+      summary: Report an emergency for an active booking
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string, default: EMERGENCY_REPORTED }
+      responses:
+        '200': { description: Emergency event emitted and notification workflow triggered }
+        '403': { description: User is not part of this booking }
+        '404': { description: Booking not found }
 
   /bookings/{id}/start-trip:
     post:
@@ -582,6 +621,8 @@ paths:
               type: object
       responses:
         '200': { description: Callback processed }
+        '400': { description: Invalid callback payload }
+        '401': { description: Invalid callback signature }
 
   /drivers/{driverId}/earnings:
     get:
@@ -1023,37 +1064,51 @@ components:
         passenger_id: { type: string, format: uuid }
         driver_id: { type: string, format: uuid }
         route_id: { type: string, format: uuid }
-        seat_count: { type: integer }
+        seats_booked: { type: integer }
         status:
           type: string
-          enum: [pending, confirmed, cancelled, completed, expired]
-        total_price_tzs: { type: integer }
-        platform_fee_tzs: { type: integer }
-        driver_earnings_tzs: { type: integer }
+          enum: [pending, confirmed, passenger_cancelled, driver_cancelled, completed]
+        payment_status: { type: string, enum: [pending, paid, failed, refunded], nullable: true }
+        total_price: { type: number }
+        platform_fee: { type: number }
+        driver_earnings: { type: number }
         confirmation_code: { type: string }
         expires_at: { type: string, format: date-time, nullable: true }
+        pickup_name: { type: string, nullable: true }
+        dropoff_name: { type: string, nullable: true }
         pickup_lat: { type: number, nullable: true }
         pickup_lng: { type: number, nullable: true }
         dropoff_lat: { type: number, nullable: true }
         dropoff_lng: { type: number, nullable: true }
         passenger_rating: { type: integer, minimum: 1, maximum: 5, nullable: true }
         driver_rating: { type: integer, minimum: 1, maximum: 5, nullable: true }
+        passenger_review: { type: string, nullable: true }
+        driver_review: { type: string, nullable: true }
         payment_id: { type: string, format: uuid, nullable: true }
+        cancellation_reason: { type: string, nullable: true }
+        cancellation_policy: { type: string, nullable: true }
+        cancelled_at: { type: string, format: date-time, nullable: true }
         trip_started_at: { type: string, format: date-time, nullable: true }
         trip_completed_at: { type: string, format: date-time, nullable: true }
+        completed_at: { type: string, format: date-time, nullable: true }
         created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
 
     CreateBookingRequest:
       type: object
-      required: [route_id, seat_count, idempotency_key]
+      required: [routeId, driverId, seatsBooked, pricePerSeat, idempotencyKey]
       properties:
-        route_id: { type: string, format: uuid }
-        seat_count: { type: integer, minimum: 1, maximum: 6 }
-        pickup_lat: { type: number }
-        pickup_lng: { type: number }
-        dropoff_lat: { type: number }
-        dropoff_lng: { type: number }
-        idempotency_key: { type: string }
+        routeId: { type: string, format: uuid }
+        driverId: { type: string, format: uuid }
+        seatsBooked: { type: integer, minimum: 1, maximum: 6 }
+        pricePerSeat: { type: integer }
+        pickupName: { type: string }
+        dropoffName: { type: string }
+        pickupLat: { type: number }
+        pickupLng: { type: number }
+        dropoffLat: { type: number }
+        dropoffLng: { type: number }
+        idempotencyKey: { type: string }
 
     RateRequest:
       type: object
@@ -1066,30 +1121,23 @@ components:
     Payment:
       type: object
       properties:
-        id: { type: string, format: uuid }
-        booking_id: { type: string, format: uuid }
-        passenger_user_id: { type: string, format: uuid }
-        amount_tzs: { type: integer }
-        provider: { type: string, enum: [azampay, mock] }
-        mno: { type: string, enum: [mpesa, tigopesa, airtelmoney, halopesa] }
-        phone: { type: string }
+        paymentId: { type: string, format: uuid }
         status:
           type: string
           enum: [pending, completed, failed, refunded]
-        provider_reference: { type: string, nullable: true }
-        failure_reason: { type: string, nullable: true }
-        idempotency_key: { type: string }
-        created_at: { type: string, format: date-time }
-        updated_at: { type: string, format: date-time }
+        providerReference: { type: string, nullable: true }
+        amountTzs: { type: integer }
+        refundedAmountTzs: { type: integer }
 
     InitiatePaymentRequest:
       type: object
-      required: [booking_id, phone, mno, idempotency_key]
+      required: [bookingId, amountTzs, method, payerPhone, idempotencyKey]
       properties:
-        booking_id: { type: string, format: uuid }
-        phone: { type: string, example: '255712345678' }
-        mno: { type: string, enum: [mpesa, tigopesa, airtelmoney, halopesa] }
-        idempotency_key: { type: string }
+        bookingId: { type: string, format: uuid }
+        amountTzs: { type: integer }
+        method: { type: string, enum: [mpesa_tz, tigopesa, airtel_money, halopesa] }
+        payerPhone: { type: string, example: '255712345678' }
+        idempotencyKey: { type: string }
 
     Settlement:
       type: object

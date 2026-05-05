@@ -103,6 +103,9 @@ export async function paymentRoutes(app: FastifyInstance): Promise<void> {
       const result = await service.processCallback('azampay', rawBody, signature);
       return reply.send({ processed: true, paymentId: result.paymentId, status: result.newStatus });
     } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === 'INVALID_SIGNATURE') return reply.status(401).send({ processed: false, error: 'INVALID_SIGNATURE' });
+      if (code === 'INVALID_CALLBACK_PAYLOAD') return reply.status(400).send({ processed: false, error: 'INVALID_CALLBACK_PAYLOAD' });
       logger.error({ err }, 'Azampay callback processing failed');
       return reply.status(500).send({ processed: false });
     }

@@ -120,17 +120,27 @@ const processProviderCallback: Handler<ProcessCallbackReq, unknown> = async (cal
 
 const refundPayment: Handler<RefundReq, unknown> = async (call, callback) => {
   try {
-    const payment = await svc.getPayment(call.request.paymentId);
-    if (!payment) {
+    const result = await svc.refund({
+      paymentId: call.request.paymentId,
+      reason: call.request.reason || 'BOOKING_CANCELLED',
+      initiatedBy: call.request.initiatedByUserId || 'booking-service',
+      cancelledAt: new Date(),
+    });
+    if (!result.payment) {
       callback({ code: grpc.status.NOT_FOUND, message: 'payment not found' } as grpc.ServiceError);
       return;
     }
     callback(null, {
-      payment: { paymentId: payment.id, status: 'REFUNDED' },
-      refundReference: `REF-${payment.id}`,
-      refundedNow: { amountTzs: String(payment.amount_tzs) },
+      payment: { paymentId: result.payment.id, status: result.payment.status.toUpperCase() },
+      refundReference: result.payment.provider_reference ?? '',
+      refundedNow: { amountTzs: String(result.refundedAmount) },
     });
   } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'NOT_FOUND') {
+      callback({ code: grpc.status.NOT_FOUND, message: String(err) } as grpc.ServiceError);
+      return;
+    }
     callback({ code: grpc.status.INTERNAL, message: String(err) } as grpc.ServiceError);
   }
 };

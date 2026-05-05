@@ -1,9 +1,15 @@
 import { PaymentRepository } from '../repositories/payment.repository.js';
 import { createPaymentProvider } from '../providers/provider.factory.js';
-import type { PaymentProvider } from '../providers/payment.provider.js';
+import type { CallbackResult, PaymentProvider } from '../providers/payment.provider.js';
 import type { PaymentRow } from '../repositories/payment.repository.js';
 import { config } from '../config.js';
 import { logger } from '../logger.js';
+import {
+  publishPaymentInitiated,
+  publishPaymentCompleted,
+  publishPaymentFailed,
+  publishPaymentRefunded,
+} from '../events/payment.events.js';
 
 export interface InitiateParams {
   bookingId: string;
@@ -57,10 +63,29 @@ export class PaymentService {
         await this.repo.setProviderReference(payment.id, result.providerReference);
       }
 
+      await publishPaymentInitiated({
+        paymentId: payment.id,
+        bookingId: payment.booking_id,
+        userId: payment.user_id,
+        amountTzs: payment.amount_tzs,
+        provider: payment.provider,
+        timestamp: new Date().toISOString(),
+      });
+
       return { payment, instructions: result.instructions, expiresInSeconds: result.expiresInSeconds };
     } catch (err) {
       logger.error({ err, paymentId: payment.id }, 'Provider initiatePayment failed');
-      await this.repo.markFailed(payment.id, 'PROVIDER_ERROR', String(err));
+      const failed = await this.repo.markFailed(payment.id, 'PROVIDER_ERROR', String(err));
+      await publishPaymentFailed({
+        paymentId: failed.id,
+        bookingId: failed.booking_id,
+        userId: failed.user_id,
+        amountTzs: failed.amount_tzs,
+        provider: failed.provider,
+        failureCode: failed.failure_code ?? 'PROVIDER_ERROR',
+        failureMessage: failed.failure_message ?? String(err),
+        timestamp: new Date().toISOString(),
+      });
       throw err;
     }
   }
@@ -68,33 +93,54 @@ export class PaymentService {
   async processCallback(provider: string, rawBody: string, signature: string): Promise<{ paymentId: string; newStatus: string }> {
     const payload = { provider, rawBody, signature };
     const verified = this.provider.verifyCallback(payload);
-
-    let paymentId: string | null = null;
-    let newStatus = 'unknown';
-
-    try {
-      const result = this.provider.parseCallback(payload);
-      const payment = await this.repo.findByInternalRef(result.internalReference);
-      if (!payment) {
-        await this.repo.saveCallback(null, provider, rawBody, signature, verified);
-        return { paymentId: '', newStatus: 'not_found' };
-      }
-      paymentId = payment.id;
-
-      if (result.status === 'completed') {
-        await this.repo.markCompleted(payment.id, result.providerReference);
-        newStatus = 'completed';
-      } else {
-        await this.repo.markFailed(payment.id, result.failureCode ?? 'UNKNOWN', result.failureMessage ?? '');
-        newStatus = 'failed';
-      }
-    } catch (err) {
-      logger.error({ err }, 'processCallback parse error');
-      newStatus = 'error';
+    if (!verified) {
+      await this.repo.saveCallback(null, provider, rawBody, signature, false);
+      throw Object.assign(new Error('Invalid callback signature'), { code: 'INVALID_SIGNATURE' });
     }
 
-    await this.repo.saveCallback(paymentId, provider, rawBody, signature, verified);
-    return { paymentId: paymentId ?? '', newStatus };
+    let result: CallbackResult;
+    try {
+      result = this.provider.parseCallback(payload);
+    } catch (err) {
+      logger.error({ err }, 'processCallback parse error');
+      await this.repo.saveCallback(null, provider, rawBody, signature, true);
+      throw Object.assign(new Error('Invalid callback payload'), { code: 'INVALID_CALLBACK_PAYLOAD' });
+    }
+    const payment = await this.repo.findByInternalRef(result.internalReference);
+    if (!payment) {
+      await this.repo.saveCallback(null, provider, rawBody, signature, true);
+      return { paymentId: '', newStatus: 'not_found' };
+    }
+
+    let newStatus = 'failed';
+    if (result.status === 'completed') {
+      const completed = await this.repo.markCompleted(payment.id, result.providerReference);
+      newStatus = 'completed';
+      await publishPaymentCompleted({
+        paymentId: completed.id,
+        bookingId: completed.booking_id,
+        userId: completed.user_id,
+        amountTzs: completed.amount_tzs,
+        provider: completed.provider,
+        providerReference: result.providerReference,
+        timestamp: new Date().toISOString(),
+      });
+    } else {
+      const failed = await this.repo.markFailed(payment.id, result.failureCode ?? 'UNKNOWN', result.failureMessage ?? '');
+      await publishPaymentFailed({
+        paymentId: failed.id,
+        bookingId: failed.booking_id,
+        userId: failed.user_id,
+        amountTzs: failed.amount_tzs,
+        provider: failed.provider,
+        failureCode: result.failureCode ?? 'UNKNOWN',
+        failureMessage: result.failureMessage ?? '',
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    await this.repo.saveCallback(payment.id, provider, rawBody, signature, true);
+    return { paymentId: payment.id, newStatus };
   }
 
   async getPayment(id: string): Promise<PaymentRow | null> {
@@ -169,6 +215,17 @@ export class PaymentService {
     if (providerRef) {
       await this.repo.setProviderReference(payment.id, providerRef);
     }
+
+    await publishPaymentRefunded({
+      paymentId: updated.id,
+      bookingId: updated.booking_id,
+      userId: updated.user_id,
+      amountTzs: updated.amount_tzs,
+      provider: updated.provider,
+      refundedAmountTzs: refundAmount,
+      reason: params.reason,
+      timestamp: new Date().toISOString(),
+    });
 
     logger.info({ paymentId: payment.id, refundAmount, policy, initiatedBy: params.initiatedBy }, 'Refund applied');
     return { payment: updated, refundedAmount: refundAmount, policy };
