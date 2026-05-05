@@ -8,15 +8,26 @@ import { createUserGrpcServer } from './grpc/user.server.js';
 import {
   createKafkaClient,
   createKafkaConsumer,
+  createKafkaProducer,
   connectKafkaConsumer,
+  connectKafkaProducer,
   startJsonConsumer,
 } from './kafka.js';
 import type { RatingSubmittedEvent } from './events/user.events.js';
 import { TOPIC_RATING_SUBMITTED } from './events/user.events.js';
+import { startUserRegisteredConsumer } from './consumers/user-registration.consumer.js';
 
 async function main(): Promise<void> {
   const repo = new UserRepository(pgPool);
-  const app = await buildApp();
+  const kafka = createKafkaClient({
+    brokers: config.KAFKA_BROKERS.split(','),
+    clientId: `${config.SERVICE_NAME}`,
+    logger,
+  });
+  const producer = createKafkaProducer(kafka);
+  await connectKafkaProducer(producer);
+
+  const app = await buildApp({ userEventsProducer: producer });
 
   // HTTP server
   await app.listen({ port: config.HTTP_PORT, host: '0.0.0.0' });
@@ -34,15 +45,10 @@ async function main(): Promise<void> {
   logger.info(`gRPC server listening on :${config.GRPC_PORT}`);
 
   // Kafka consumer — rating.submitted → update user average rating
-  const kafka = createKafkaClient({
-    brokers: config.KAFKA_BROKERS.split(','),
-    clientId: `${config.SERVICE_NAME}-consumer`,
-    logger,
-  });
-  const consumer = createKafkaConsumer(kafka, { groupId: `${config.SERVICE_NAME}-ratings` });
-  await connectKafkaConsumer(consumer);
+  const ratingConsumer = createKafkaConsumer(kafka, { groupId: `${config.SERVICE_NAME}-ratings` });
+  await connectKafkaConsumer(ratingConsumer);
   await startJsonConsumer<RatingSubmittedEvent>({
-    consumer,
+    consumer: ratingConsumer,
     topic: TOPIC_RATING_SUBMITTED,
     logger,
     onMessage: async ({ value }) => {
@@ -52,10 +58,21 @@ async function main(): Promise<void> {
   });
   logger.info(`Kafka consumer listening on topic: ${TOPIC_RATING_SUBMITTED}`);
 
+  const registrationConsumer = await startUserRegisteredConsumer({
+    kafka,
+    repo,
+    logger,
+    groupId: `${config.SERVICE_NAME}-registrations`,
+  });
+  logger.info('Kafka consumer listening on topic: user.registered');
+
   const shutdown = async (signal: string): Promise<void> => {
     logger.info({ signal }, 'Shutting down...');
     try {
       await app.close();
+      await ratingConsumer.disconnect();
+      await registrationConsumer.disconnect();
+      await producer.disconnect();
       grpcServer.forceShutdown();
       await pgPool.end();
       process.exit(0);

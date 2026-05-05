@@ -2,6 +2,7 @@ import fastifyCors from '@fastify/cors';
 import fastifyHelmet from '@fastify/helmet';
 import fastifySensible from '@fastify/sensible';
 import fastify, { type FastifyBaseLogger, type FastifyInstance, type RawServerDefault } from 'fastify';
+import type { Producer } from 'kafkajs';
 
 import { config } from './config.js';
 import { pgPool } from './db.js';
@@ -9,7 +10,11 @@ import { logger } from './logger.js';
 import { userRoutes } from './controllers/user.routes.js';
 import { UserService } from './services/user.service.js';
 
-export async function buildApp(): Promise<FastifyInstance> {
+interface BuildAppOptions {
+  userEventsProducer?: Producer | null;
+}
+
+export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyInstance> {
   const app: FastifyInstance<RawServerDefault> = fastify({
     logger: logger as unknown as FastifyBaseLogger,
     requestIdHeader: 'x-request-id',
@@ -35,7 +40,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     return register.metrics();
   });
 
-  const svc = new UserService(pgPool);
+  const svc = new UserService(pgPool, options.userEventsProducer ?? null);
   await app.register(userRoutes, { prefix: '/api/v1/users', svc });
 
   return app;

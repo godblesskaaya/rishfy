@@ -14,6 +14,15 @@ export interface UserRow {
   updated_at: Date;
 }
 
+interface UserRegistrationUpsertInput {
+  id: string;
+  phone_number: string;
+  full_name: string;
+  email?: string | null;
+  role?: 'passenger' | 'driver' | 'admin';
+  status?: 'active' | 'suspended' | 'pending_verification';
+}
+
 export interface DriverProfileRow {
   id: string;
   user_id: string;
@@ -69,6 +78,37 @@ export class UserRepository {
       [phone],
     );
     return rows[0] ?? null;
+  }
+
+  async upsertFromRegistration(data: UserRegistrationUpsertInput): Promise<UserRow> {
+    const { rows } = await this.pool.query<UserRow>(
+      `INSERT INTO users (id, phone_number, full_name, email, role, status)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (id) DO UPDATE
+       SET phone_number = EXCLUDED.phone_number,
+           full_name = EXCLUDED.full_name,
+           email = EXCLUDED.email,
+           role = CASE
+                    WHEN users.role = 'driver' AND EXCLUDED.role = 'passenger' THEN users.role
+                    WHEN users.role = 'admin' AND EXCLUDED.role IN ('passenger', 'driver') THEN users.role
+                    ELSE EXCLUDED.role
+                  END,
+           status = CASE
+                      WHEN users.status = 'suspended' AND EXCLUDED.status = 'active' THEN users.status
+                      ELSE EXCLUDED.status
+                    END,
+           updated_at = now()
+       RETURNING *`,
+      [
+        data.id,
+        data.phone_number,
+        data.full_name,
+        data.email ?? null,
+        data.role ?? 'passenger',
+        data.status ?? 'active',
+      ],
+    );
+    return rows[0]!;
   }
 
   async update(
@@ -170,10 +210,22 @@ export class UserRepository {
 
   async listDriverVehicles(driverProfileId: string): Promise<VehicleRow[]> {
     const { rows } = await this.pool.query<VehicleRow>(
-      'SELECT * FROM vehicles WHERE driver_profile_id = $1 ORDER BY created_at DESC',
+      'SELECT * FROM vehicles WHERE driver_profile_id = $1 ORDER BY is_active DESC, created_at DESC',
       [driverProfileId],
     );
     return rows;
+  }
+
+  async setActiveVehicle(driverProfileId: string, vehicleId: string): Promise<VehicleRow | null> {
+    const { rows } = await this.pool.query<VehicleRow>(
+      `UPDATE vehicles
+       SET is_active = CASE WHEN id = $2 THEN true ELSE false END,
+           updated_at = now()
+       WHERE driver_profile_id = $1
+       RETURNING *`,
+      [driverProfileId, vehicleId],
+    );
+    return rows.find((row) => row.id === vehicleId) ?? null;
   }
 
   async updateVehicle(id: string, data: Partial<Omit<VehicleRow, 'id' | 'driver_profile_id' | 'created_at' | 'updated_at'>>): Promise<VehicleRow | null> {

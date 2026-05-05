@@ -121,6 +121,16 @@ export async function userRoutes(app: FastifyInstance, { svc }: { svc: UserServi
     } catch (err) { return handleError(err, reply); }
   });
 
+  // PUT /users/me/vehicles/:vehicleId/active
+  app.put<{ Params: { vehicleId: string } }>('/me/vehicles/:vehicleId/active', async (req, reply) => {
+    try {
+      const userId = req.headers['x-user-id'] as string;
+      if (!userId) return reply.code(401).send({ error: 'UNAUTHENTICATED' });
+      const vehicle = await svc.setActiveVehicle(userId, req.params.vehicleId);
+      return reply.send(vehicle);
+    } catch (err) { return handleError(err, reply); }
+  });
+
   // DELETE /users/me/vehicles/:vehicleId
   app.delete<{ Params: { vehicleId: string } }>('/me/vehicles/:vehicleId', async (req, reply) => {
     try {
@@ -143,12 +153,16 @@ export async function userRoutes(app: FastifyInstance, { svc }: { svc: UserServi
   });
 
   // GET /users/drivers/:userId — public driver profile
-  app.get<{ Params: { userId: string } }>('/drivers/:userId', async (req, reply) => {
+  const publicDriverHandler = async (req: import('fastify').FastifyRequest<{ Params: { userId: string } }>, reply: import('fastify').FastifyReply) => {
     try {
       const result = await svc.getPublicDriver(req.params.userId);
       // Strip PII
       const { phone_number: _, email: __, ...publicUser } = result.user;
       return reply.send({ user: publicUser, driverProfile: result.driverProfile });
     } catch (err) { return handleError(err, reply); }
-  });
+  };
+
+  app.get<{ Params: { userId: string } }>('/drivers/:userId', publicDriverHandler);
+  // Alias for strict Sprint 2 ticket path.
+  app.get<{ Params: { userId: string } }>('/drivers/:userId/public', publicDriverHandler);
 }

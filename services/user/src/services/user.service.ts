@@ -1,14 +1,19 @@
 import { randomUUID } from 'crypto';
 import type { Pool } from 'pg';
+import type { Producer } from 'kafkajs';
 import { UserRepository } from '../repositories/user.repository.js';
 import { buildObjectUrl, generateUploadUrl } from '../clients/minio.client.js';
 import { config } from '../config.js';
+import { publishDriverUpgraded } from '../events/user.events.js';
 import { AppError } from '../utils/errors.js';
 
 export class UserService {
   private readonly repo: UserRepository;
 
-  constructor(pool: Pool) {
+  constructor(
+    pool: Pool,
+    private readonly kafkaProducer: Producer | null = null,
+  ) {
     this.repo = new UserRepository(pool);
   }
 
@@ -56,6 +61,17 @@ export class UserService {
     if (!upgraded) throw new AppError('USER_NOT_FOUND', 404);
 
     const profile = await this.repo.createDriverProfile({ user_id: userId, ...data });
+
+    // Account-created synchronization is handled by consuming auth-service `user.registered` events.
+    // User-service only owns this role-transition event.
+    if (this.kafkaProducer) {
+      await publishDriverUpgraded(this.kafkaProducer, {
+        user_id: userId,
+        license_number: data.license_number,
+        upgraded_at: new Date().toISOString(),
+      });
+    }
+
     return { user: upgraded, driverProfile: profile };
   }
 
@@ -84,6 +100,21 @@ export class UserService {
     }
 
     return this.repo.updateVehicle(vehicleId, data as Parameters<UserRepository['updateVehicle']>[1]);
+  }
+
+  async setActiveVehicle(userId: string, vehicleId: string) {
+    const vehicle = await this.repo.findVehicle(vehicleId);
+    if (!vehicle) throw new AppError('VEHICLE_NOT_FOUND', 404);
+
+    const profile = await this.repo.findDriverProfile(userId);
+    if (!profile || vehicle.driver_profile_id !== profile.id) {
+      throw new AppError('FORBIDDEN', 403);
+    }
+
+    const activated = await this.repo.setActiveVehicle(profile.id, vehicleId);
+    if (!activated) throw new AppError('VEHICLE_NOT_FOUND', 404);
+
+    return activated;
   }
 
   async deleteVehicle(userId: string, vehicleId: string) {

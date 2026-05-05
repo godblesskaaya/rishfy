@@ -7,10 +7,15 @@ const TOPIC_RATING_SUBMITTED = 'rating.submitted';
 
 export interface UserRegisteredEvent {
   user_id: string;
-  phone_number: string;
-  full_name: string;
-  role: string;
-  created_at: string;
+  phone_number?: string;
+  phone?: string;
+  full_name?: string;
+  role?: string;
+  status?: string;
+  email?: string | null;
+  created_at?: string;
+  registered_at?: string;
+  user_type?: string;
 }
 
 export interface UserDriverUpgradedEvent {
@@ -44,4 +49,4 @@ export async function publishDriverUpgraded(producer: Producer, event: UserDrive
   });
 }
 
-export { TOPIC_RATING_SUBMITTED };
+export { TOPIC_USER_REGISTERED, TOPIC_RATING_SUBMITTED };
