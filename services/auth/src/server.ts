@@ -1,12 +1,26 @@
 import { buildApp } from './app.js';
 import { config } from './config.js';
+import {
+  connectKafkaProducer,
+  createKafkaClient,
+  createKafkaProducer,
+  disconnectKafkaProducer,
+} from './kafka.js';
 import { logger } from './logger.js';
 import { startTracing, stopTracing } from './tracing.js';
 // import { startGrpcServer } from './grpc/server.js';
 
 async function main(): Promise<void> {
   startTracing();
-  const app = await buildApp();
+  const kafka = createKafkaClient({
+    brokers: config.KAFKA_BROKERS.split(','),
+    clientId: config.SERVICE_NAME,
+    logger,
+  });
+  const producer = createKafkaProducer(kafka);
+  await connectKafkaProducer(producer);
+
+  const app = await buildApp({ authEventsProducer: producer });
 
   // Start HTTP server
   try {
@@ -26,6 +40,7 @@ async function main(): Promise<void> {
     logger.info({ signal }, 'Shutting down...');
     try {
       await app.close();
+      await disconnectKafkaProducer(producer);
       await stopTracing();
       // TODO: close DB pool, Redis, Kafka
       process.exit(0);

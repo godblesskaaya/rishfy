@@ -1,5 +1,7 @@
 import { buildApp } from '@/app.js';
 import { clearRateLimitBuckets } from '@/middleware/rate-limit.js';
+import { InMemoryAuthRepository } from '@/repositories/auth.repository.js';
+import { AuthService } from '@/services/auth.service.js';
 
 describe('auth routes', () => {
   beforeEach(() => {
@@ -125,6 +127,61 @@ describe('auth routes', () => {
     });
 
     expect(limited.statusCode).toBe(429);
+    await app.close();
+  });
+
+  it('emits user.registered once on register route', async () => {
+    const userRegisteredPublisher = vi.fn().mockResolvedValue(undefined);
+    const app = await buildApp({
+      authService: new AuthService({
+        repository: new InMemoryAuthRepository(),
+        userRegisteredPublisher,
+      }),
+    });
+
+    const registerResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/register',
+      payload: {
+        phoneNumber: '+255700000210',
+        password: 'Password123',
+        fullName: 'Integration Event',
+      },
+    });
+
+    expect(registerResponse.statusCode).toBe(201);
+    const registered = registerResponse.json();
+    expect(userRegisteredPublisher).toHaveBeenCalledTimes(1);
+    expect(userRegisteredPublisher).toHaveBeenCalledWith({
+      user_id: registered.user.id,
+      phone_number: '+255700000210',
+      full_name: 'Integration Event',
+      role: 'passenger',
+      created_at: registered.user.createdAt,
+    });
+    await app.close();
+  });
+
+  it('keeps register route successful when event publish fails', async () => {
+    const userRegisteredPublisher = vi.fn().mockRejectedValue(new Error('event bus unavailable'));
+    const app = await buildApp({
+      authService: new AuthService({
+        repository: new InMemoryAuthRepository(),
+        userRegisteredPublisher,
+      }),
+    });
+
+    const registerResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/register',
+      payload: {
+        phoneNumber: '+255700000211',
+        password: 'Password123',
+      },
+    });
+
+    expect(registerResponse.statusCode).toBe(201);
+    expect(userRegisteredPublisher).toHaveBeenCalledTimes(1);
     await app.close();
   });
 });

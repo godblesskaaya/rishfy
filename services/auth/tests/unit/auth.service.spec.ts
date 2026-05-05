@@ -2,6 +2,50 @@ import { InMemoryAuthRepository } from '@/repositories/auth.repository.js';
 import { AuthService } from '@/services/auth.service.js';
 
 describe('AuthService', () => {
+  it('publishes user.registered exactly once during register', async () => {
+    const userRegisteredPublisher = vi.fn().mockResolvedValue(undefined);
+    const authService = new AuthService({
+      repository: new InMemoryAuthRepository(),
+      userRegisteredPublisher,
+    });
+
+    const registered = await authService.register({
+      email: 'event-once@example.com',
+      phoneNumber: '+255700000111',
+      password: 'Password123',
+      fullName: 'Event Once',
+    });
+
+    expect(registered.user.id).toBeTruthy();
+    expect(userRegisteredPublisher).toHaveBeenCalledTimes(1);
+    expect(userRegisteredPublisher).toHaveBeenCalledWith({
+      user_id: registered.user.id,
+      phone_number: '+255700000111',
+      full_name: 'Event Once',
+      role: 'passenger',
+      created_at: registered.user.createdAt,
+    });
+  });
+
+  it('continues register flow when user.registered publish fails', async () => {
+    const userRegisteredPublisher = vi.fn().mockRejectedValue(new Error('kafka unavailable'));
+    const authService = new AuthService({
+      repository: new InMemoryAuthRepository(),
+      userRegisteredPublisher,
+    });
+
+    await expect(
+      authService.register({
+        phoneNumber: '+255700000112',
+        password: 'Password123',
+        fullName: 'Publish Fallback',
+      }),
+    ).resolves.toMatchObject({
+      user: { phoneNumber: '+255700000112' },
+    });
+    expect(userRegisteredPublisher).toHaveBeenCalledTimes(1);
+  });
+
   it('registers, verifies, logs in, refreshes, and logs out a user', async () => {
     const authService = new AuthService({ repository: new InMemoryAuthRepository() });
 

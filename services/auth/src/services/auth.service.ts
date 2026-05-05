@@ -10,6 +10,8 @@ import type {
   ResetPasswordInput,
   VerifyOtpInput,
 } from '../controllers/auth.schemas.js';
+import type { UserRegisteredEvent } from '../events/auth.events.js';
+import { logger } from '../logger.js';
 import type { AuthRepository } from '../repositories/auth.repository.js';
 import type { AuthTokens, AuthUser, SafeAuthUser } from '../types/auth.js';
 
@@ -19,6 +21,7 @@ const LOCKOUT_MS = 15 * 60 * 1000;
 export interface AuthServiceDeps {
   repository: AuthRepository;
   otpSender?: (payload: { destination: string; code: string; purpose: string }) => Promise<void>;
+  userRegisteredPublisher?: (event: UserRegisteredEvent) => Promise<void>;
 }
 
 export class AuthService {
@@ -33,6 +36,8 @@ export class AuthService {
       fullName: input.fullName,
       passwordHash: hashPassword(input.password),
     });
+
+    await this.publishUserRegistered(user);
 
     const otpCode = this.generateOtpCode();
     const expiresAt = new Date(Date.now() + OTP_EXPIRY_MS);
@@ -207,5 +212,23 @@ export class AuthService {
     }
 
     await this.deps.otpSender?.({ destination, code, purpose });
+  }
+
+  private async publishUserRegistered(user: AuthUser): Promise<void> {
+    if (!this.deps.userRegisteredPublisher) {
+      return;
+    }
+
+    try {
+      await this.deps.userRegisteredPublisher({
+        user_id: user.id,
+        phone_number: user.phoneNumber ?? '',
+        full_name: user.fullName ?? 'Rishfy User',
+        role: user.role,
+        created_at: user.createdAt.toISOString(),
+      });
+    } catch (err) {
+      logger.error({ err, userId: user.id }, 'Failed to publish user.registered event');
+    }
   }
 }
