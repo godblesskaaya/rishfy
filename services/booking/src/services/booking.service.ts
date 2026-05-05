@@ -1,11 +1,12 @@
 import { BookingRepository } from '../repositories/booking.repository.js';
 import { reserveSeats, releaseSeats } from '../clients/route.grpc.client.js';
+import { refundPayment } from '../clients/payment.grpc.client.js';
 import { config } from '../config.js';
 import { logger } from '../logger.js';
 import {
   publishBookingCreated, publishBookingConfirmed, publishBookingCancelled,
   publishBookingCompleted, publishBookingExpired, publishTripStarted,
-  publishTripCompleted, publishBookingRated,
+  publishTripCompleted, publishBookingRated, publishBookingEmergency,
 } from '../events/booking.events.js';
 import type { BookingRow } from '../repositories/booking.repository.js';
 
@@ -22,6 +23,16 @@ export interface CreateBookingParams {
   dropoffLat?: number;
   dropoffLng?: number;
   idempotencyKey: string;
+}
+
+export interface CancelBookingResult {
+  booking: BookingRow;
+  refund: {
+    attempted: boolean;
+    applied: boolean;
+    refundedAmountTzs: number;
+    refundReference: string;
+  };
 }
 
 export class BookingService {
@@ -98,7 +109,7 @@ export class BookingService {
     return booking;
   }
 
-  async cancelByPassenger(bookingId: string, passengerId: string, reason: string): Promise<BookingRow> {
+  async cancelByPassengerWithRefund(bookingId: string, passengerId: string, reason: string): Promise<CancelBookingResult> {
     const booking = await this.repo.findById(bookingId);
     if (!booking) throw Object.assign(new Error('Booking not found'), { code: 'NOT_FOUND' });
     if (booking.passenger_id !== passengerId) throw Object.assign(new Error('Forbidden'), { code: 'FORBIDDEN' });
@@ -113,7 +124,41 @@ export class BookingService {
       driverId: updated.driver_id, cancelledBy: 'passenger', reason,
       timestamp: new Date().toISOString(),
     });
-    return updated;
+
+    const refund = {
+      attempted: false,
+      applied: false,
+      refundedAmountTzs: 0,
+      refundReference: '',
+    };
+
+    if (updated.payment_id && updated.payment_status === 'paid') {
+      refund.attempted = true;
+      const refundResult = await refundPayment(updated.payment_id, passengerId, reason);
+      if (refundResult && refundResult.refundedAmountTzs > 0) {
+        refund.applied = true;
+        refund.refundedAmountTzs = refundResult.refundedAmountTzs;
+        refund.refundReference = refundResult.refundReference;
+        await this.repo.markPaymentRefunded(bookingId, 'PAYMENT_SERVICE_POLICY');
+        await this.repo.appendEvent(bookingId, 'booking.refund_applied', {
+          paymentId: updated.payment_id,
+          refundedAmountTzs: refundResult.refundedAmountTzs,
+          refundReference: refundResult.refundReference,
+        });
+      } else {
+        await this.repo.appendEvent(bookingId, 'booking.refund_pending', {
+          paymentId: updated.payment_id,
+          reason: 'PAYMENT_REFUND_UNAVAILABLE',
+        });
+      }
+    }
+
+    return { booking: updated, refund };
+  }
+
+  async cancelByPassenger(bookingId: string, passengerId: string, reason: string): Promise<BookingRow> {
+    const result = await this.cancelByPassengerWithRefund(bookingId, passengerId, reason);
+    return result.booking;
   }
 
   async handleDriverCancelledRoute(routeId: string): Promise<void> {
@@ -186,6 +231,31 @@ export class BookingService {
       timestamp: new Date().toISOString(),
     });
     return updated;
+  }
+
+  async triggerEmergency(bookingId: string, reporterId: string, reason: string): Promise<BookingRow> {
+    const booking = await this.repo.findById(bookingId);
+    if (!booking) throw Object.assign(new Error('Booking not found'), { code: 'NOT_FOUND' });
+
+    const reporterRole = booking.passenger_id === reporterId
+      ? 'passenger'
+      : (booking.driver_id === reporterId ? 'driver' : null);
+
+    if (!reporterRole) throw Object.assign(new Error('Forbidden'), { code: 'FORBIDDEN' });
+
+    await this.repo.appendEvent(bookingId, 'booking.emergency', { reportedBy: reporterId, reporterRole, reason });
+    await publishBookingEmergency({
+      bookingId,
+      routeId: booking.route_id,
+      passengerId: booking.passenger_id,
+      driverId: booking.driver_id,
+      reportedBy: reporterId,
+      reporterRole,
+      reason,
+      timestamp: new Date().toISOString(),
+    });
+
+    return booking;
   }
 
   async getBooking(id: string): Promise<BookingRow | null> {

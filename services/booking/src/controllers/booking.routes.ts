@@ -84,16 +84,44 @@ export async function bookingRoutes(app: FastifyInstance): Promise<void> {
     const { id } = req.params as { id: string };
     const { reason = 'PASSENGER_CANCELLED' } = req.body as { reason?: string };
     try {
-      const booking = await service.cancelByPassenger(id, userId, reason);
+      const result = await service.cancelByPassengerWithRefund(id, userId, reason);
       // Remove expiry job if still pending
       try { await getExpiryQueue(redis).remove(`expire:${id}`); } catch {}
-      return reply.send(booking);
+      return reply.send({
+        ...result.booking,
+        refund: result.refund,
+      });
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
       if (code === 'NOT_FOUND') return reply.status(404).send({ error: 'NOT_FOUND' });
       if (code === 'FORBIDDEN') return reply.status(403).send({ error: 'FORBIDDEN' });
       if (code === 'INVALID_STATE') return reply.status(409).send({ error: 'INVALID_STATE' });
       logger.error({ err }, 'POST /bookings/:id/cancel failed');
+      return reply.status(500).send({ error: 'INTERNAL_ERROR' });
+    }
+  });
+
+  // POST /api/v1/bookings/:id/emergency
+  app.post('/api/v1/bookings/:id/emergency', async (req, reply) => {
+    const userId = req.headers['x-user-id'] as string;
+    if (!userId) return reply.status(401).send({ error: 'UNAUTHORIZED' });
+
+    const { id } = req.params as { id: string };
+    const { reason = 'EMERGENCY_REPORTED' } = req.body as { reason?: string };
+
+    try {
+      const booking = await service.triggerEmergency(id, userId, reason);
+      return reply.send({
+        reported: true,
+        bookingId: booking.id,
+        routeId: booking.route_id,
+        reason,
+      });
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === 'NOT_FOUND') return reply.status(404).send({ error: 'NOT_FOUND' });
+      if (code === 'FORBIDDEN') return reply.status(403).send({ error: 'FORBIDDEN' });
+      logger.error({ err }, 'POST /bookings/:id/emergency failed');
       return reply.status(500).send({ error: 'INTERNAL_ERROR' });
     }
   });

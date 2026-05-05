@@ -190,4 +190,14 @@ export class BookingRepository {
       [bookingId, eventType, JSON.stringify(payload)],
     );
   }
+
+  async markPaymentRefunded(id: string, policy: string): Promise<BookingRow> {
+    const { rows } = await this.pool.query<BookingRow>(
+      `UPDATE bookings
+       SET payment_status='refunded', cancellation_policy=$2, updated_at=now()
+       WHERE id=$1 RETURNING *`,
+      [id, policy],
+    );
+    return rows[0]!;
+  }
 }

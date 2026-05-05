@@ -5,6 +5,7 @@ const T = {
   CREATED: 'booking.created',
   CONFIRMED: 'booking.confirmed',
   CANCELLED: 'booking.cancelled',
+  EMERGENCY: 'booking.emergency',
   COMPLETED: 'booking.completed',
   EXPIRED: 'booking.expired',
   TRIP_STARTED: 'booking.trip_started',
@@ -35,6 +36,11 @@ export async function publishBookingCancelled(data: {
   bookingId: string; routeId: string; passengerId: string; driverId: string;
   cancelledBy: 'passenger' | 'driver' | 'system'; reason: string; timestamp: string;
 }): Promise<void> { await pub(T.CANCELLED, data.bookingId, data); }
+
+export async function publishBookingEmergency(data: {
+  bookingId: string; routeId: string; passengerId: string; driverId: string;
+  reportedBy: string; reporterRole: 'passenger' | 'driver'; reason: string; timestamp: string;
+}): Promise<void> { await pub(T.EMERGENCY, data.bookingId, data); }
 
 export async function publishBookingCompleted(data: {
   bookingId: string; routeId: string; passengerId: string; driverId: string;

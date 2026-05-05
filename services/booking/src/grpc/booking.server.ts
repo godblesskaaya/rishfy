@@ -141,12 +141,16 @@ const listRouteBookings: Handler<ListRouteReq, unknown> = async (call, callback)
 
 const cancelBooking: Handler<CancelReq, unknown> = async (call, callback) => {
   try {
-    const booking = await svc.cancelByPassenger(call.request.bookingId, call.request.cancellingUserId, call.request.reason);
-    if (!booking) {
+    const result = await svc.cancelByPassengerWithRefund(call.request.bookingId, call.request.cancellingUserId, call.request.reason);
+    if (!result.booking) {
       callback({ code: grpc.status.NOT_FOUND, message: 'booking not found or not cancellable' } as grpc.ServiceError);
       return;
     }
-    callback(null, { booking: rowToProto(booking), refundAmount: { amountTzs: '0' }, refundReference: '' });
+    callback(null, {
+      booking: rowToProto(result.booking),
+      refundAmount: { amountTzs: String(result.refund.refundedAmountTzs) },
+      refundReference: result.refund.refundReference,
+    });
   } catch (err) {
     callback({ code: grpc.status.INTERNAL, message: String(err) } as grpc.ServiceError);
   }
