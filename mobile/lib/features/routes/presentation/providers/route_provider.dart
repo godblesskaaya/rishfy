@@ -74,3 +74,68 @@ final FutureProviderFamily<RouteEntity, String> routeDetailProvider =
   final RouteDto dto = await ds.getRoute(routeId);
   return dto.toDomain();
 });
+
+// ---- Driver vehicles (for route posting) ----
+
+final FutureProvider<List<DriverVehicleOption>> myVehicleOptionsProvider =
+    FutureProvider.autoDispose<List<DriverVehicleOption>>((Ref ref) async {
+  final RouteRemoteDataSource ds = ref.read(routeDataSourceProvider);
+  return ds.listMyVehicles();
+});
+
+// ---- Create route ----
+
+enum CreateRouteStatus { idle, loading, success, failed }
+
+class CreateRouteState {
+  const CreateRouteState({
+    this.status = CreateRouteStatus.idle,
+    this.createdRoute,
+    this.error,
+  });
+
+  final CreateRouteStatus status;
+  final RouteEntity? createdRoute;
+  final String? error;
+
+  CreateRouteState copyWith({
+    CreateRouteStatus? status,
+    RouteEntity? createdRoute,
+    String? error,
+  }) =>
+      CreateRouteState(
+        status: status ?? this.status,
+        createdRoute: createdRoute ?? this.createdRoute,
+        error: error,
+      );
+}
+
+final StateNotifierProvider.autoDispose<CreateRouteNotifier, CreateRouteState>
+    createRouteProvider =
+    StateNotifierProvider.autoDispose<CreateRouteNotifier, CreateRouteState>(
+  (Ref ref) => CreateRouteNotifier(ref.read(routeDataSourceProvider)),
+);
+
+class CreateRouteNotifier extends StateNotifier<CreateRouteState> {
+  CreateRouteNotifier(this._ds) : super(const CreateRouteState());
+
+  final RouteRemoteDataSource _ds;
+
+  Future<void> submit(CreateRouteRequest req) async {
+    state = const CreateRouteState(status: CreateRouteStatus.loading);
+    try {
+      final RouteDto dto = await _ds.createRoute(req);
+      state = CreateRouteState(
+        status: CreateRouteStatus.success,
+        createdRoute: dto.toDomain(),
+      );
+    } catch (e) {
+      state = CreateRouteState(
+        status: CreateRouteStatus.failed,
+        error: e.toString(),
+      );
+    }
+  }
+
+  void reset() => state = const CreateRouteState();
+}

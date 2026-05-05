@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import 'package:uuid/uuid.dart';
 
 import '../../../../core/constants/app_constants.dart';
 import '../../../../shared/widgets/primary_button.dart';
@@ -24,7 +25,7 @@ class CreateBookingScreen extends ConsumerStatefulWidget {
 }
 
 class _CreateBookingScreenState extends ConsumerState<CreateBookingScreen> {
-  String _paymentMethod = 'mpesa';
+  String _paymentMethod = 'mpesa_tz';
   final TextEditingController _phoneCtrl = TextEditingController();
   int _seatCount = 1;
   Timer? _pollTimer;
@@ -58,9 +59,18 @@ class _CreateBookingScreenState extends ConsumerState<CreateBookingScreen> {
     await ref.read(createBookingProvider.notifier).submit(
           CreateBookingRequest(
             routeId: widget.routeId,
-            seatCount: _seatCount,
+            driverId: route.driverUserId,
+            seatsBooked: _seatCount,
+            pricePerSeat: route.pricePerSeatTzs,
             paymentMethod: _paymentMethod,
             payerPhone: phone,
+            idempotencyKey: const Uuid().v4(),
+            pickupName: route.originName,
+            dropoffName: route.destinationName,
+            pickupLat: route.originLat,
+            pickupLng: route.originLng,
+            dropoffLat: route.destinationLat,
+            dropoffLng: route.destinationLng,
           ),
         );
     final CreateBookingState s = ref.read(createBookingProvider);
@@ -77,9 +87,10 @@ class _CreateBookingScreenState extends ConsumerState<CreateBookingScreen> {
 
   String _providerLabel(String method) {
     switch (method) {
-      case 'mpesa': return 'M-Pesa';
+      case 'mpesa_tz': return 'M-Pesa';
       case 'tigopesa': return 'TigoPesa';
       case 'airtel_money': return 'Airtel Money';
+      case 'halopesa': return 'HaloPesa';
       default: return method;
     }
   }
@@ -194,7 +205,7 @@ class _CreateBookingScreenState extends ConsumerState<CreateBookingScreen> {
           Text('Payment method', style: Theme.of(context).textTheme.titleSmall),
           RadioListTile<String>(
             title: const Text('M-Pesa'),
-            value: 'mpesa',
+            value: 'mpesa_tz',
             groupValue: _paymentMethod,
             onChanged: (String? v) => setState(() => _paymentMethod = v!),
           ),
@@ -207,6 +218,12 @@ class _CreateBookingScreenState extends ConsumerState<CreateBookingScreen> {
           RadioListTile<String>(
             title: const Text('Airtel Money'),
             value: 'airtel_money',
+            groupValue: _paymentMethod,
+            onChanged: (String? v) => setState(() => _paymentMethod = v!),
+          ),
+          RadioListTile<String>(
+            title: const Text('HaloPesa'),
+            value: 'halopesa',
             groupValue: _paymentMethod,
             onChanged: (String? v) => setState(() => _paymentMethod = v!),
           ),

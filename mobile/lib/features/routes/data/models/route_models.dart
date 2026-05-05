@@ -45,33 +45,52 @@ class RouteDto {
   final DateTime? estimatedArrivalDatetime;
   final List<RouteWaypointDto> waypoints;
 
-  factory RouteDto.fromJson(Map<String, dynamic> j) => RouteDto(
-        routeId: j['route_id'] as String,
-        driverUserId: j['driver_user_id'] as String,
-        driverName: j['driver_name'] as String? ?? '',
-        originName: j['origin_name'] as String,
-        destinationName: j['destination_name'] as String,
-        originLat: (j['origin_lat'] as num).toDouble(),
-        originLng: (j['origin_lng'] as num).toDouble(),
-        destinationLat: (j['destination_lat'] as num).toDouble(),
-        destinationLng: (j['destination_lng'] as num).toDouble(),
-        departureDatetime: DateTime.parse(j['departure_datetime'] as String),
-        pricePerSeatTzs: j['price_per_seat_tzs'] as int,
-        totalSeats: j['total_seats'] as int,
-        availableSeats: j['available_seats'] as int,
-        vehicleModel: j['vehicle_model'] as String? ?? '',
-        vehiclePlate: j['vehicle_plate'] as String? ?? '',
-        status: j['status'] as String? ?? 'active',
-        encodedPolyline: j['encoded_polyline'] as String?,
-        driverRating: (j['driver_rating'] as num?)?.toDouble(),
-        estimatedArrivalDatetime: j['estimated_arrival_datetime'] != null
-            ? DateTime.parse(j['estimated_arrival_datetime'] as String)
-            : null,
-        waypoints: (j['waypoints'] as List<dynamic>? ?? <dynamic>[])
-            .map((dynamic e) =>
-                RouteWaypointDto.fromJson(e as Map<String, dynamic>))
-            .toList(),
-      );
+  factory RouteDto.fromJson(Map<String, dynamic> j) {
+    final int availableSeats = _toInt(
+      j['available_seats'],
+      fallback: 0,
+    );
+    final int bookedSeats = _toInt(
+      j['booked_seats'],
+      fallback: 0,
+    );
+    final int totalSeats = _toInt(
+      j['total_seats'],
+      fallback: availableSeats + bookedSeats,
+    );
+
+    return RouteDto(
+      routeId: (j['route_id'] ?? j['id']) as String,
+      driverUserId: (j['driver_user_id'] ?? j['driver_id']) as String,
+      driverName: j['driver_name'] as String? ?? '',
+      originName: (j['origin_name'] as String?) ?? 'Origin',
+      destinationName: (j['destination_name'] as String?) ?? 'Destination',
+      originLat: _toDouble(j['origin_lat']),
+      originLng: _toDouble(j['origin_lng']),
+      destinationLat: _toDouble(j['destination_lat'] ?? j['dest_lat']),
+      destinationLng: _toDouble(j['destination_lng'] ?? j['dest_lng']),
+      departureDatetime: DateTime.parse(
+        (j['departure_datetime'] ?? j['departure_time']) as String,
+      ),
+      pricePerSeatTzs: _toInt(
+        j['price_per_seat_tzs'] ?? j['price_per_seat'],
+      ),
+      totalSeats: totalSeats,
+      availableSeats: availableSeats,
+      vehicleModel: j['vehicle_model'] as String? ?? '',
+      vehiclePlate: j['vehicle_plate'] as String? ?? '',
+      status: j['status'] as String? ?? 'active',
+      encodedPolyline: (j['encoded_polyline'] ?? j['polyline']) as String?,
+      driverRating: (j['driver_rating'] as num?)?.toDouble(),
+      estimatedArrivalDatetime: j['estimated_arrival_datetime'] != null
+          ? DateTime.parse(j['estimated_arrival_datetime'] as String)
+          : null,
+      waypoints: (j['waypoints'] as List<dynamic>? ?? <dynamic>[])
+          .map((dynamic e) =>
+              RouteWaypointDto.fromJson(e as Map<String, dynamic>))
+          .toList(),
+    );
+  }
 
   RouteEntity toDomain() => RouteEntity(
         routeId: routeId,
@@ -137,4 +156,88 @@ class RouteSearchParams {
   final String destination;
   final DateTime departureDate;
   final int seats;
+}
+
+class CreateRouteRequest {
+  const CreateRouteRequest({
+    required this.vehicleId,
+    required this.originName,
+    required this.destinationName,
+    required this.availableSeats,
+    required this.pricePerSeat,
+    required this.departureTime,
+    this.recurrence = 'none',
+    this.recurrenceDays = const <int>[],
+    this.recurrenceEndDate,
+  });
+
+  final String vehicleId;
+  final String originName;
+  final String destinationName;
+  final int availableSeats;
+  final int pricePerSeat;
+  final DateTime departureTime;
+  final String recurrence;
+  final List<int> recurrenceDays;
+  final DateTime? recurrenceEndDate;
+}
+
+class DriverVehicleOption {
+  const DriverVehicleOption({
+    required this.id,
+    required this.make,
+    required this.model,
+    required this.plateNumber,
+    this.year,
+    this.isActive = false,
+  });
+
+  final String id;
+  final String make;
+  final String model;
+  final String plateNumber;
+  final int? year;
+  final bool isActive;
+
+  String get label {
+    final String base = '$make $model'.trim();
+    final String withYear =
+        year != null && year! > 0 ? '$base ($year)' : base;
+    final String normalized = withYear.trim().isEmpty ? 'Vehicle' : withYear;
+    return '$normalized · $plateNumber';
+  }
+
+  factory DriverVehicleOption.fromJson(Map<String, dynamic> j) {
+    return DriverVehicleOption(
+      id: (j['id'] ?? j['vehicle_id']) as String,
+      make: (j['make'] as String?) ?? '',
+      model: (j['model'] as String?) ?? '',
+      plateNumber: (j['plate_number'] ?? j['registration_number'] ?? '')
+          as String,
+      year: _toNullableInt(j['year']),
+      isActive: (j['is_active'] as bool?) ?? false,
+    );
+  }
+}
+
+double _toDouble(dynamic value) {
+  if (value is num) return value.toDouble();
+  if (value is String) return double.parse(value);
+  throw FormatException('Invalid numeric value: $value');
+}
+
+int _toInt(dynamic value, {int fallback = 0}) {
+  if (value == null) return fallback;
+  if (value is int) return value;
+  if (value is num) return value.toInt();
+  if (value is String) return double.parse(value).round();
+  return fallback;
+}
+
+int? _toNullableInt(dynamic value) {
+  if (value == null) return null;
+  if (value is int) return value;
+  if (value is num) return value.toInt();
+  if (value is String) return int.tryParse(value);
+  return null;
 }

@@ -9,12 +9,24 @@ class BookingRemoteDataSource {
 
   Future<InitiatePaymentResponse> createBooking(
       CreateBookingRequest req) async {
-    final Response<Map<String, dynamic>> res =
+    final Response<Map<String, dynamic>> bookingRes =
         await _dio.post<Map<String, dynamic>>(
       '/api/v1/bookings',
-      data: req.toJson(),
+      data: req.toBookingJson(),
     );
-    return InitiatePaymentResponse.fromJson(res.data!);
+    final BookingDto booking =
+        BookingDto.fromJson(bookingRes.data as Map<String, dynamic>);
+
+    final Response<Map<String, dynamic>> paymentRes =
+        await _dio.post<Map<String, dynamic>>(
+      '/api/v1/payments/initiate',
+      data: req.toPaymentJson(booking.bookingId),
+    );
+
+    return InitiatePaymentResponse.fromJson(<String, dynamic>{
+      ...?paymentRes.data,
+      'bookingId': booking.bookingId,
+    });
   }
 
   Future<List<BookingDto>> listMyBookings() async {
@@ -43,7 +55,10 @@ class BookingRemoteDataSource {
   }
 
   Future<void> cancelBooking(String bookingId) async {
-    await _dio.post<void>('/api/v1/bookings/$bookingId/cancel');
+    await _dio.post<void>(
+      '/api/v1/bookings/$bookingId/cancel',
+      data: const <String, dynamic>{'reason': 'PASSENGER_CANCELLED'},
+    );
   }
 
   Future<void> rateTrip({
@@ -55,7 +70,7 @@ class BookingRemoteDataSource {
       '/api/v1/bookings/$bookingId/rate',
       data: <String, dynamic>{
         'rating': rating,
-        if (comment != null) 'comment': comment,
+        if (comment != null) 'review': comment,
       },
     );
   }

@@ -36,11 +36,12 @@ class BookingDto {
   final String? paymentId;
 
   factory BookingDto.fromJson(Map<String, dynamic> j) => BookingDto(
-        bookingId: j['booking_id'] as String,
+        bookingId: (j['booking_id'] ?? j['id']) as String,
         routeId: j['route_id'] as String,
-        passengerUserId: j['passenger_user_id'] as String,
-        seatCount: j['seat_count'] as int,
-        totalPriceTzs: j['total_price'] as int,
+        passengerUserId:
+            (j['passenger_user_id'] ?? j['passenger_id']) as String? ?? '',
+        seatCount: _toInt(j['seat_count'] ?? j['seats_booked']),
+        totalPriceTzs: _toInt(j['total_price'] ?? j['total_price_tzs']),
         status: j['status'] as String,
         paymentStatus: j['payment_status'] as String? ?? 'pending',
         createdAt: DateTime.parse(j['created_at'] as String),
@@ -77,21 +78,56 @@ class BookingDto {
 class CreateBookingRequest {
   const CreateBookingRequest({
     required this.routeId,
-    required this.seatCount,
+    required this.driverId,
+    required this.seatsBooked,
+    required this.pricePerSeat,
     required this.paymentMethod,
     required this.payerPhone,
+    required this.idempotencyKey,
+    this.pickupName,
+    this.dropoffName,
+    this.pickupLat,
+    this.pickupLng,
+    this.dropoffLat,
+    this.dropoffLng,
   });
 
   final String routeId;
-  final int seatCount;
+  final String driverId;
+  final int seatsBooked;
+  final int pricePerSeat;
   final String paymentMethod;
   final String payerPhone;
+  final String idempotencyKey;
+  final String? pickupName;
+  final String? dropoffName;
+  final double? pickupLat;
+  final double? pickupLng;
+  final double? dropoffLat;
+  final double? dropoffLng;
 
-  Map<String, dynamic> toJson() => <String, dynamic>{
-        'route_id': routeId,
-        'seat_count': seatCount,
-        'payment_method': paymentMethod,
-        'payer_phone': payerPhone,
+  int get totalAmountTzs => seatsBooked * pricePerSeat;
+
+  Map<String, dynamic> toBookingJson() => <String, dynamic>{
+        'routeId': routeId,
+        'driverId': driverId,
+        'seatsBooked': seatsBooked,
+        'pricePerSeat': pricePerSeat,
+        'idempotencyKey': idempotencyKey,
+        if (pickupName != null) 'pickupName': pickupName,
+        if (dropoffName != null) 'dropoffName': dropoffName,
+        if (pickupLat != null) 'pickupLat': pickupLat,
+        if (pickupLng != null) 'pickupLng': pickupLng,
+        if (dropoffLat != null) 'dropoffLat': dropoffLat,
+        if (dropoffLng != null) 'dropoffLng': dropoffLng,
+      };
+
+  Map<String, dynamic> toPaymentJson(String bookingId) => <String, dynamic>{
+        'bookingId': bookingId,
+        'amountTzs': totalAmountTzs,
+        'method': paymentMethod,
+        'payerPhone': payerPhone,
+        'idempotencyKey': idempotencyKey,
       };
 }
 
@@ -112,10 +148,18 @@ class InitiatePaymentResponse {
 
   factory InitiatePaymentResponse.fromJson(Map<String, dynamic> j) =>
       InitiatePaymentResponse(
-        bookingId: j['booking_id'] as String,
-        paymentId: j['payment_id'] as String,
+        bookingId: (j['booking_id'] ?? j['bookingId']) as String,
+        paymentId: (j['payment_id'] ?? j['paymentId']) as String,
         status: j['status'] as String,
-        ussdCode: j['ussd_code'] as String?,
-        providerReference: j['provider_reference'] as String?,
+        ussdCode: (j['ussd_code'] ?? j['instructions']) as String?,
+        providerReference:
+            (j['provider_reference'] ?? j['providerReference']) as String?,
       );
+}
+
+int _toInt(dynamic value) {
+  if (value is int) return value;
+  if (value is num) return value.toInt();
+  if (value is String) return double.parse(value).round();
+  throw FormatException('Invalid integer value: $value');
 }

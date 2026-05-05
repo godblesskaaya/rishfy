@@ -79,6 +79,7 @@ class _RouteSearchScreenState extends ConsumerState<RouteSearchScreen> {
                           textInputAction: TextInputAction.next,
                           decoration: const InputDecoration(
                             labelText: 'From',
+                            hintText: 'City name or lat,lng',
                             prefixIcon: Icon(Icons.my_location),
                             border: InputBorder.none,
                           ),
@@ -90,6 +91,7 @@ class _RouteSearchScreenState extends ConsumerState<RouteSearchScreen> {
                           onSubmitted: (_) => _search(),
                           decoration: const InputDecoration(
                             labelText: 'To',
+                            hintText: 'City name or lat,lng',
                             prefixIcon: Icon(Icons.location_on),
                             border: InputBorder.none,
                           ),
