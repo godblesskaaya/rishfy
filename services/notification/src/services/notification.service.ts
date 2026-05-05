@@ -8,6 +8,7 @@ import { InAppAdapter } from '../channels/in-app.adapter.js';
 import type { ChannelAdapter } from '../channels/channel.adapter.js';
 import { logger } from '../logger.js';
 import { pgPool } from '../db.js';
+import { config } from '../config.js';
 
 export const NOTIF_QUEUE = 'notifications';
 
@@ -23,6 +24,8 @@ export interface DispatchParams {
   lang?: string;
   channels: string[];
   vars: Record<string, string | number>;
+  fallbackTitle?: string;
+  fallbackBody?: string;
   sourceEventType?: string;
   sourceEventId?: string;
   fcmToken?: string;
@@ -42,12 +45,15 @@ export class NotificationService {
     await Promise.all(
       params.channels.map(async (channel) => {
         const tmpl = await this.repo.getTemplate(params.templateKey, lang, channel);
-        if (!tmpl) {
+        if (!tmpl && !params.fallbackBody) {
           logger.warn({ key: params.templateKey, lang, channel }, 'Template not found');
           return;
         }
-        const body = renderTemplate(tmpl.body_template, params.vars);
-        const title = tmpl.subject ? renderTemplate(tmpl.subject, params.vars) : undefined;
+        const bodyTemplate = tmpl ? tmpl.body_template : params.fallbackBody!;
+        const body = renderTemplate(bodyTemplate, params.vars);
+        const title = tmpl?.subject
+          ? renderTemplate(tmpl.subject, params.vars)
+          : (params.fallbackTitle ? renderTemplate(params.fallbackTitle, params.vars) : undefined);
 
         const notif = await this.repo.create({
           userId: params.userId,
@@ -103,6 +109,15 @@ export class NotificationService {
 
   async enqueue(connection: IORedis, params: DispatchParams, priority = 5): Promise<void> {
     const queue = new Queue(NOTIF_QUEUE, { connection });
-    await queue.add('send', params, { priority });
+    await queue.add('send', params, {
+      priority,
+      attempts: config.NOTIF_QUEUE_ATTEMPTS,
+      backoff: {
+        type: 'exponential',
+        delay: config.NOTIF_QUEUE_BACKOFF_MS,
+      },
+      removeOnComplete: 2000,
+      removeOnFail: 5000,
+    });
   }
 }

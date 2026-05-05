@@ -11,6 +11,8 @@ const configSchema = z.object({
   DATABASE_URL: z.string().url(),
   REDIS_URL: z.string().url(),
   KAFKA_BROKERS: z.string(),
+  NOTIF_QUEUE_ATTEMPTS: z.coerce.number().int().positive().default(4),
+  NOTIF_QUEUE_BACKOFF_MS: z.coerce.number().int().positive().default(15000),
 
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().url().optional(),
 });

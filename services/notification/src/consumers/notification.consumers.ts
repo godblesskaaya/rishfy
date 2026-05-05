@@ -20,10 +20,21 @@ interface BookingCancelledPayload {
   cancelledBy: 'passenger' | 'driver' | 'system'; driverName?: string; departureTime?: string;
 }
 
+interface BookingEmergencyPayload {
+  bookingId: string;
+  routeId: string;
+  passengerId: string;
+  driverId: string;
+  reportedBy: string;
+  reporterRole: 'passenger' | 'driver';
+  reason: string;
+}
+
 interface TripPayload { bookingId: string; driverId: string; passengerId: string; driverName?: string }
 
 const TOPICS = [
   'booking.created', 'booking.confirmed', 'booking.cancelled', 'booking.expired',
+  'booking.emergency',
   'booking.trip_started', 'booking.trip_completed', 'booking.rated',
   'payment.completed', 'payment.failed',
   'driver.arrived',
@@ -111,6 +122,41 @@ async function routeEvent(topic: string, p: Record<string, unknown>, redis: IORe
         sourceEventId: d.bookingId,
       });
     }
+  } else if (topic === 'booking.emergency') {
+    const d = p as unknown as BookingEmergencyPayload;
+    const responderId = d.reporterRole === 'passenger' ? d.driverId : d.passengerId;
+    await enq({
+      userId: responderId,
+      templateKey: 'booking.emergency',
+      channels: ['push', 'in_app'],
+      vars: { booking_id: d.bookingId, reason: d.reason },
+      fallbackTitle: 'Emergency alert',
+      fallbackBody: 'Emergency reported on booking {{booking_id}}. Reason: {{reason}}. Please respond immediately.',
+      sourceEventType: topic,
+      sourceEventId: d.bookingId,
+      data: {
+        bookingId: d.bookingId,
+        routeId: d.routeId,
+        reportedBy: d.reportedBy,
+        reporterRole: d.reporterRole,
+        reason: d.reason,
+      },
+    });
+    await enq({
+      userId: d.reportedBy,
+      templateKey: 'booking.emergency',
+      channels: ['in_app'],
+      vars: { booking_id: d.bookingId },
+      fallbackTitle: 'Emergency received',
+      fallbackBody: 'Your emergency report for booking {{booking_id}} has been submitted.',
+      sourceEventType: topic,
+      sourceEventId: d.bookingId,
+      data: {
+        bookingId: d.bookingId,
+        routeId: d.routeId,
+        reason: d.reason,
+      },
+    });
   } else if (topic === 'booking.trip_started') {
     const d = p as unknown as TripPayload;
     await enq({

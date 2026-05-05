@@ -7,8 +7,7 @@ const repo = new NotificationRepository(pgPool);
 const deviceRepo = new DeviceTokenRepository(pgPool);
 
 export async function notificationRoutes(app: FastifyInstance): Promise<void> {
-  // GET /api/v1/notifications
-  app.get('/api/v1/notifications', async (req, reply) => {
+  const listMyNotifications = async (req: import('fastify').FastifyRequest, reply: import('fastify').FastifyReply) => {
     const userId = req.headers['x-user-id'] as string;
     if (!userId) return reply.status(401).send({ error: 'UNAUTHORIZED' });
     const { limit = 30, offset = 0 } = req.query as { limit?: number; offset?: number };
@@ -17,7 +16,12 @@ export async function notificationRoutes(app: FastifyInstance): Promise<void> {
       repo.countUnread(userId),
     ]);
     return reply.send({ notifications, unread });
-  });
+  };
+
+  // GET /api/v1/notifications
+  app.get('/api/v1/notifications', listMyNotifications);
+  // Alias for strict Sprint 3 ticket path.
+  app.get('/api/v1/notifications/me', listMyNotifications);
 
   // PATCH /api/v1/notifications/:id/read
   app.patch('/api/v1/notifications/:id/read', async (req, reply) => {
