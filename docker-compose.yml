@@ -25,7 +25,7 @@ services:
   # ---------------------------------------------------------------------------
 
   postgres:
-    image: timescale/timescaledb-ha:pg16-latest
+    image: timescale/timescaledb:2.15.0-pg16
     container_name: rishfy-postgres
     restart: unless-stopped
     environment:
@@ -155,6 +155,7 @@ services:
     volumes:
       - ./services/auth:/app
       - /app/node_modules
+      - ./shared:/app/shared:ro
       - ./infrastructure/secrets/jwt_private_key.pem:/run/secrets/jwt_private_key:ro
       - ./infrastructure/secrets/jwt_public_key.pem:/run/secrets/jwt_public_key:ro
     ports:
@@ -189,6 +190,7 @@ services:
     volumes:
       - ./services/user:/app
       - /app/node_modules
+      - ./shared:/app/shared:ro
     ports:
       - "8082:8082"
       - "50052:50052"
@@ -221,6 +223,7 @@ services:
     volumes:
       - ./services/route:/app
       - /app/node_modules
+      - ./shared:/app/shared:ro
     ports:
       - "8083:8083"
       - "50053:50053"
@@ -255,6 +258,7 @@ services:
     volumes:
       - ./services/booking:/app
       - /app/node_modules
+      - ./shared:/app/shared:ro
     ports:
       - "8084:8084"
       - "50054:50054"
@@ -293,6 +297,7 @@ services:
     volumes:
       - ./services/payment:/app
       - /app/node_modules
+      - ./shared:/app/shared:ro
     ports:
       - "8085:8085"
       - "50055:50055"
@@ -327,6 +332,7 @@ services:
     volumes:
       - ./services/location:/app
       - /app/node_modules
+      - ./shared:/app/shared:ro
     ports:
       - "8086:8086"
       - "8186:8186"
@@ -362,6 +368,7 @@ services:
     volumes:
       - ./services/notification:/app
       - /app/node_modules
+      - ./shared:/app/shared:ro
       - ./infrastructure/secrets/fcm_service_account.json:/run/secrets/fcm_service_account:ro
     ports:
       - "8087:8087"
