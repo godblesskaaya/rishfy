@@ -11,10 +11,18 @@ const redis = new IORedis(config.REDIS_URL, { maxRetriesPerRequest: null });
 const geo = new GeoService(redis);
 
 export async function locationRoutes(app: FastifyInstance): Promise<void> {
-  // GET /api/v1/locations/driver/:driverId — last known location
+  // GET /api/v1/locations/driver/:driverId — last known location (legacy path)
   app.get('/api/v1/locations/driver/:driverId', async (req, reply) => {
     const { driverId } = req.params as { driverId: string };
     const loc = await geo.getDriverLocation(driverId);
+    if (!loc) return reply.status(404).send({ error: 'DRIVER_NOT_ACTIVE' });
+    return reply.send(loc);
+  });
+
+  // GET /api/v1/locations/drivers/:id/current — spec-compliant path (RSHFY-406)
+  app.get('/api/v1/locations/drivers/:id/current', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const loc = await geo.getDriverLocation(id);
     if (!loc) return reply.status(404).send({ error: 'DRIVER_NOT_ACTIVE' });
     return reply.send(loc);
   });
