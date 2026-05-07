@@ -5,19 +5,12 @@ import 'package:rishfy/features/auth/domain/entities/user.dart';
 import 'package:rishfy/features/auth/domain/repositories/auth_repository.dart';
 import 'package:rishfy/features/auth/presentation/providers/auth_provider.dart';
 
-// =============================================================================
-// Sample test — demonstrates patterns for the rest of the team to follow.
-//
-// Run with: flutter test test/unit/auth_controller_test.dart
-// =============================================================================
-
 class _MockAuthRepository extends Mock implements AuthRepository {}
 
 void main() {
   late _MockAuthRepository mockRepo;
 
   setUpAll(() {
-    // Register fallback values for any()-matched positional args.
     registerFallbackValue(UserRole.passenger);
   });
 
@@ -60,25 +53,86 @@ void main() {
     });
   });
 
-  group('AuthController.loginWithOtp', () {
+  group('AuthController.login', () {
     test('transitions to authenticated on success', () async {
       when(() => mockRepo.getCurrentSession()).thenAnswer((_) async => null);
-      when(() => mockRepo.verifyOtp(
-            phoneNumber: any(named: 'phoneNumber'),
-            otpCode: any(named: 'otpCode'),
-            otpReference: any(named: 'otpReference'),
-          )).thenAnswer((_) async => _fakeSession());
+      when(
+        () => mockRepo.login(
+          identifier: any(named: 'identifier'),
+          password: any(named: 'password'),
+        ),
+      ).thenAnswer((_) async => _fakeSession());
 
       final ProviderContainer container = makeContainer();
       addTearDown(container.dispose);
 
-      // Wait for initial build
       await container.read(authControllerProvider.future);
 
-      await container.read(authControllerProvider.notifier).loginWithOtp(
+      await container.read(authControllerProvider.notifier).login(
+            identifier: '+255712345678',
+            password: 'Password123',
+          );
+
+      final AuthState state = container.read(authControllerProvider).value!;
+      expect(state.isAuthenticated, isTrue);
+      expect(state.user?.userId, equals('user-123'));
+    });
+  });
+
+  group('AuthController.register', () {
+    test('returns pending registration details without authenticating', () async {
+      when(() => mockRepo.getCurrentSession()).thenAnswer((_) async => null);
+      when(
+        () => mockRepo.register(
+          phoneNumber: any(named: 'phoneNumber'),
+          password: any(named: 'password'),
+          fullName: any(named: 'fullName'),
+          email: any(named: 'email'),
+        ),
+      ).thenAnswer((_) async => const PendingRegistration(
+            userId: 'pending-user',
             phoneNumber: '+255712345678',
+          ));
+
+      final ProviderContainer container = makeContainer();
+      addTearDown(container.dispose);
+
+      await container.read(authControllerProvider.future);
+
+      final PendingRegistration pending =
+          await container.read(authControllerProvider.notifier).register(
+                phoneNumber: '+255712345678',
+                password: 'Password123',
+                fullName: 'Test User',
+                email: 'test@example.com',
+              );
+
+      expect(pending.userId, equals('pending-user'));
+      expect(
+        container.read(authControllerProvider).value?.isAuthenticated,
+        isFalse,
+      );
+    });
+  });
+
+  group('AuthController.verifyOtp', () {
+    test('transitions to authenticated after registration verification', () async {
+      when(() => mockRepo.getCurrentSession()).thenAnswer((_) async => null);
+      when(
+        () => mockRepo.verifyOtp(
+          userId: any(named: 'userId'),
+          otpCode: any(named: 'otpCode'),
+        ),
+      ).thenAnswer((_) async => _fakeSession());
+
+      final ProviderContainer container = makeContainer();
+      addTearDown(container.dispose);
+
+      await container.read(authControllerProvider.future);
+
+      await container.read(authControllerProvider.notifier).verifyOtp(
+            userId: 'pending-user',
             otpCode: '123456',
-            otpReference: 'otp-ref',
           );
 
       final AuthState state = container.read(authControllerProvider).value!;
@@ -106,10 +160,6 @@ void main() {
     });
   });
 }
-
-// =============================================================================
-// Test fixtures
-// =============================================================================
 
 AuthSession _fakeSession() {
   return AuthSession(

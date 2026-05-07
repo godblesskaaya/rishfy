@@ -117,3 +117,25 @@ class AuthSession extends Equatable {
   List<Object?> get props =>
       <Object?>[accessToken, refreshToken, expiresAt, user];
 }
+
+/// Registration has started, but the account still needs OTP verification.
+class PendingRegistration extends Equatable {
+  const PendingRegistration({
+    required this.userId,
+    this.phoneNumber,
+    this.email,
+    this.expiresAt,
+  });
+
+  final String userId;
+  final String? phoneNumber;
+  final String? email;
+  final DateTime? expiresAt;
+
+  String get contactLabel => phoneNumber?.isNotEmpty == true
+      ? phoneNumber!
+      : (email?.isNotEmpty == true ? email! : 'your account');
+
+  @override
+  List<Object?> get props => <Object?>[userId, phoneNumber, email, expiresAt];
+}

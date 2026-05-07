@@ -23,8 +23,6 @@ import '../../features/routes/presentation/screens/route_search_screen.dart';
 import '../../features/trip/presentation/screens/active_trip_screen.dart';
 import '../../shared/providers/locale_provider.dart';
 
-part 'app_router.g.dart';
-
 /// Root navigator keys — expose for nested navigators if needed.
 final GlobalKey<NavigatorState> _rootNavKey =
     GlobalKey<NavigatorState>(debugLabel: 'root');
@@ -92,9 +90,8 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
           final Map<String, dynamic>? extra =
               state.extra as Map<String, dynamic>?;
           return OtpVerificationScreen(
-            phoneNumber: extra?['phoneNumber'] as String? ?? '',
-            otpReference: extra?['otpReference'] as String? ?? '',
-            purpose: extra?['purpose'] as String? ?? 'registration',
+            userId: extra?['userId'] as String? ?? '',
+            contact: extra?['contact'] as String? ?? 'your account',
           );
         },
       ),

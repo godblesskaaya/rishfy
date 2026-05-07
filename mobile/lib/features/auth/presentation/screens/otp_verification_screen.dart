@@ -12,21 +12,13 @@ import '../providers/auth_provider.dart';
 
 class OtpVerificationScreen extends ConsumerStatefulWidget {
   const OtpVerificationScreen({
-    required this.phoneNumber,
-    required this.otpReference,
-    required this.purpose,
+    required this.userId,
+    required this.contact,
     super.key,
-    this.firstName,
-    this.lastName,
-    this.email,
   });
 
-  final String phoneNumber;
-  final String otpReference;
-  final String purpose;
-  final String? firstName;
-  final String? lastName;
-  final String? email;
+  final String userId;
+  final String contact;
 
   @override
   ConsumerState<OtpVerificationScreen> createState() =>
@@ -36,70 +28,37 @@ class OtpVerificationScreen extends ConsumerStatefulWidget {
 class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
   final List<TextEditingController> _controllers =
       List<TextEditingController>.generate(
-          AppConstants.otpLength, (_) => TextEditingController());
-  final List<FocusNode> _focusNodes =
-      List<FocusNode>.generate(AppConstants.otpLength, (_) => FocusNode());
+    AppConstants.otpLength,
+    (_) => TextEditingController(),
+  );
+  final List<FocusNode> _focusNodes = List<FocusNode>.generate(
+    AppConstants.otpLength,
+    (_) => FocusNode(),
+  );
 
-  String _otpRef = '';
-  Timer? _resendTimer;
-  int _secondsLeft = 0;
   bool _submitting = false;
   String? _error;
 
   @override
-  void initState() {
-    super.initState();
-    _otpRef = widget.otpReference;
-    _startResendCooldown();
-  }
-
-  @override
   void dispose() {
-    for (final TextEditingController c in _controllers) {
-      c.dispose();
+    for (final TextEditingController controller in _controllers) {
+      controller.dispose();
     }
-    for (final FocusNode f in _focusNodes) {
-      f.dispose();
+    for (final FocusNode focusNode in _focusNodes) {
+      focusNode.dispose();
     }
-    _resendTimer?.cancel();
     super.dispose();
   }
 
-  void _startResendCooldown() {
-    setState(() => _secondsLeft = AppConstants.otpResendCooldown.inSeconds);
-    _resendTimer?.cancel();
-    _resendTimer = Timer.periodic(const Duration(seconds: 1), (Timer t) {
-      if (!mounted) {
-        t.cancel();
-        return;
-      }
-      setState(() => _secondsLeft--);
-      if (_secondsLeft <= 0) t.cancel();
-    });
-  }
-
-  String get _otpCode => _controllers.map((TextEditingController c) => c.text).join();
-
-  Future<void> _resendOtp() async {
-    try {
-      final String newRef = await ref
-          .read(authControllerProvider.notifier)
-          .requestOtp(phoneNumber: widget.phoneNumber, purpose: widget.purpose);
-      setState(() {
-        _otpRef = newRef;
-        _error = null;
-      });
-      _startResendCooldown();
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Code sent')),
-      );
-    } on AppException catch (e) {
-      setState(() => _error = e.message);
-    }
-  }
+  String get _otpCode =>
+      _controllers.map((TextEditingController c) => c.text).join();
 
   Future<void> _verify() async {
+    if (widget.userId.isEmpty) {
+      setState(() => _error = 'Missing verification details. Please register again.');
+      return;
+    }
+
     if (_otpCode.length < AppConstants.otpLength) {
       setState(() => _error = 'Please enter the full code');
       return;
@@ -111,39 +70,13 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
     });
 
     try {
-      final AuthController ctrl = ref.read(authControllerProvider.notifier);
-      if (widget.purpose == 'registration') {
-        await ctrl.register(
-          phoneNumber: widget.phoneNumber,
-          firstName: widget.firstName ?? '',
-          lastName: widget.lastName ?? '',
-          otpCode: _otpCode,
-          otpReference: _otpRef,
-          email: widget.email,
-        );
-      } else {
-        await ctrl.loginWithOtp(
-          phoneNumber: widget.phoneNumber,
-          otpCode: _otpCode,
-          otpReference: _otpRef,
-        );
-      }
+      await ref.read(authControllerProvider.notifier).verifyOtp(
+            userId: widget.userId,
+            otpCode: _otpCode,
+          );
 
       if (!mounted) return;
-
-      // The router's redirect will pick up the new auth state and send us home.
-      final AsyncValue<AuthState> auth = ref.read(authControllerProvider);
-      auth.whenOrNull(
-        error: (Object error, _) {
-          setState(() =>
-              _error = error is AppException ? error.message : 'Login failed');
-        },
-        data: (AuthState s) {
-          if (s.isAuthenticated) {
-            context.go('/home');
-          }
-        },
-      );
+      context.go('/home');
     } on AppException catch (e) {
       setState(() => _error = e.message);
     } catch (_) {
@@ -165,7 +98,7 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
             children: <Widget>[
               const SizedBox(height: 20),
               Text(
-                'Verify your number',
+                'Verify your account',
                 style: Theme.of(context).textTheme.displaySmall?.copyWith(
                       fontWeight: FontWeight.bold,
                     ),
@@ -174,14 +107,21 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
               Text.rich(
                 TextSpan(
                   children: <InlineSpan>[
-                    const TextSpan(text: 'We sent a 6-digit code to '),
+                    const TextSpan(text: 'Enter the 6-digit code sent to '),
                     TextSpan(
-                      text: widget.phoneNumber,
+                      text: widget.contact,
                       style: const TextStyle(fontWeight: FontWeight.w600),
                     ),
                   ],
                 ),
                 style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'If you did not receive the code, go back and try registering again.',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
               ),
@@ -202,18 +142,18 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
                       inputFormatters: <TextInputFormatter>[
                         FilteringTextInputFormatter.digitsOnly,
                       ],
-                      decoration: const InputDecoration(
-                        counterText: '',
-                      ),
+                      decoration: const InputDecoration(counterText: ''),
                       onChanged: (String value) {
-                        if (value.isNotEmpty && i < AppConstants.otpLength - 1) {
+                        if (value.isNotEmpty &&
+                            i < AppConstants.otpLength - 1) {
                           _focusNodes[i + 1].requestFocus();
                         } else if (value.isEmpty && i > 0) {
                           _focusNodes[i - 1].requestFocus();
                         }
+
                         if (_otpCode.length == AppConstants.otpLength) {
                           FocusScope.of(context).unfocus();
-                          _verify();
+                          unawaited(_verify());
                         }
                       },
                     ),
@@ -233,20 +173,6 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
                 label: 'Verify',
                 loading: _submitting,
                 onPressed: _verify,
-              ),
-              const SizedBox(height: 16),
-              Center(
-                child: _secondsLeft > 0
-                    ? Text(
-                        'Resend code in ${_secondsLeft}s',
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              color: Theme.of(context).colorScheme.onSurfaceVariant,
-                            ),
-                      )
-                    : TextButton(
-                        onPressed: _resendOtp,
-                        child: const Text('Resend code'),
-                      ),
               ),
             ],
           ),

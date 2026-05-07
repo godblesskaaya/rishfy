@@ -1,5 +1,3 @@
-import 'package:uuid/uuid.dart';
-
 import '../../../../core/constants/app_logger.dart';
 import '../../../../core/storage/secure_storage.dart';
 import '../../domain/entities/user.dart';
@@ -18,29 +16,13 @@ class AuthRepositoryImpl implements AuthRepository {
   final SecureStorage _storage;
 
   @override
-  Future<String> requestOtp({
-    required String phoneNumber,
-    required String purpose,
+  Future<AuthSession> login({
+    required String identifier,
+    required String password,
   }) async {
-    final OtpRequestResponseDto response = await _remote.requestOtp(
-      phoneNumber: phoneNumber,
-      purpose: purpose,
-    );
-    return response.otpReference;
-  }
-
-  @override
-  Future<AuthSession> verifyOtp({
-    required String phoneNumber,
-    required String otpCode,
-    required String otpReference,
-  }) async {
-    final String deviceId = await _ensureDeviceId();
-    final LoginResponseDto response = await _remote.verifyOtp(
-      phoneNumber: phoneNumber,
-      otpCode: otpCode,
-      otpReference: otpReference,
-      deviceId: deviceId,
+    final LoginResponseDto response = await _remote.login(
+      identifier: identifier,
+      password: password,
     );
 
     final AuthSession session = _toSession(response);
@@ -49,23 +31,37 @@ class AuthRepositoryImpl implements AuthRepository {
   }
 
   @override
-  Future<AuthSession> register({
+  Future<PendingRegistration> register({
     required String phoneNumber,
-    required String firstName,
-    required String lastName,
-    required String otpCode,
-    required String otpReference,
+    required String password,
+    String? fullName,
     String? email,
   }) async {
-    final String deviceId = await _ensureDeviceId();
-    final LoginResponseDto response = await _remote.register(
+    final RegistrationResponseDto response = await _remote.register(
       phoneNumber: phoneNumber,
-      firstName: firstName,
-      lastName: lastName,
-      otpCode: otpCode,
-      otpReference: otpReference,
-      deviceId: deviceId,
+      password: password,
+      fullName: fullName,
       email: email,
+    );
+
+    return PendingRegistration(
+      userId: response.user.userId,
+      phoneNumber: response.user.phoneNumber.isEmpty
+          ? phoneNumber
+          : response.user.phoneNumber,
+      email: response.user.email ?? email,
+      expiresAt: response.otpExpiresAt,
+    );
+  }
+
+  @override
+  Future<AuthSession> verifyOtp({
+    required String userId,
+    required String otpCode,
+  }) async {
+    final LoginResponseDto response = await _remote.verifyOtp(
+      userId: userId,
+      otpCode: otpCode,
     );
 
     final AuthSession session = _toSession(response);
@@ -76,25 +72,35 @@ class AuthRepositoryImpl implements AuthRepository {
   @override
   Future<AuthSession?> refreshSession() async {
     final String? refreshToken = await _storage.readRefreshToken();
-    final String? userId = await _storage.readUserId();
-    if (refreshToken == null || userId == null) {
+    if (refreshToken == null) {
       return null;
     }
 
     try {
-      final String deviceId = await _ensureDeviceId();
-      final AuthTokensDto tokens = await _remote.refresh(
+      final RefreshResponseDto response = await _remote.refresh(
         refreshToken: refreshToken,
-        deviceId: deviceId,
       );
 
-      await _storage.writeAccessToken(tokens.accessToken);
-      await _storage.writeRefreshToken(tokens.refreshToken);
+      await _storage.writeAccessToken(response.tokens.accessToken);
+      await _storage.writeRefreshToken(response.tokens.refreshToken);
 
-      // For refresh, we don't have the full user object — callers should
-      // reuse the existing user and just update tokens. Return null to signal
-      // that the controller should rebuild from storage.
-      return null;
+      if (response.user == null) {
+        return null;
+      }
+
+      final AuthSession current = await _requireCachedSession();
+      final AuthSession refreshed = AuthSession(
+        accessToken: response.tokens.accessToken,
+        refreshToken: response.tokens.refreshToken,
+        expiresAt: response.tokens.expiresAt,
+        user: response.user!.toDomain().copyWith(
+              phoneNumber: response.user!.phoneNumber.isEmpty
+                  ? current.user.phoneNumber
+                  : response.user!.phoneNumber,
+            ),
+      );
+      await _persist(refreshed);
+      return refreshed;
     } catch (e, s) {
       AppLogger.error('Refresh failed', error: e, stackTrace: s);
       return null;
@@ -120,18 +126,13 @@ class AuthRepositoryImpl implements AuthRepository {
       return null;
     }
 
-    // We don't cache the full user object locally; it's re-fetched by the
-    // user-service on app start via the profile endpoint. Return a minimal
-    // session here — the controller will refresh user data.
     return AuthSession(
       accessToken: accessToken,
       refreshToken: refreshToken,
-      // Expiry is unknown without parsing the JWT; assume valid and let the
-      // AuthInterceptor trigger refresh on 401.
       expiresAt: DateTime.now().add(const Duration(minutes: 15)),
       user: User(
         userId: userId,
-        phoneNumber: '', // Filled in by profile fetch
+        phoneNumber: '',
         firstName: '',
         lastName: '',
         role: UserRole.passenger,
@@ -140,20 +141,12 @@ class AuthRepositoryImpl implements AuthRepository {
     );
   }
 
-  @override
-  Future<bool> phoneExists(String phoneNumber) {
-    return _remote.checkPhoneExists(phoneNumber);
-  }
-
-  // ---------------- helpers ----------------
-
-  Future<String> _ensureDeviceId() async {
-    String? id = await _storage.readDeviceId();
-    if (id == null || id.isEmpty) {
-      id = const Uuid().v4();
-      await _storage.writeDeviceId(id);
+  Future<AuthSession> _requireCachedSession() async {
+    final AuthSession? session = await getCurrentSession();
+    if (session == null) {
+      throw StateError('No cached session available during refresh.');
     }
-    return id;
+    return session;
   }
 
   AuthSession _toSession(LoginResponseDto dto) {

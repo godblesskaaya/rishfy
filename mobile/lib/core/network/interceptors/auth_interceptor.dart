@@ -14,7 +14,7 @@ class AuthInterceptor extends Interceptor {
 
   final Ref _ref;
 
-  // Avoid refresh storm — if multiple requests fail at the same time, only one
+  // Avoid refresh storm â€” if multiple requests fail at the same time, only one
   // should trigger a refresh; the rest wait for it.
   static bool _isRefreshing = false;
   static final List<RequestOptions> _queue = <RequestOptions>[];
@@ -51,7 +51,7 @@ class AuthInterceptor extends Interceptor {
     }
 
     // Prevent retrying a refresh endpoint itself
-    if (err.requestOptions.path.contains('/auth/refresh')) {
+    if (err.requestOptions.path.contains('/auth/refresh-token')) {
       await _logout();
       return handler.next(err);
     }
@@ -76,7 +76,7 @@ class AuthInterceptor extends Interceptor {
 
       // Retry the original request with the new token
       final Response<dynamic> retried = await _retry(err.requestOptions);
-      _processQueue();
+      await _processQueue();
       return handler.resolve(retried);
     } catch (e, s) {
       AppLogger.error('Token refresh failed', error: e, stackTrace: s);
@@ -108,7 +108,7 @@ class AuthInterceptor extends Interceptor {
   }
 
   Future<void> _processQueue() async {
-    // Drain queued requests — in practice they will be re-fired by their
+    // Drain queued requests â€” in practice they will be re-fired by their
     // original callers once the refresh unblocks them. We just clear the list.
     _queue.clear();
   }
@@ -121,8 +121,8 @@ class AuthInterceptor extends Interceptor {
     const List<String> publicPaths = <String>[
       '/api/v1/auth/login',
       '/api/v1/auth/register',
-      '/api/v1/auth/otp',
-      '/api/v1/auth/refresh',
+      '/api/v1/auth/verify-otp',
+      '/api/v1/auth/refresh-token',
     ];
     return publicPaths.any((String p) => path.contains(p));
   }

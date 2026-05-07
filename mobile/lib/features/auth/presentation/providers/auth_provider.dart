@@ -8,10 +8,6 @@ import '../../data/repositories/auth_repository_impl.dart';
 import '../../domain/entities/user.dart';
 import '../../domain/repositories/auth_repository.dart';
 
-// ============================================================================
-// State
-// ============================================================================
-
 /// Immutable auth state. Held by [AuthController].
 class AuthState {
   const AuthState({
@@ -47,10 +43,6 @@ class AuthState {
   }
 }
 
-// ============================================================================
-// DI
-// ============================================================================
-
 final Provider<AuthRemoteDataSource> authRemoteDataSourceProvider =
     Provider<AuthRemoteDataSource>((Ref ref) {
   return AuthRemoteDataSource(ref.read(dioClientProvider));
@@ -64,10 +56,6 @@ final Provider<AuthRepository> authRepositoryProvider =
   );
 });
 
-// ============================================================================
-// Controller
-// ============================================================================
-
 final AsyncNotifierProvider<AuthController, AuthState> authControllerProvider =
     AsyncNotifierProvider<AuthController, AuthState>(AuthController.new);
 
@@ -80,7 +68,6 @@ class AuthController extends AsyncNotifier<AuthState> {
     return _bootstrap();
   }
 
-  /// Check for persisted session on app start.
   Future<AuthState> _bootstrap() async {
     try {
       final AuthSession? session = await _repo.getCurrentSession();
@@ -94,64 +81,52 @@ class AuthController extends AsyncNotifier<AuthState> {
     }
   }
 
-  // --------------------------- Flows ---------------------------------------
-
-  /// Returns the OTP reference ID.
-  Future<String> requestOtp({
-    required String phoneNumber,
-    required String purpose,
+  Future<void> login({
+    required String identifier,
+    required String password,
   }) async {
-    return _repo.requestOtp(phoneNumber: phoneNumber, purpose: purpose);
+    state = const AsyncValue<AuthState>.loading();
+    state = await AsyncValue.guard(() async {
+      final AuthSession session = await _repo.login(
+        identifier: identifier,
+        password: password,
+      );
+      return AuthState.authenticated(session);
+    });
   }
 
-  /// Login by OTP. Updates [state] on success.
-  Future<void> loginWithOtp({
+  Future<PendingRegistration> register({
     required String phoneNumber,
+    required String password,
+    String? fullName,
+    String? email,
+  }) {
+    return _repo.register(
+      phoneNumber: phoneNumber,
+      password: password,
+      fullName: fullName,
+      email: email,
+    );
+  }
+
+  Future<void> verifyOtp({
+    required String userId,
     required String otpCode,
-    required String otpReference,
   }) async {
     state = const AsyncValue<AuthState>.loading();
     state = await AsyncValue.guard(() async {
       final AuthSession session = await _repo.verifyOtp(
-        phoneNumber: phoneNumber,
+        userId: userId,
         otpCode: otpCode,
-        otpReference: otpReference,
       );
       return AuthState.authenticated(session);
     });
   }
 
-  /// Register a new user. Updates [state] on success.
-  Future<void> register({
-    required String phoneNumber,
-    required String firstName,
-    required String lastName,
-    required String otpCode,
-    required String otpReference,
-    String? email,
-  }) async {
-    state = const AsyncValue<AuthState>.loading();
-    state = await AsyncValue.guard(() async {
-      final AuthSession session = await _repo.register(
-        phoneNumber: phoneNumber,
-        firstName: firstName,
-        lastName: lastName,
-        otpCode: otpCode,
-        otpReference: otpReference,
-        email: email,
-      );
-      return AuthState.authenticated(session);
-    });
-  }
-
-  /// Refresh tokens using the stored refresh token.
-  /// Returns true on success.
   Future<bool> refreshSession() async {
     try {
       final AuthSession? newSession = await _repo.refreshSession();
       if (newSession == null) {
-        // Token refresh updated storage but didn't return a full session —
-        // keep current user, just mark authenticated.
         return state.valueOrNull?.isAuthenticated ?? false;
       }
       state = AsyncValue<AuthState>.data(AuthState.authenticated(newSession));
@@ -162,7 +137,6 @@ class AuthController extends AsyncNotifier<AuthState> {
     }
   }
 
-  /// User-initiated logout.
   Future<void> logout() async {
     state = const AsyncValue<AuthState>.loading();
     try {
@@ -172,14 +146,11 @@ class AuthController extends AsyncNotifier<AuthState> {
     }
   }
 
-  /// Forced logout — triggered by the AuthInterceptor after refresh failure.
-  /// Does NOT call the server (that would just fail again); just clears local state.
   Future<void> forceLogout() async {
     state = const AsyncValue<AuthState>.data(AuthState.unauthenticated());
     await ref.read(secureStorageProvider).clear();
   }
 
-  /// Update the cached user (e.g., after profile edit).
   void updateUser(User updatedUser) {
     final AuthState? current = state.valueOrNull;
     if (current?.session == null) return;
@@ -194,16 +165,10 @@ class AuthController extends AsyncNotifier<AuthState> {
   }
 }
 
-// ============================================================================
-// Convenience selectors
-// ============================================================================
-
-/// Current authenticated user, or null if unauthenticated.
 final Provider<User?> currentUserProvider = Provider<User?>((Ref ref) {
   return ref.watch(authControllerProvider).valueOrNull?.user;
 });
 
-/// True if user can switch between passenger and driver roles.
 final Provider<bool> canSwitchRolesProvider = Provider<bool>((Ref ref) {
   final User? user = ref.watch(currentUserProvider);
   return user?.canSwitchRoles ?? false;
