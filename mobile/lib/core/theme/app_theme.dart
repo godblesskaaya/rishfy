@@ -61,7 +61,6 @@ class AppTheme {
       useMaterial3: true,
       colorScheme: scheme,
       scaffoldBackgroundColor: background,
-      fontFamily: 'Inter',
       visualDensity: VisualDensity.standard,
 
       // ---- AppBar ----
@@ -73,7 +72,6 @@ class AppTheme {
         centerTitle: false,
         titleTextStyle: TextStyle(
           color: scheme.onSurface,
-          fontFamily: 'Inter',
           fontWeight: FontWeight.w600,
           fontSize: 18,
         ),
@@ -158,7 +156,7 @@ class AppTheme {
       ),
 
       // ---- Cards ----
-      cardTheme: CardTheme(
+      cardTheme: CardThemeData(
         color: scheme.surface,
         elevation: 0,
         margin: EdgeInsets.zero,

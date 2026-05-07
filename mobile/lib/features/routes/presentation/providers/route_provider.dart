@@ -77,7 +77,7 @@ final FutureProviderFamily<RouteEntity, String> routeDetailProvider =
 
 // ---- Driver vehicles (for route posting) ----
 
-final FutureProvider<List<DriverVehicleOption>> myVehicleOptionsProvider =
+final myVehicleOptionsProvider =
     FutureProvider.autoDispose<List<DriverVehicleOption>>((Ref ref) async {
   final RouteRemoteDataSource ds = ref.read(routeDataSourceProvider);
   return ds.listMyVehicles();
@@ -110,8 +110,7 @@ class CreateRouteState {
       );
 }
 
-final StateNotifierProvider.autoDispose<CreateRouteNotifier, CreateRouteState>
-    createRouteProvider =
+final createRouteProvider =
     StateNotifierProvider.autoDispose<CreateRouteNotifier, CreateRouteState>(
   (Ref ref) => CreateRouteNotifier(ref.read(routeDataSourceProvider)),
 );

@@ -37,12 +37,11 @@ class Env {
     // Fallback to hardcoded defaults in debug mode so fresh checkouts work.
     Map<String, String> values = <String, String>{};
     try {
-      final String raw =
-          await rootBundle.loadString('assets/env/$env.env');
+      final String raw = await rootBundle.loadString('assets/env/$env.env');
       values = _parseEnv(raw);
     } catch (_) {
       if (kDebugMode) {
-        debugPrint('⚠️  No env file for "$env", using dev defaults');
+        debugPrint('No env file for "$env", using dev defaults');
       }
       values = _devDefaults();
     }
@@ -54,7 +53,7 @@ class Env {
     _enableCrashReporting = values['ENABLE_CRASH_REPORTING'] == 'true';
   }
 
-  /// Development defaults — matches docker-compose stack on host machine.
+  /// Development defaults match docker-compose stack on host machine.
   /// 10.0.2.2 is Android emulator's alias for host's localhost.
   /// For iOS simulator, use 'localhost' instead.
   static Map<String, String> _devDefaults() {

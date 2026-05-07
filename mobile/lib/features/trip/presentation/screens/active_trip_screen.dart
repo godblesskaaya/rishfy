@@ -6,7 +6,6 @@ import 'package:intl/intl.dart';
 
 import '../../../../core/constants/app_constants.dart';
 import '../../../../shared/widgets/primary_button.dart';
-import '../../../bookings/data/datasources/booking_remote_datasource.dart';
 import '../../../bookings/domain/entities/booking_entity.dart';
 import '../../../bookings/presentation/providers/booking_provider.dart';
 import '../../data/models/location_models.dart';

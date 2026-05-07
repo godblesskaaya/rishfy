@@ -8,6 +8,7 @@ import 'package:uuid/uuid.dart';
 
 import '../../../../core/constants/app_constants.dart';
 import '../../../../shared/widgets/primary_button.dart';
+import '../../../auth/domain/entities/user.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import '../../../routes/domain/entities/route_entity.dart';
 import '../../../routes/presentation/providers/route_provider.dart';

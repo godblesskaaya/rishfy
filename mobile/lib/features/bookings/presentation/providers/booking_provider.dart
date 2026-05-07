@@ -41,8 +41,7 @@ class CreateBookingState {
       );
 }
 
-final StateNotifierProvider<CreateBookingNotifier, CreateBookingState>
-    createBookingProvider =
+final createBookingProvider =
     StateNotifierProvider.autoDispose<CreateBookingNotifier,
         CreateBookingState>(
   (Ref ref) => CreateBookingNotifier(ref.read(bookingDataSourceProvider)),

@@ -75,7 +75,7 @@ class ErrorInterceptor extends Interceptor {
       case 502:
       case 503:
       case 504:
-        return ServerException(message: message, statusCode: status);
+        return ServerException(message: message, statusCode: status ?? 500);
       default:
         return ServerException(
           message: message,
