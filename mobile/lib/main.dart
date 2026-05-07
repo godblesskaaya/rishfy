@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -9,9 +8,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'app.dart';
 import 'core/config/env.dart';
+import 'core/config/firebase_bootstrap.dart';
 import 'core/constants/app_logger.dart';
 
 Future<void> main() async {
+  var crashReportingEnabled = false;
+
   // Run in a guarded zone to capture all async errors
   runZonedGuarded<Future<void>>(() async {
     WidgetsFlutterBinding.ensureInitialized();
@@ -24,16 +26,8 @@ Future<void> main() async {
     // Load environment config (dev/staging/prod selected at build time)
     await Env.load();
 
-    // Firebase (skip on web for now)
-    if (!kIsWeb) {
-      await Firebase.initializeApp();
-
-      if (kReleaseMode) {
-        // Forward Flutter errors to Crashlytics in release builds
-        FlutterError.onError =
-            FirebaseCrashlytics.instance.recordFlutterFatalError;
-      }
-    }
+    final bool firebaseReady = await initializeFirebaseIfConfigured();
+    crashReportingEnabled = firebaseReady && Env.enableCrashReporting;
 
     // Global error logger
     FlutterError.onError = (FlutterErrorDetails details) {
@@ -42,7 +36,7 @@ Future<void> main() async {
         error: details.exception,
         stackTrace: details.stack,
       );
-      if (kReleaseMode) {
+      if (kReleaseMode && crashReportingEnabled) {
         FirebaseCrashlytics.instance.recordFlutterFatalError(details);
       } else {
         FlutterError.presentError(details);
@@ -56,7 +50,8 @@ Future<void> main() async {
     );
   }, (Object error, StackTrace stack) {
     AppLogger.error('Uncaught zone error', error: error, stackTrace: stack);
-    if (kReleaseMode) {
+    if (kReleaseMode && crashReportingEnabled) {
+      // Skip Crashlytics when Firebase could not initialize for this build.
       FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
     }
   });

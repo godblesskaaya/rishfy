@@ -130,8 +130,8 @@ Env files live in `assets/env/`. Keys:
 ## Firebase Setup
 
 1. Create a Firebase project at https://console.firebase.google.com
-2. Add Android app with package `tz.rishfy.app`, download `google-services.json` → `android/app/`
-3. Add iOS app with bundle ID `tz.rishfy.app`, download `GoogleService-Info.plist` → `ios/Runner/`
+2. Add Android app with package `com.blenko.rishfy`, download `google-services.json` → `android/app/`
+3. Add iOS app with bundle ID `com.blenko.rishfy`, download `GoogleService-Info.plist` → `ios/Runner/`
 4. Enable **Cloud Messaging**, **Analytics**, **Crashlytics**
 
 For each environment, you can either use a separate Firebase project or switch at build time via flavors (recommended post-MVP).

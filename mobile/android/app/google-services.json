@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "856157635501",
+    "project_id": "rishfy-a452c",
+    "storage_bucket": "rishfy-a452c.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:856157635501:android:f265e9848cb2ac0631d724",
+        "android_client_info": {
+          "package_name": "com.blenko.rishfy"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDpQZCPlUVWUpqtPnwv3agW_M9PgXuWF7Q"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

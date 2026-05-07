@@ -5,6 +5,7 @@ node_modules/
 # Build outputs
 dist/
 build/
+.gradle-user-home/
 *.tsbuildinfo
 **/*.js.map
 
@@ -49,3 +50,6 @@ shared/protos/generated/
 .testcontainers/
 .ssh-keys/
 team-ssh-keys.txt
+
+# omx files
+*.omx
