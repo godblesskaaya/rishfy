@@ -54,6 +54,14 @@ class SecureStorage {
   Future<String?> readUserId() =>
       _storage.read(key: AppConstants.keyUserId);
 
+  Future<void> writeUserSnapshot(String userSnapshot) => _storage.write(
+        key: AppConstants.keyUserSnapshot,
+        value: userSnapshot,
+      );
+
+  Future<String?> readUserSnapshot() =>
+      _storage.read(key: AppConstants.keyUserSnapshot);
+
   Future<void> writeDeviceId(String deviceId) =>
       _storage.write(key: AppConstants.keyDeviceId, value: deviceId);
 

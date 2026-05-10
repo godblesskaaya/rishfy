@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/constants/app_logger.dart';
 import '../../../../core/network/dio_client.dart';
 import '../../../../core/storage/secure_storage.dart';
+import '../../../profile/data/datasources/profile_remote_datasource.dart';
 import '../../data/datasources/auth_remote_datasource.dart';
 import '../../data/repositories/auth_repository_impl.dart';
 import '../../domain/entities/user.dart';
@@ -61,10 +64,12 @@ final AsyncNotifierProvider<AuthController, AuthState> authControllerProvider =
 
 class AuthController extends AsyncNotifier<AuthState> {
   late AuthRepository _repo;
+  late ProfileRemoteDataSource _profileRemote;
 
   @override
   Future<AuthState> build() async {
     _repo = ref.read(authRepositoryProvider);
+    _profileRemote = ref.read(profileRemoteDataSourceProvider);
     return _bootstrap();
   }
 
@@ -74,7 +79,8 @@ class AuthController extends AsyncNotifier<AuthState> {
       if (session == null) {
         return const AuthState.unauthenticated();
       }
-      return AuthState.authenticated(session);
+      final AuthSession hydrated = await _hydrateSession(session);
+      return AuthState.authenticated(hydrated);
     } catch (e, s) {
       AppLogger.error('Bootstrap failed', error: e, stackTrace: s);
       return const AuthState.unauthenticated();
@@ -85,14 +91,25 @@ class AuthController extends AsyncNotifier<AuthState> {
     required String identifier,
     required String password,
   }) async {
+    AppLogger.info('AuthController.login start for $identifier');
+    final AuthState previousState =
+        state.valueOrNull ?? const AuthState.unauthenticated();
     state = const AsyncValue<AuthState>.loading();
-    state = await AsyncValue.guard(() async {
+    try {
       final AuthSession session = await _repo.login(
         identifier: identifier,
         password: password,
       );
-      return AuthState.authenticated(session);
-    });
+      final AuthSession hydrated = await _hydrateSession(session);
+      AppLogger.info(
+        'AuthController.login success for ${hydrated.user.userId}',
+      );
+      state = AsyncValue<AuthState>.data(AuthState.authenticated(hydrated));
+    } catch (e, s) {
+      AppLogger.warn('AuthController.login failed', error: e, stackTrace: s);
+      state = AsyncValue<AuthState>.data(previousState);
+      Error.throwWithStackTrace(e, s);
+    }
   }
 
   Future<PendingRegistration> register({
@@ -113,23 +130,40 @@ class AuthController extends AsyncNotifier<AuthState> {
     required String userId,
     required String otpCode,
   }) async {
+    AppLogger.info('AuthController.verifyOtp start for $userId');
+    final AuthState previousState =
+        state.valueOrNull ?? const AuthState.unauthenticated();
     state = const AsyncValue<AuthState>.loading();
-    state = await AsyncValue.guard(() async {
+    try {
       final AuthSession session = await _repo.verifyOtp(
         userId: userId,
         otpCode: otpCode,
       );
-      return AuthState.authenticated(session);
-    });
+      final AuthSession hydrated = await _hydrateSession(session);
+      AppLogger.info(
+        'AuthController.verifyOtp success for ${hydrated.user.userId}',
+      );
+      state = AsyncValue<AuthState>.data(AuthState.authenticated(hydrated));
+    } catch (e, s) {
+      AppLogger.warn('AuthController.verifyOtp failed', error: e, stackTrace: s);
+      state = AsyncValue<AuthState>.data(previousState);
+      Error.throwWithStackTrace(e, s);
+    }
   }
 
   Future<bool> refreshSession() async {
     try {
+      AppLogger.info('AuthController.refreshSession start');
       final AuthSession? newSession = await _repo.refreshSession();
       if (newSession == null) {
+        AppLogger.warn('AuthController.refreshSession returned null');
         return state.valueOrNull?.isAuthenticated ?? false;
       }
-      state = AsyncValue<AuthState>.data(AuthState.authenticated(newSession));
+      final AuthSession hydrated = await _hydrateSession(newSession);
+      AppLogger.info(
+        'AuthController.refreshSession success for ${hydrated.user.userId}',
+      );
+      state = AsyncValue<AuthState>.data(AuthState.authenticated(hydrated));
       return true;
     } catch (e, s) {
       AppLogger.error('Session refresh failed', error: e, stackTrace: s);
@@ -140,15 +174,25 @@ class AuthController extends AsyncNotifier<AuthState> {
   Future<void> logout() async {
     state = const AsyncValue<AuthState>.loading();
     try {
+      AppLogger.info('AuthController.logout start');
       await _repo.logout();
     } finally {
+      AppLogger.info('AuthController.logout complete');
       state = const AsyncValue<AuthState>.data(AuthState.unauthenticated());
     }
   }
 
   Future<void> forceLogout() async {
+    AppLogger.warn('AuthController.forceLogout triggered');
     state = const AsyncValue<AuthState>.data(AuthState.unauthenticated());
     await ref.read(secureStorageProvider).clear();
+  }
+
+  Future<void> syncCurrentUser() async {
+    final AuthSession? session = state.valueOrNull?.session;
+    if (session == null) return;
+    final AuthSession hydrated = await _hydrateSession(session);
+    state = AsyncValue<AuthState>.data(AuthState.authenticated(hydrated));
   }
 
   void updateUser(User updatedUser) {
@@ -161,7 +205,28 @@ class AuthController extends AsyncNotifier<AuthState> {
       expiresAt: current.session!.expiresAt,
       user: updatedUser,
     );
+    unawaited(_repo.cacheUser(updatedUser));
     state = AsyncValue<AuthState>.data(AuthState.authenticated(newSession));
+  }
+
+  Future<AuthSession> _hydrateSession(AuthSession session) async {
+    try {
+      final User currentUser = await _profileRemote.getCurrentUser();
+      await _repo.cacheUser(currentUser);
+      return AuthSession(
+        accessToken: session.accessToken,
+        refreshToken: session.refreshToken,
+        expiresAt: session.expiresAt,
+        user: currentUser,
+      );
+    } catch (error, stackTrace) {
+      AppLogger.warn(
+        'AuthController._hydrateSession fell back to auth payload user',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      return session;
+    }
   }
 }
 

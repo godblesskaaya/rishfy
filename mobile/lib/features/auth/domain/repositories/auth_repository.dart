@@ -32,4 +32,7 @@ abstract class AuthRepository {
 
   /// Get the current cached session, if any.
   Future<AuthSession?> getCurrentSession();
+
+  /// Update the cached user profile without changing stored tokens.
+  Future<void> cacheUser(User user);
 }

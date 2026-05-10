@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../core/constants/app_constants.dart';
+import '../../../auth/domain/entities/user.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 
 class ProfileScreen extends ConsumerWidget {
@@ -11,6 +12,9 @@ class ProfileScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final user = ref.watch(currentUserProvider);
+    final bool isDriver = user?.role == UserRole.driver;
+    final String vehicleTitle =
+        isDriver ? 'My vehicles' : 'Become a driver & vehicles';
 
     return Scaffold(
       appBar: AppBar(title: const Text('Profile')),
@@ -53,9 +57,9 @@ class ProfileScreen extends ConsumerWidget {
           ),
           ListTile(
             leading: const Icon(Icons.directions_car_outlined),
-            title: const Text('My vehicles'),
+            title: Text(vehicleTitle),
             trailing: const Icon(Icons.chevron_right),
-            onTap: () {},
+            onTap: () => context.push('/profile/vehicles'),
           ),
           ListTile(
             leading: const Icon(Icons.emergency_outlined),

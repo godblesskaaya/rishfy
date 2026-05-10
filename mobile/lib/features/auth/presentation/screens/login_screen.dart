@@ -46,12 +46,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             identifier: fullPhone,
             password: _passwordCtrl.text,
           );
-
       if (!mounted) return;
       context.go('/home');
     } on AppException catch (e) {
+      if (!mounted) return;
       setState(() => _error = e.message);
     } catch (_) {
+      if (!mounted) return;
       setState(() => _error = 'Something went wrong. Please try again.');
     } finally {
       if (mounted) {

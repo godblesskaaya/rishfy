@@ -23,6 +23,65 @@ Total: **200+ files, ~25,000 lines** of carefully-designed foundation across bac
 
 ---
 
+## Current Snapshot (2026-05-10)
+
+Use this section first if you are joining mid-stream and need the current
+state before reading deeper docs.
+
+### Repo-wide status
+
+- Infrastructure and service scaffolding are still the intended foundation.
+- Mobile is the most actively changing area right now.
+- Current mobile work has moved beyond launch/setup and into real on-device
+  feature iteration on a physical Android device.
+
+### Mobile changes recently landed
+
+- Auth/session persistence was improved so the app can cache richer user data
+  locally instead of reconstructing a blank passenger user on startup.
+- Active passenger/driver role is now persisted locally.
+- Driver setup work was added in-app:
+  - become-driver flow
+  - vehicle management screen
+  - route-posting handoff into vehicle setup
+- Route search was upgraded from raw text-only entry to a GIS-aware flow:
+  - embedded Google Map
+  - current-location action
+  - map tap selection
+  - reverse geocoding into the search form
+  - coordinate-backed route search parameters
+- Android Google Maps manifest wiring was fixed so the app no longer ships an
+  empty `MAPS_API_KEY` placeholder.
+
+### Verified mobile behavior
+
+- App builds and installs successfully on Android debug builds.
+- Unit tests for auth controller pass.
+- The Search screen now renders a live Google Map on-device.
+- "Use current location" successfully populates the origin field with a
+  reverse-geocoded location on-device.
+
+### Known blockers separated by owner
+
+- Backend blockers:
+  - route search fails because the backend reports `relation "routes" does not exist`
+  - vehicle loading for `/api/v1/users/me/vehicles` is still unreliable/failing
+  - `/api/v1/users/me` appears to return incomplete profile data for display names
+- App-side follow-up:
+  - home/profile still often show empty user names
+  - search/backend error states still need polish
+  - vehicle error/empty states still need polish
+  - several profile/passenger quick actions are still placeholders
+
+### Recommended catch-up order for developers
+
+1. Read this section.
+2. Read [mobile/README.md](mobile/README.md) "Current Mobile Status".
+3. Check `git status` and current mobile diffs before touching auth, routes, or profile.
+4. Confirm whether your task belongs to the backend blocker lane or the app lane.
+
+---
+
 ## Day 1 Checklist (Each Developer)
 
 ### 1. Machine Setup (30 min)

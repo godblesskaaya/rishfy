@@ -43,6 +43,7 @@ class AppConstants {
   static const String keyAccessToken = 'access_token';
   static const String keyRefreshToken = 'refresh_token';
   static const String keyUserId = 'user_id';
+  static const String keyUserSnapshot = 'user_snapshot';
   static const String keyDeviceId = 'device_id';
   static const String keyActiveRole = 'active_role';
   static const String keyLocale = 'locale';

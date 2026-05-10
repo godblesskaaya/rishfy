@@ -31,8 +31,14 @@ class RouteRemoteDataSource {
   }
 
   Future<List<RouteDto>> searchRoutes(RouteSearchParams params) async {
-    final _LatLng origin = _resolveLocation(params.origin);
-    final _LatLng destination = _resolveLocation(params.destination);
+    final _LatLng origin =
+        params.originLatitude != null && params.originLongitude != null
+            ? _LatLng(params.originLatitude!, params.originLongitude!)
+            : _resolveLocation(params.origin);
+    final _LatLng destination = params.destinationLatitude != null &&
+            params.destinationLongitude != null
+        ? _LatLng(params.destinationLatitude!, params.destinationLongitude!)
+        : _resolveLocation(params.destination);
 
     final Response<Map<String, dynamic>> res =
         await _dio.get<Map<String, dynamic>>(

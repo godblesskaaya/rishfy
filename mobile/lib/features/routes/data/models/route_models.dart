@@ -150,12 +150,20 @@ class RouteSearchParams {
     required this.destination,
     required this.departureDate,
     required this.seats,
+    this.originLatitude,
+    this.originLongitude,
+    this.destinationLatitude,
+    this.destinationLongitude,
   });
 
   final String origin;
   final String destination;
   final DateTime departureDate;
   final int seats;
+  final double? originLatitude;
+  final double? originLongitude;
+  final double? destinationLatitude;
+  final double? destinationLongitude;
 }
 
 class CreateRouteRequest {

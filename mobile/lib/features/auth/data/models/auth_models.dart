@@ -238,3 +238,19 @@ num? _readNum(Map<String, dynamic> json, List<String> keys) {
   }
   return null;
 }
+
+Map<String, dynamic> userToStorageJson(User user) {
+  return <String, dynamic>{
+    'userId': user.userId,
+    'phoneNumber': user.phoneNumber,
+    'firstName': user.firstName,
+    'lastName': user.lastName,
+    'email': user.email,
+    'profilePictureUrl': user.profilePictureUrl,
+    'role': user.role.name,
+    'isVerified': user.isVerified,
+    'ratingAverage': user.ratingAverage,
+    'ratingCount': user.ratingCount,
+    'language': user.language,
+  };
+}

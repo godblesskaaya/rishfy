@@ -308,6 +308,21 @@ class _PostRouteScreenState extends ConsumerState<PostRouteScreen> {
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
               ],
+              if (vehicleOptions.isEmpty && !vehiclesAsync.isLoading) ...<Widget>[
+                const SizedBox(height: 8),
+                Text(
+                  'No vehicles found on your driver profile yet.',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: () => context.push('/profile/vehicles'),
+                    icon: const Icon(Icons.directions_car_outlined),
+                    label: const Text('Open vehicle setup'),
+                  ),
+                ),
+              ],
               if (vehiclesAsync.hasError) ...<Widget>[
                 const SizedBox(height: 8),
                 Text(

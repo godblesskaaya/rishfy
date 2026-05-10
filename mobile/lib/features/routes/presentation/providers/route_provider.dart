@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/network/dio_client.dart';
+import '../../data/datasources/location_search_remote_datasource.dart';
 import '../../data/datasources/route_remote_datasource.dart';
 import '../../data/models/route_models.dart';
 import '../../domain/entities/route_entity.dart';
@@ -8,6 +9,11 @@ import '../../domain/entities/route_entity.dart';
 final Provider<RouteRemoteDataSource> routeDataSourceProvider =
     Provider<RouteRemoteDataSource>(
   (Ref ref) => RouteRemoteDataSource(ref.read(dioClientProvider)),
+);
+
+final Provider<LocationSearchRemoteDataSource> locationSearchDataSourceProvider =
+    Provider<LocationSearchRemoteDataSource>(
+  (Ref ref) => LocationSearchRemoteDataSource(ref.read(dioClientProvider)),
 );
 
 // ---- Search state ----

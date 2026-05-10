@@ -1,10 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../core/constants/app_constants.dart';
+import '../../../../shared/providers/active_role_provider.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
-import '../../../../shared/providers/locale_provider.dart';
 
 class PassengerHomeScreen extends ConsumerWidget {
   const PassengerHomeScreen({super.key});
@@ -74,7 +76,11 @@ class PassengerHomeScreen extends ConsumerWidget {
                           label: 'Driver',
                           selected: false,
                           onTap: () {
-                            ref.read(activeRoleProvider.notifier).state = 'driver';
+                            unawaited(
+                              ref
+                                  .read(activeRoleProvider.notifier)
+                                  .setRole('driver'),
+                            );
                           },
                         ),
                       ),

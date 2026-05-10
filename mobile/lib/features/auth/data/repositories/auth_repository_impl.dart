@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import '../../../../core/constants/app_logger.dart';
 import '../../../../core/storage/secure_storage.dart';
 import '../../domain/entities/user.dart';
@@ -20,6 +22,7 @@ class AuthRepositoryImpl implements AuthRepository {
     required String identifier,
     required String password,
   }) async {
+    AppLogger.info('AuthRepository.login request for $identifier');
     final LoginResponseDto response = await _remote.login(
       identifier: identifier,
       password: password,
@@ -27,6 +30,9 @@ class AuthRepositoryImpl implements AuthRepository {
 
     final AuthSession session = _toSession(response);
     await _persist(session);
+    AppLogger.info(
+      'AuthRepository.login persisted session for ${session.user.userId}',
+    );
     return session;
   }
 
@@ -73,6 +79,7 @@ class AuthRepositoryImpl implements AuthRepository {
   Future<AuthSession?> refreshSession() async {
     final String? refreshToken = await _storage.readRefreshToken();
     if (refreshToken == null) {
+      AppLogger.warn('AuthRepository.refreshSession missing refresh token');
       return null;
     }
 
@@ -121,24 +128,47 @@ class AuthRepositoryImpl implements AuthRepository {
     final String? accessToken = await _storage.readAccessToken();
     final String? refreshToken = await _storage.readRefreshToken();
     final String? userId = await _storage.readUserId();
+    final String? cachedUserSnapshot = await _storage.readUserSnapshot();
 
     if (accessToken == null || refreshToken == null || userId == null) {
+      AppLogger.info('AuthRepository.getCurrentSession cache miss');
       return null;
     }
 
+    User restoredUser;
+    if (cachedUserSnapshot != null && cachedUserSnapshot.isNotEmpty) {
+      try {
+        final Object? raw = jsonDecode(cachedUserSnapshot);
+        if (raw is Map<String, dynamic>) {
+          restoredUser = UserDto.fromJson(raw).toDomain();
+        } else {
+          restoredUser = _fallbackCachedUser(userId);
+        }
+      } catch (error, stackTrace) {
+        AppLogger.warn(
+          'AuthRepository.getCurrentSession failed to decode cached user',
+          error: error,
+          stackTrace: stackTrace,
+        );
+        restoredUser = _fallbackCachedUser(userId);
+      }
+    } else {
+      restoredUser = _fallbackCachedUser(userId);
+    }
+
+    AppLogger.info('AuthRepository.getCurrentSession cache hit for $userId');
     return AuthSession(
       accessToken: accessToken,
       refreshToken: refreshToken,
       expiresAt: DateTime.now().add(const Duration(minutes: 15)),
-      user: User(
-        userId: userId,
-        phoneNumber: '',
-        firstName: '',
-        lastName: '',
-        role: UserRole.passenger,
-        isVerified: true,
-      ),
+      user: restoredUser,
     );
+  }
+
+  @override
+  Future<void> cacheUser(User user) async {
+    await _storage.writeUserSnapshot(jsonEncode(userToStorageJson(user)));
+    AppLogger.info('AuthRepository.cacheUser updated snapshot for ${user.userId}');
   }
 
   Future<AuthSession> _requireCachedSession() async {
@@ -162,5 +192,20 @@ class AuthRepositoryImpl implements AuthRepository {
     await _storage.writeAccessToken(session.accessToken);
     await _storage.writeRefreshToken(session.refreshToken);
     await _storage.writeUserId(session.user.userId);
+    await _storage.writeUserSnapshot(jsonEncode(userToStorageJson(session.user)));
+    AppLogger.info(
+      'AuthRepository._persist wrote secure storage for ${session.user.userId}',
+    );
+  }
+
+  User _fallbackCachedUser(String userId) {
+    return User(
+      userId: userId,
+      phoneNumber: '',
+      firstName: '',
+      lastName: '',
+      role: UserRole.passenger,
+      isVerified: true,
+    );
   }
 }

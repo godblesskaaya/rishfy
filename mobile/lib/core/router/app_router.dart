@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../constants/app_logger.dart';
 import '../../features/auth/presentation/providers/auth_provider.dart';
 import '../../features/auth/presentation/screens/login_screen.dart';
 import '../../features/auth/presentation/screens/onboarding_screen.dart';
@@ -15,13 +16,14 @@ import '../../features/home/presentation/screens/driver_home_screen.dart';
 import '../../features/home/presentation/screens/passenger_home_screen.dart';
 import '../../features/home/presentation/screens/shell_screen.dart';
 import '../../features/notifications/presentation/screens/notifications_screen.dart';
+import '../../features/profile/presentation/screens/vehicle_management_screen.dart';
 import '../../features/profile/presentation/screens/profile_screen.dart';
 import '../../features/profile/presentation/screens/settings_screen.dart';
 import '../../features/routes/presentation/screens/post_route_screen.dart';
 import '../../features/routes/presentation/screens/route_detail_screen.dart';
 import '../../features/routes/presentation/screens/route_search_screen.dart';
 import '../../features/trip/presentation/screens/active_trip_screen.dart';
-import '../../shared/providers/locale_provider.dart';
+import '../../shared/providers/active_role_provider.dart';
 
 /// Root navigator keys — expose for nested navigators if needed.
 final GlobalKey<NavigatorState> _rootNavKey =
@@ -30,14 +32,13 @@ final GlobalKey<NavigatorState> _shellNavKey =
     GlobalKey<NavigatorState>(debugLabel: 'shell');
 
 final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
-  final AsyncValue<AuthState> auth = ref.watch(authControllerProvider);
-
   return GoRouter(
     navigatorKey: _rootNavKey,
     initialLocation: '/splash',
     debugLogDiagnostics: true,
     refreshListenable: _AuthNotifier(ref),
     redirect: (BuildContext context, GoRouterState state) {
+      final AsyncValue<AuthState> auth = ref.read(authControllerProvider);
       final bool isAuthed = auth.maybeWhen(
         data: (AuthState s) => s.isAuthenticated,
         orElse: () => false,
@@ -45,9 +46,15 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
 
       final bool loading = auth.isLoading || auth is AsyncLoading;
       final String path = state.matchedLocation;
+      String? redirectTarget;
 
       // Let splash handle its own redirect
-      if (path == '/splash') return null;
+      if (path == '/splash') {
+        AppLogger.info(
+          'Router redirect path=$path isAuthed=$isAuthed loading=$loading -> stay',
+        );
+        return null;
+      }
 
       final bool onAuthRoute = path.startsWith('/auth') ||
           path == '/login' ||
@@ -56,15 +63,18 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
 
       // Not authenticated → force onto auth flow
       if (!isAuthed && !loading && !onAuthRoute) {
-        return '/login';
+        redirectTarget = '/login';
       }
 
       // Already authenticated → skip auth screens
       if (isAuthed && onAuthRoute) {
-        return '/home';
+        redirectTarget = '/home';
       }
 
-      return null; // No redirect
+      AppLogger.info(
+        'Router redirect path=$path isAuthed=$isAuthed loading=$loading -> ${redirectTarget ?? 'stay'}',
+      );
+      return redirectTarget; // No redirect
     },
     routes: <RouteBase>[
       // ---- Bootstrap & Auth (outside shell) ----
@@ -106,9 +116,12 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
           GoRoute(
             path: '/home',
             pageBuilder: (BuildContext context, GoRouterState state) {
+              final user = ref.watch(currentUserProvider);
               final String role = ref.watch(activeRoleProvider);
+              final bool showDriverHome =
+                  user?.role.name == 'driver' && role == 'driver';
               return NoTransitionPage<void>(
-                child: role == 'driver'
+                child: showDriverHome
                     ? const DriverHomeScreen()
                     : const PassengerHomeScreen(),
               );
@@ -188,6 +201,11 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
         parentNavigatorKey: _rootNavKey,
         path: '/settings',
         builder: (_, __) => const SettingsScreen(),
+      ),
+      GoRoute(
+        parentNavigatorKey: _rootNavKey,
+        path: '/profile/vehicles',
+        builder: (_, __) => const VehicleManagementScreen(),
       ),
     ],
     errorBuilder: (BuildContext context, GoRouterState state) {

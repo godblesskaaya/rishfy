@@ -74,12 +74,13 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
             userId: widget.userId,
             otpCode: _otpCode,
           );
-
       if (!mounted) return;
       context.go('/home');
     } on AppException catch (e) {
+      if (!mounted) return;
       setState(() => _error = e.message);
     } catch (_) {
+      if (!mounted) return;
       setState(() => _error = 'Verification failed. Please try again.');
     } finally {
       if (mounted) setState(() => _submitting = false);

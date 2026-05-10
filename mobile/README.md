@@ -32,6 +32,68 @@ flutter run --dart-define=ENV=dev
 
 ---
 
+## Current Mobile Status (2026-05-10)
+
+This section is the fastest way for another developer to catch up with the
+current mobile branch state before reading the rest of this README.
+
+### What recently changed
+
+- Auth bootstrap now caches and restores richer user data locally.
+- Active passenger/driver role is persisted locally.
+- Driver setup is now partially available in-app:
+  - vehicle management screen
+  - become-driver flow
+  - better route-posting handoff when vehicles are missing
+- Search is now GIS-aware instead of text-only:
+  - Google Map embedded in route search
+  - current location action
+  - map tap selection
+  - reverse geocoding into the origin/destination form
+  - route search params can carry real coordinates
+- Android build config now injects the Google Maps API key into the manifest.
+
+### What is working
+
+- Debug APK builds and installs on Android.
+- Auth controller unit tests pass.
+- Search screen displays a live Google Map on-device.
+- Current location can populate the origin field on-device.
+
+### What is still broken or incomplete
+
+- Backend route search is still blocked:
+  - `/api/v1/routes/search` returns `relation "routes" does not exist`
+- Vehicle loading is still blocked or unreliable:
+  - `/api/v1/users/me/vehicles`
+- User display names are still not consistently hydrated into home/profile UI.
+- Several app surfaces still need product polish:
+  - search error states
+  - vehicle empty/error states
+  - profile actions like saved places, emergency contacts, payment methods, help
+
+### Backend vs app split
+
+- Backend thread:
+  - fix route-service/schema issue for `routes`
+  - fix vehicle endpoint behavior
+  - confirm `/users/me` profile payload shape for names
+- App thread:
+  - profile/name hydration cleanup
+  - search UX polish
+  - vehicle-state polish
+  - remaining placeholder flows
+
+### Files to inspect first
+
+- `lib/features/auth/presentation/providers/auth_provider.dart`
+- `lib/features/auth/data/repositories/auth_repository_impl.dart`
+- `lib/features/profile/presentation/screens/vehicle_management_screen.dart`
+- `lib/features/routes/presentation/screens/route_search_screen.dart`
+- `lib/features/routes/data/datasources/location_search_remote_datasource.dart`
+
+---
+
 ## Architecture
 
 We use **Clean Architecture** at the feature level: each feature has `data/`, `domain/`, and `presentation/` subdirs.

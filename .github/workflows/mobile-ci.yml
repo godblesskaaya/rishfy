@@ -2,15 +2,22 @@ name: Mobile CI
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
     paths:
       - 'mobile/**'
       - '.github/workflows/mobile-ci.yml'
   pull_request:
-    branches: [main]
+    branches:
+      - main
     paths:
       - 'mobile/**'
       - '.github/workflows/mobile-ci.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: mobile-ci-${{ github.ref }}
+  cancel-in-progress: true
 
 defaults:
   run:
@@ -20,21 +27,27 @@ jobs:
   analyze-test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.22.0'
-          channel: 'stable'
+          flutter-version: '3.41.4'
+          channel: stable
           cache: true
 
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Generate code (build_runner)
+      - name: Generate code
         run: dart run build_runner build --delete-conflicting-outputs
-        continue-on-error: true
 
       - name: Analyze
         run: flutter analyze --no-fatal-infos
@@ -42,24 +55,85 @@ jobs:
       - name: Test
         run: flutter test
 
-  build-android:
+  build-android-artifacts:
     runs-on: ubuntu-latest
     needs: analyze-test
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
+          distribution: temurin
           java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android build dependencies
+        run: |
+          yes | sdkmanager --licenses
+          sdkmanager \
+            "platform-tools" \
+            "platforms;android-36" \
+            "build-tools;36.0.0" \
+            "ndk;28.2.13676358" \
+            "cmake;4.0.2"
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.22.0'
-          channel: 'stable'
+          flutter-version: '3.41.4'
+          channel: stable
           cache: true
 
-      - run: flutter pub get
-      - run: flutter build apk --debug --flavor dev || flutter build apk --debug
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Generate code
+        run: dart run build_runner build --delete-conflicting-outputs
+
+      - name: Build debug APK
+        run: flutter build apk --debug --dart-define=ENV=dev
+
+      - name: Build release APK
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: flutter build apk --release --dart-define=ENV=prod
+
+      - name: Build release app bundle
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: flutter build appbundle --release --dart-define=ENV=prod
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: rishfy-android-debug-apk-${{ github.sha }}
+          path: mobile/build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload release artifacts
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: rishfy-android-release-${{ github.sha }}
+          path: |
+            mobile/build/app/outputs/flutter-apk/app-release.apk
+            mobile/build/app/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Summarize downloads
+        run: |
+          {
+            echo "## Mobile build artifacts"
+            echo
+            echo "- Debug APK artifact: \`rishfy-android-debug-apk-${{ github.sha }}\`"
+            if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref }}" = "refs/heads/main" ]; then
+              echo "- Release artifact bundle: \`rishfy-android-release-${{ github.sha }}\`"
+              echo "- Files included: \`app-release.apk\`, \`app-release.aab\`"
+            fi
+            echo
+            echo "Download them from the **Artifacts** section of this workflow run."
+          } >> "$GITHUB_STEP_SUMMARY"

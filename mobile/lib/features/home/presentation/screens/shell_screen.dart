@@ -2,8 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../../shared/providers/active_role_provider.dart';
+import '../../../auth/domain/entities/user.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
-import '../../../../shared/providers/locale_provider.dart';
 
 class ShellScreen extends ConsumerWidget {
   const ShellScreen({required this.child, super.key});
@@ -35,8 +36,6 @@ class ShellScreen extends ConsumerWidget {
     final String location = GoRouterState.of(context).matchedLocation;
     final AsyncValue<AuthState> auth = ref.watch(authControllerProvider);
     final String role = ref.watch(activeRoleProvider);
-    final List<_Tab> tabs = role == 'driver' ? _driverTabs : _passengerTabs;
-    final int currentIndex = _indexOf(location, tabs);
 
     return auth.when(
       data: (AuthState state) {
@@ -46,6 +45,10 @@ class ShellScreen extends ConsumerWidget {
           });
           return const SizedBox.shrink();
         }
+        final bool showDriverTabs =
+            state.user?.role == UserRole.driver && role == 'driver';
+        final List<_Tab> tabs = showDriverTabs ? _driverTabs : _passengerTabs;
+        final int currentIndex = _indexOf(location, tabs);
         return Scaffold(
           body: child,
           bottomNavigationBar: BottomNavigationBar(
@@ -59,7 +62,7 @@ class ShellScreen extends ConsumerWidget {
               );
             }).toList(),
           ),
-          floatingActionButton: role == 'driver'
+          floatingActionButton: showDriverTabs
               ? _EmergencyFab(onTap: () => _showEmergencyDialog(context))
               : null,
         );
