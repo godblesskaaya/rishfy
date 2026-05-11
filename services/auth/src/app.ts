@@ -4,12 +4,14 @@ import fastifySensible from '@fastify/sensible';
 import fastify, { type FastifyBaseLogger, type FastifyInstance, type RawServerDefault } from 'fastify';
 import type { Producer } from 'kafkajs';
 
-import { config } from './config.js';
+import { config, isTest } from './config.js';
+import { adminRoutes } from './controllers/admin.routes.js';
 import { authRoutes } from './controllers/auth.routes.js';
 import { internalRoutes } from './controllers/internal.routes.js';
 import { publishUserRegistered } from './events/auth.events.js';
 import { logger } from './logger.js';
 import { InMemoryAuthRepository } from './repositories/auth.repository.js';
+import { PgAuthRepository } from './repositories/pg-auth.repository.js';
 import { AuthService } from './services/auth.service.js';
 
 export interface BuildAppOptions {
@@ -25,9 +27,12 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     bodyLimit: 1024 * 1024,
   });
 
+  // Use real DB repository in non-test environments
+  const repository = isTest ? new InMemoryAuthRepository() : new PgAuthRepository();
+
   const eventProducer = options.authEventsProducer ?? null;
   const authService = options.authService ?? new AuthService({
-    repository: new InMemoryAuthRepository(),
+    repository,
     otpSender: async ({ destination, code, purpose }) => {
       app.log.info({ destination, code, purpose }, 'Mock OTP dispatched');
     },
@@ -60,6 +65,11 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   await app.register(authRoutes, {
     prefix: '/api/v1/auth',
     authService,
+  });
+
+  await app.register(adminRoutes, {
+    prefix: '/api/v1/auth',
+    repository,
   });
 
   await app.register(internalRoutes, { prefix: '/internal' });

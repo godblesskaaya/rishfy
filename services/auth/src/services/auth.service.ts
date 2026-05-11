@@ -1,4 +1,4 @@
-import { randomInt } from 'node:crypto';
+import { createHash, randomInt } from 'node:crypto';
 
 import { AuthError } from './errors.js';
 import { hashPassword, verifyPassword } from './password.service.js';
@@ -101,7 +101,12 @@ export class AuthService {
   async refreshToken(input: RefreshTokenInput): Promise<{ user: SafeAuthUser; tokens: AuthTokens }> {
     const claims = verifyRefreshToken(input.refreshToken);
     const session = await this.deps.repository.findRefreshSession(claims.sid);
-    if (!session || session.revokedAt || session.token !== input.refreshToken || session.expiresAt.getTime() <= Date.now()) {
+    if (
+      !session ||
+      session.revokedAt ||
+      session.token !== this.hashRefreshToken(input.refreshToken) ||
+      session.expiresAt.getTime() <= Date.now()
+    ) {
       throw new AuthError(401, 'INVALID_REFRESH_TOKEN', 'Refresh token is invalid or expired');
     }
 
@@ -118,7 +123,7 @@ export class AuthService {
   async logout(input: RefreshTokenInput): Promise<{ success: true }> {
     const claims = verifyRefreshToken(input.refreshToken);
     const session = await this.deps.repository.findRefreshSession(claims.sid);
-    if (session && !session.revokedAt) {
+    if (session && !session.revokedAt && session.token === this.hashRefreshToken(input.refreshToken)) {
       session.revokedAt = new Date();
       await this.deps.repository.updateRefreshSession(session);
     }
@@ -168,16 +173,21 @@ export class AuthService {
   }
 
   private async issueTokens(user: AuthUser): Promise<AuthTokens> {
-    const provisional = issueAuthTokens({ userId: user.id, role: user.role, sessionId: 'pending' });
+    // JWT sub = profileId (UUID) — consistent with user_db users.id
+    const provisional = issueAuthTokens({ userId: user.profileId, role: user.role, sessionId: 'pending' });
     const session = await this.deps.repository.createRefreshSession(
-      user.id,
-      provisional.refreshToken,
+      user.id, // auth_db integer id for the FK in refresh_tokens
+      this.hashRefreshToken(provisional.refreshToken),
       new Date(Date.now() + provisional.refreshExpiresInSeconds * 1000),
     );
-    const finalTokens = issueAuthTokens({ userId: user.id, role: user.role, sessionId: session.id });
-    session.token = finalTokens.refreshToken;
+    const finalTokens = issueAuthTokens({ userId: user.profileId, role: user.role, sessionId: session.id });
+    session.token = this.hashRefreshToken(finalTokens.refreshToken);
     await this.deps.repository.updateRefreshSession(session);
     return finalTokens;
+  }
+
+  private hashRefreshToken(token: string): string {
+    return createHash('sha256').update(token).digest('hex');
   }
 
   private async requireUser(userId: string): Promise<AuthUser> {
@@ -190,7 +200,7 @@ export class AuthService {
 
   private toSafeUser(user: AuthUser): SafeAuthUser {
     return {
-      id: user.id,
+      id: user.profileId, // expose UUID — clients use this as their stable user ID
       email: user.email,
       phoneNumber: user.phoneNumber,
       fullName: user.fullName,
@@ -222,6 +232,7 @@ export class AuthService {
     try {
       await this.deps.userRegisteredPublisher({
         user_id: user.id,
+        profile_id: user.profileId,
         phone_number: user.phoneNumber ?? '',
         full_name: user.fullName ?? 'Rishfy User',
         role: user.role,

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { Consumer, Kafka } from 'kafkajs';
 import type { Logger } from 'pino';
 import type { UserRepository } from '../repositories/user.repository.js';
@@ -39,7 +40,8 @@ export async function applyUserRegisteredEvent(
   }
 
   await repo.upsertFromRegistration({
-    id: event.user_id,
+    id: event.profile_id ?? randomUUID(),
+    auth_id: event.user_id,
     phone_number: phoneNumber,
     full_name: fullName,
     email: event.email ?? null,

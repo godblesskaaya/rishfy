@@ -15,7 +15,8 @@ export interface UserRow {
 }
 
 interface UserRegistrationUpsertInput {
-  id: string;
+  id: string;       // profile_id UUID — used as users.id primary key
+  auth_id: string;
   phone_number: string;
   full_name: string;
   email?: string | null;
@@ -82,10 +83,11 @@ export class UserRepository {
 
   async upsertFromRegistration(data: UserRegistrationUpsertInput): Promise<UserRow> {
     const { rows } = await this.pool.query<UserRow>(
-      `INSERT INTO users (id, phone_number, full_name, email, role, status)
-       VALUES ($1, $2, $3, $4, $5, $6)
+      `INSERT INTO users (id, auth_id, phone_number, full_name, email, role, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        ON CONFLICT (id) DO UPDATE
-       SET phone_number = EXCLUDED.phone_number,
+       SET auth_id = EXCLUDED.auth_id,
+           phone_number = EXCLUDED.phone_number,
            full_name = EXCLUDED.full_name,
            email = EXCLUDED.email,
            role = CASE
@@ -101,6 +103,7 @@ export class UserRepository {
        RETURNING *`,
       [
         data.id,
+        data.auth_id,
         data.phone_number,
         data.full_name,
         data.email ?? null,
@@ -159,7 +162,7 @@ export class UserRepository {
 
   async findDriverProfile(userId: string): Promise<DriverProfileRow | null> {
     const { rows } = await this.pool.query<DriverProfileRow>(
-      'SELECT * FROM driver_profiles WHERE user_id = $1',
+      `SELECT dp.* FROM driver_profiles dp WHERE dp.user_id = $1`,
       [userId],
     );
     return rows[0] ?? null;
@@ -273,7 +276,7 @@ export class UserRepository {
 
   async deactivateDevice(userId: string, deviceId: string): Promise<void> {
     await this.pool.query(
-      'UPDATE devices SET is_active = false WHERE user_id = $1 AND device_id = $2',
+      `UPDATE devices SET is_active = false WHERE user_id = $1 AND device_id = $2`,
       [userId, deviceId],
     );
   }

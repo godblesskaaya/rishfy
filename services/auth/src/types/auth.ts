@@ -7,7 +7,8 @@ export type UserRole = 'passenger' | 'driver' | 'admin';
 export type OtpPurpose = 'register' | 'reset-password';
 
 export interface AuthUser extends AuthIdentifier {
-  id: string;
+  id: string;       // auth_db integer id (string-cast) — internal use only
+  profileId: string; // UUID shared with user_db as users.id — used in JWTs
   passwordHash: string;
   fullName?: string;
   role: UserRole;

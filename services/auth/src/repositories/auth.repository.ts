@@ -30,8 +30,10 @@ export class InMemoryAuthRepository implements AuthRepository {
 
   async createUser(input: CreateUserInput): Promise<AuthUser> {
     const now = new Date();
+    const profileId = randomUUID();
     const user: AuthUser = {
       id: randomUUID(),
+      profileId,
       email: input.email?.toLowerCase(),
       phoneNumber: input.phoneNumber,
       passwordHash: input.passwordHash,

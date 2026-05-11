@@ -7,6 +7,7 @@ const TOPIC_RATING_SUBMITTED = 'rating.submitted';
 
 export interface UserRegisteredEvent {
   user_id: string;
+  profile_id?: string;
   phone_number?: string;
   phone?: string;
   full_name?: string;

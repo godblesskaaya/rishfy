@@ -1,4 +1,5 @@
 import { createPrivateKey, createPublicKey, generateKeyPairSync } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 
 import jwt from 'jsonwebtoken';
 
@@ -14,8 +15,19 @@ const generatedKeyPair = generateKeyPairSync('rsa', {
   privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
 });
 
-const privateKey = createPrivateKey(config.JWT_PRIVATE_KEY ?? generatedKeyPair.privateKey);
-const publicKey = createPublicKey(config.JWT_PUBLIC_KEY ?? generatedKeyPair.publicKey);
+function resolveKeyMaterial(value?: string, path?: string): string | undefined {
+  if (value) return value;
+  if (path) {
+    try { return readFileSync(path, 'utf-8').trim(); } catch { return undefined; }
+  }
+  return undefined;
+}
+
+const resolvedPrivateKey = resolveKeyMaterial(config.JWT_PRIVATE_KEY, config.JWT_PRIVATE_KEY_PATH);
+const resolvedPublicKey = resolveKeyMaterial(config.JWT_PUBLIC_KEY, config.JWT_PUBLIC_KEY_PATH);
+
+const privateKey = createPrivateKey(resolvedPrivateKey ?? generatedKeyPair.privateKey);
+const publicKey = createPublicKey(resolvedPublicKey ?? generatedKeyPair.publicKey);
 
 export interface AccessTokenClaims {
   sub: string;

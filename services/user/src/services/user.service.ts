@@ -60,7 +60,7 @@ export class UserService {
     const upgraded = await this.repo.upgradeToDriver(userId);
     if (!upgraded) throw new AppError('USER_NOT_FOUND', 404);
 
-    const profile = await this.repo.createDriverProfile({ user_id: userId, ...data });
+    const profile = await this.repo.createDriverProfile({ user_id: upgraded.id, ...data });
 
     // Account-created synchronization is handled by consuming auth-service `user.registered` events.
     // User-service only owns this role-transition event.

@@ -13,6 +13,8 @@ const configSchema = z.object({
   KAFKA_BROKERS: z.string(),
   JWT_PRIVATE_KEY: z.string().optional(),
   JWT_PUBLIC_KEY: z.string().optional(),
+  JWT_PRIVATE_KEY_PATH: z.string().optional(),
+  JWT_PUBLIC_KEY_PATH: z.string().optional(),
 
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().url().optional(),
 });

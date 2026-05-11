@@ -6,6 +6,7 @@ const TOPIC_USER_REGISTERED = 'user.registered';
 
 export interface UserRegisteredEvent {
   user_id: string;
+  profile_id: string;
   phone_number: string;
   full_name: string;
   role: string;
