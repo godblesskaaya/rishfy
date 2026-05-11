@@ -112,3 +112,53 @@ final FutureProviderFamily<BookingEntity, String> bookingDetailProvider =
   final BookingDto dto = await ds.getBooking(bookingId);
   return dto.toDomain();
 });
+
+// ---- Decline booking (driver only) ----
+
+enum DeclineBookingStatus { idle, loading, success, failed }
+
+class DeclineBookingState {
+  const DeclineBookingState({
+    this.status = DeclineBookingStatus.idle,
+    this.error,
+  });
+
+  final DeclineBookingStatus status;
+  final String? error;
+
+  DeclineBookingState copyWith({
+    DeclineBookingStatus? status,
+    String? error,
+  }) =>
+      DeclineBookingState(
+        status: status ?? this.status,
+        error: error,
+      );
+}
+
+final StateNotifierProvider<DeclineBookingNotifier, DeclineBookingState>
+    declineBookingProvider = StateNotifierProvider.autoDispose<
+        DeclineBookingNotifier, DeclineBookingState>(
+  (Ref ref) => DeclineBookingNotifier(ref.read(bookingDataSourceProvider)),
+);
+
+class DeclineBookingNotifier extends StateNotifier<DeclineBookingState> {
+  DeclineBookingNotifier(this._ds) : super(const DeclineBookingState());
+
+  final BookingRemoteDataSource _ds;
+
+  Future<void> decline(String bookingId, {String? reason}) async {
+    state = state.copyWith(status: DeclineBookingStatus.loading, error: null);
+    try {
+      await _ds.declineBooking(bookingId, reason: reason);
+      state = state.copyWith(status: DeclineBookingStatus.success);
+    } catch (e) {
+      state = state.copyWith(
+        status: DeclineBookingStatus.failed,
+        error: e.toString(),
+      );
+    }
+  }
+
+  void reset() => state = const DeclineBookingState();
+}

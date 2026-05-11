@@ -30,37 +30,43 @@ class RouteRemoteDataSource {
         .toList();
   }
 
-  Future<List<RouteDto>> searchRoutes(RouteSearchParams params) async {
-    final _LatLng origin =
-        params.originLatitude != null && params.originLongitude != null
-            ? _LatLng(params.originLatitude!, params.originLongitude!)
-            : _resolveLocation(params.origin);
-    final _LatLng destination = params.destinationLatitude != null &&
-            params.destinationLongitude != null
-        ? _LatLng(params.destinationLatitude!, params.destinationLongitude!)
-        : _resolveLocation(params.destination);
-
+  Future<List<SearchResultDto>> searchRoutes(RouteSearchParams params) async {
     final Response<Map<String, dynamic>> res =
         await _dio.get<Map<String, dynamic>>(
       '/api/v1/routes/search',
       queryParameters: <String, dynamic>{
-        'origin_lat': origin.lat,
-        'origin_lng': origin.lng,
-        'destination_lat': destination.lat,
-        'destination_lng': destination.lng,
-        'departure_after': DateTime(
-          params.departureDate.year,
-          params.departureDate.month,
-          params.departureDate.day,
-        ).toIso8601String(),
-        'seats_needed': params.seats,
+        'pickup_lat': params.pickupLat,
+        'pickup_lng': params.pickupLng,
+        'dropoff_lat': params.dropoffLat,
+        'dropoff_lng': params.dropoffLng,
+        'desired_departure_time':
+            params.desiredDepartureTime.toUtc().toIso8601String(),
+        'time_flexibility_minutes': params.timeFlexibilityMinutes,
+        'max_walking_distance': params.maxWalkingDistanceMeters,
+        'seats_needed': params.seatsNeeded,
       },
     );
     final List<dynamic> data =
         res.data?['routes'] as List<dynamic>? ?? <dynamic>[];
     return data
-        .map((dynamic e) => RouteDto.fromJson(e as Map<String, dynamic>))
+        .map((dynamic e) =>
+            SearchResultDto.fromJson(e as Map<String, dynamic>))
         .toList();
+  }
+
+  Future<RoutePreviewDto> previewRoute(RoutePreviewRequest req) async {
+    final Response<Map<String, dynamic>> res =
+        await _dio.post<Map<String, dynamic>>(
+      '/api/v1/routes/preview',
+      data: <String, dynamic>{
+        'origin_lat': req.originLat,
+        'origin_lng': req.originLng,
+        'destination_lat': req.destinationLat,
+        'destination_lng': req.destinationLng,
+        if (req.waypoints.isNotEmpty) 'waypoints': req.waypoints,
+      },
+    );
+    return RoutePreviewDto.fromJson(res.data!);
   }
 
   Future<RouteDto> getRoute(String routeId) async {
@@ -71,23 +77,22 @@ class RouteRemoteDataSource {
   }
 
   Future<RouteDto> createRoute(CreateRouteRequest req) async {
-    final _LatLng origin = _resolveLocation(req.originName);
-    final _LatLng destination = _resolveLocation(req.destinationName);
-
     final Response<Map<String, dynamic>> res =
         await _dio.post<Map<String, dynamic>>(
       '/api/v1/routes',
       data: <String, dynamic>{
         'vehicle_id': req.vehicleId,
         'origin_name': req.originName.trim(),
-        'origin_lat': origin.lat,
-        'origin_lng': origin.lng,
+        'origin_lat': req.originLat,
+        'origin_lng': req.originLng,
         'destination_name': req.destinationName.trim(),
-        'destination_lat': destination.lat,
-        'destination_lng': destination.lng,
+        'destination_lat': req.destinationLat,
+        'destination_lng': req.destinationLng,
         'available_seats': req.availableSeats,
         'price_per_seat': req.pricePerSeat,
         'departure_time': req.departureTime.toUtc().toIso8601String(),
+        'flexibility_minutes': req.flexibilityMinutes,
+        if (req.waypoints.isNotEmpty) 'waypoints': req.waypoints,
         'recurrence': req.recurrence,
         if (req.recurrenceDays.isNotEmpty) 'recurrence_days': req.recurrenceDays,
         if (req.recurrenceEndDate != null)

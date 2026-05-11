@@ -20,19 +20,19 @@ final Provider<LocationSearchRemoteDataSource> locationSearchDataSourceProvider 
 
 class RouteSearchState {
   const RouteSearchState({
-    this.results = const <RouteEntity>[],
+    this.results = const <SearchResultDto>[],
     this.isLoading = false,
     this.error,
     this.params,
   });
 
-  final List<RouteEntity> results;
+  final List<SearchResultDto> results;
   final bool isLoading;
   final String? error;
   final RouteSearchParams? params;
 
   RouteSearchState copyWith({
-    List<RouteEntity>? results,
+    List<SearchResultDto>? results,
     bool? isLoading,
     String? error,
     RouteSearchParams? params,
@@ -59,17 +59,71 @@ class RouteSearchNotifier extends StateNotifier<RouteSearchState> {
   Future<void> search(RouteSearchParams params) async {
     state = state.copyWith(isLoading: true, error: null, params: params);
     try {
-      final List<RouteDto> dtos = await _ds.searchRoutes(params);
-      state = state.copyWith(
-        isLoading: false,
-        results: dtos.map((RouteDto d) => d.toDomain()).toList(),
-      );
+      final List<SearchResultDto> results = await _ds.searchRoutes(params);
+      state = state.copyWith(isLoading: false, results: results);
     } catch (e) {
       state = state.copyWith(isLoading: false, error: e.toString());
     }
   }
 
   void clear() => state = const RouteSearchState();
+}
+
+// ---- Preview route ----
+
+enum PreviewRouteStatus { idle, loading, success, failed }
+
+class PreviewRouteState {
+  const PreviewRouteState({
+    this.status = PreviewRouteStatus.idle,
+    this.preview,
+    this.error,
+  });
+
+  final PreviewRouteStatus status;
+  final RoutePreviewDto? preview;
+  final String? error;
+
+  PreviewRouteState copyWith({
+    PreviewRouteStatus? status,
+    RoutePreviewDto? preview,
+    String? error,
+  }) =>
+      PreviewRouteState(
+        status: status ?? this.status,
+        preview: preview ?? this.preview,
+        error: error,
+      );
+}
+
+final StateNotifierProvider<PreviewRouteNotifier, PreviewRouteState>
+    previewRouteProvider = StateNotifierProvider.autoDispose<PreviewRouteNotifier,
+        PreviewRouteState>(
+  (Ref ref) => PreviewRouteNotifier(ref.read(routeDataSourceProvider)),
+);
+
+class PreviewRouteNotifier extends StateNotifier<PreviewRouteState> {
+  PreviewRouteNotifier(this._ds) : super(const PreviewRouteState());
+
+  final RouteRemoteDataSource _ds;
+
+  Future<void> preview(RoutePreviewRequest req) async {
+    state = const PreviewRouteState(status: PreviewRouteStatus.loading);
+    try {
+      final RoutePreviewDto dto = await _ds.previewRoute(req);
+      state = PreviewRouteState(
+        status: PreviewRouteStatus.success,
+        preview: dto,
+      );
+    } catch (e) {
+      state = PreviewRouteState(
+        status: PreviewRouteStatus.failed,
+        error: e.toString(),
+      );
+    }
+  }
+
+  void reset() => state = const PreviewRouteState();
 }
 
 // ---- Single route detail ----

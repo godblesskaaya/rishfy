@@ -13,7 +13,6 @@ import '../../../../core/errors/app_exception.dart';
 import '../../../../shared/widgets/primary_button.dart';
 import '../../data/datasources/location_search_remote_datasource.dart';
 import '../../data/models/route_models.dart';
-import '../../domain/entities/route_entity.dart';
 import '../providers/route_provider.dart';
 
 class RouteSearchScreen extends ConsumerStatefulWidget {
@@ -36,10 +35,14 @@ class _RouteSearchScreenState extends ConsumerState<RouteSearchScreen> {
   Timer? _destDebounce;
 
   DateTime _departureDate = DateTime.now();
+  TimeOfDay _departureTime = TimeOfDay.now();
   int _seatCount = 1;
+  int _timeFlexibilityMinutes = 30;
+  int _maxWalkingDistanceMeters = 1000;
   String _mapTargetField = 'origin';
   bool _loadingCurrentLocation = false;
   String? _locationHint;
+  bool _showAdvanced = false;
 
   LocationSearchResult? _originSelection;
   LocationSearchResult? _destinationSelection;
@@ -54,6 +57,8 @@ class _RouteSearchScreenState extends ConsumerState<RouteSearchScreen> {
   @override
   void initState() {
     super.initState();
+    _departureDate = DateTime.now();
+    _departureTime = TimeOfDay.now();
     _originFocusNode.addListener(_handleFocusChange);
     _destFocusNode.addListener(_handleFocusChange);
     unawaited(_loadCurrentLocation());
@@ -271,26 +276,44 @@ class _RouteSearchScreenState extends ConsumerState<RouteSearchScreen> {
     _applySelection(_mapTargetField, _currentLocation!);
   }
 
+  DateTime get _desiredDepartureDateTime => DateTime(
+        _departureDate.year,
+        _departureDate.month,
+        _departureDate.day,
+        _departureTime.hour,
+        _departureTime.minute,
+      );
+
+  Future<void> _pickDepartureTime() async {
+    final TimeOfDay? picked = await showTimePicker(
+      context: context,
+      initialTime: _departureTime,
+    );
+    if (picked != null) setState(() => _departureTime = picked);
+  }
+
   Future<void> _search() async {
-    final String origin = _originCtrl.text.trim();
-    final String dest = _destCtrl.text.trim();
-    if (origin.isEmpty || dest.isEmpty) {
+    if (_originSelection == null || _destinationSelection == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Enter origin and destination')),
+        const SnackBar(
+          content: Text('Select pickup and dropoff from the suggestions'),
+        ),
       );
       return;
     }
 
     await ref.read(routeSearchProvider.notifier).search(
           RouteSearchParams(
-            origin: _originSelection?.asLatLng ?? origin,
-            destination: _destinationSelection?.asLatLng ?? dest,
-            departureDate: _departureDate,
-            seats: _seatCount,
-            originLatitude: _originSelection?.latitude,
-            originLongitude: _originSelection?.longitude,
-            destinationLatitude: _destinationSelection?.latitude,
-            destinationLongitude: _destinationSelection?.longitude,
+            pickupLat: _originSelection!.latitude,
+            pickupLng: _originSelection!.longitude,
+            dropoffLat: _destinationSelection!.latitude,
+            dropoffLng: _destinationSelection!.longitude,
+            desiredDepartureTime: _desiredDepartureDateTime,
+            timeFlexibilityMinutes: _timeFlexibilityMinutes,
+            maxWalkingDistanceMeters: _maxWalkingDistanceMeters,
+            seatsNeeded: _seatCount,
+            pickupLabel: _originSelection!.label,
+            dropoffLabel: _destinationSelection!.label,
           ),
         );
   }
@@ -373,6 +396,7 @@ class _RouteSearchScreenState extends ConsumerState<RouteSearchScreen> {
   Widget build(BuildContext context) {
     final RouteSearchState searchState = ref.watch(routeSearchProvider);
     final bool mapsConfigured = Env.googleMapsApiKey.trim().isNotEmpty;
+    final List<SearchResultDto> results = searchState.results;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Search routes')),
@@ -470,57 +494,98 @@ class _RouteSearchScreenState extends ConsumerState<RouteSearchScreen> {
                       ),
                     ],
                     const SizedBox(height: AppConstants.spaceMd),
-                    InkWell(
-                      borderRadius:
-                          BorderRadius.circular(AppConstants.radiusLg),
-                      onTap: () async {
-                        final DateTime? picked = await showDatePicker(
-                          context: context,
-                          initialDate: _departureDate,
-                          firstDate: DateTime.now(),
-                          lastDate: DateTime.now().add(
-                            const Duration(days: 60),
-                          ),
-                        );
-                        if (picked != null) {
-                          setState(() => _departureDate = picked);
-                        }
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: AppConstants.spaceMd,
-                          vertical: AppConstants.spaceSm + 4,
-                        ),
-                        decoration: BoxDecoration(
-                          border: Border.all(
-                            color: Theme.of(context).colorScheme.outlineVariant,
-                          ),
-                          borderRadius:
-                              BorderRadius.circular(AppConstants.radiusLg),
-                        ),
-                        child: Row(
-                          children: <Widget>[
-                            Icon(
-                              Icons.calendar_today,
-                              color: Theme.of(context).colorScheme.primary,
-                              size: 20,
-                            ),
-                            const SizedBox(width: 12),
-                            Text(
-                              DateFormat('EEE, d MMM y').format(_departureDate),
-                            ),
-                            const Spacer(),
-                            Text(
-                              'Change',
-                              style: TextStyle(
-                                color: Theme.of(context).colorScheme.primary,
+                    // ── Date + time row ──────────────────────────────────
+                    Row(
+                      children: <Widget>[
+                        Expanded(
+                          child: InkWell(
+                            borderRadius:
+                                BorderRadius.circular(AppConstants.radiusLg),
+                            onTap: () async {
+                              final DateTime? picked = await showDatePicker(
+                                context: context,
+                                initialDate: _departureDate,
+                                firstDate: DateTime.now(),
+                                lastDate: DateTime.now()
+                                    .add(const Duration(days: 60)),
+                              );
+                              if (picked != null) {
+                                setState(() => _departureDate = picked);
+                              }
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: AppConstants.spaceMd,
+                                vertical: AppConstants.spaceSm + 4,
+                              ),
+                              decoration: BoxDecoration(
+                                border: Border.all(
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .outlineVariant,
+                                ),
+                                borderRadius: BorderRadius.circular(
+                                    AppConstants.radiusLg),
+                              ),
+                              child: Row(
+                                children: <Widget>[
+                                  Icon(
+                                    Icons.calendar_today,
+                                    color:
+                                        Theme.of(context).colorScheme.primary,
+                                    size: 18,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      DateFormat('d MMM').format(_departureDate),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
-                          ],
+                          ),
                         ),
-                      ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: InkWell(
+                            borderRadius:
+                                BorderRadius.circular(AppConstants.radiusLg),
+                            onTap: _pickDepartureTime,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: AppConstants.spaceMd,
+                                vertical: AppConstants.spaceSm + 4,
+                              ),
+                              decoration: BoxDecoration(
+                                border: Border.all(
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .outlineVariant,
+                                ),
+                                borderRadius: BorderRadius.circular(
+                                    AppConstants.radiusLg),
+                              ),
+                              child: Row(
+                                children: <Widget>[
+                                  Icon(
+                                    Icons.schedule,
+                                    color:
+                                        Theme.of(context).colorScheme.primary,
+                                    size: 18,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(_departureTime.format(context)),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: AppConstants.spaceMd),
+                    // ── Seats row ────────────────────────────────────────
                     Row(
                       children: <Widget>[
                         const Text('Seats'),
@@ -543,6 +608,71 @@ class _RouteSearchScreenState extends ConsumerState<RouteSearchScreen> {
                         ),
                       ],
                     ),
+                    // ── Advanced options ─────────────────────────────────
+                    InkWell(
+                      onTap: () =>
+                          setState(() => _showAdvanced = !_showAdvanced),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                            vertical: AppConstants.spaceSm),
+                        child: Row(
+                          children: <Widget>[
+                            Text(
+                              'Advanced options',
+                              style: TextStyle(
+                                color: Theme.of(context).colorScheme.primary,
+                                fontSize: 13,
+                              ),
+                            ),
+                            Icon(
+                              _showAdvanced
+                                  ? Icons.expand_less
+                                  : Icons.expand_more,
+                              color: Theme.of(context).colorScheme.primary,
+                              size: 18,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    if (_showAdvanced) ...<Widget>[
+                      Text(
+                        'Time flexibility',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                      const SizedBox(height: 6),
+                      Wrap(
+                        spacing: 6,
+                        children: <int>[15, 30, 60].map((int m) {
+                          return ChoiceChip(
+                            label: Text('±$m min'),
+                            selected: _timeFlexibilityMinutes == m,
+                            onSelected: (_) => setState(
+                                () => _timeFlexibilityMinutes = m),
+                          );
+                        }).toList(),
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        'Max walking distance to pickup',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                      const SizedBox(height: 6),
+                      Wrap(
+                        spacing: 6,
+                        children: <int>[500, 1000, 1500, 2000].map((int m) {
+                          return ChoiceChip(
+                            label: Text(
+                              m < 1000 ? '${m}m' : '${m ~/ 1000} km',
+                            ),
+                            selected: _maxWalkingDistanceMeters == m,
+                            onSelected: (_) => setState(
+                                () => _maxWalkingDistanceMeters = m),
+                          );
+                        }).toList(),
+                      ),
+                      const SizedBox(height: 8),
+                    ],
                     const SizedBox(height: AppConstants.spaceMd),
                     PrimaryButton(
                       label: 'Search',
@@ -555,18 +685,18 @@ class _RouteSearchScreenState extends ConsumerState<RouteSearchScreen> {
                       _ErrorBanner(message: searchState.error!),
                     ],
                     const SizedBox(height: AppConstants.spaceLg),
-                    if (searchState.results.isNotEmpty)
-                      ...searchState.results.map(
-                        (RouteEntity route) => Padding(
+                    if (results.isNotEmpty)
+                      ...results.map(
+                        (SearchResultDto r) => Padding(
                           padding: const EdgeInsets.only(
                             bottom: AppConstants.spaceSm,
                           ),
-                          child: _RouteCard(route: route),
+                          child: _SearchResultCard(result: r),
                         ),
                       )
                     else if (!searchState.isLoading &&
                         searchState.params != null &&
-                        searchState.results.isEmpty)
+                        results.isEmpty)
                       Container(
                         padding: const EdgeInsets.all(AppConstants.spaceLg),
                         decoration: BoxDecoration(
@@ -577,7 +707,8 @@ class _RouteSearchScreenState extends ConsumerState<RouteSearchScreen> {
                               BorderRadius.circular(AppConstants.radiusLg),
                         ),
                         child: const Text(
-                          'No routes found yet. Try another date, location, or come back after backend route fixes land.',
+                          'No routes found. Try adjusting the time, '
+                          'walking distance, or flexibility window.',
                           textAlign: TextAlign.center,
                         ),
                       ),
@@ -793,22 +924,38 @@ class _ErrorBanner extends StatelessWidget {
   }
 }
 
-class _RouteCard extends StatelessWidget {
-  const _RouteCard({required this.route});
+class _SearchResultCard extends StatelessWidget {
+  const _SearchResultCard({required this.result});
 
-  final RouteEntity route;
+  final SearchResultDto result;
 
   @override
   Widget build(BuildContext context) {
     final String price =
-        'TZS ${NumberFormat('#,###').format(route.pricePerSeatTzs)}';
-    final String time =
-        DateFormat('HH:mm').format(route.departureDatetime.toLocal());
+        'TZS ${NumberFormat('#,###').format(result.pricePerSeat)}';
+    final String pickupTime =
+        DateFormat('HH:mm').format(result.estimatedPickupTime.toLocal());
+    final String departureTime =
+        DateFormat('HH:mm').format(result.driverDepartureTime.toLocal());
 
     return Card(
       child: InkWell(
         borderRadius: BorderRadius.circular(AppConstants.radiusMd),
-        onTap: () => GoRouter.of(context).push('/routes/${route.routeId}'),
+        onTap: () => GoRouter.of(context).push(
+          '/bookings/create',
+          extra: <String, dynamic>{
+            'routeId': result.routeId,
+            'driverId': result.driverId,
+            'pricePerSeat': result.pricePerSeat,
+            'suggestedPickupName': result.suggestedPickupName,
+            'suggestedPickupLat': result.suggestedPickupLat,
+            'suggestedPickupLng': result.suggestedPickupLng,
+            'estimatedPickupTime': result.estimatedPickupTime.toIso8601String(),
+            'walkingDistanceToPickup': result.walkingDistanceToPickup,
+            'walkingTimeToPickup': result.walkingTimeToPickup,
+            'walkingDistanceFromDropoff': result.walkingDistanceFromDropoff,
+          },
+        ),
         child: Padding(
           padding: const EdgeInsets.all(AppConstants.spaceMd),
           child: Column(
@@ -818,7 +965,7 @@ class _RouteCard extends StatelessWidget {
                 children: <Widget>[
                   Expanded(
                     child: Text(
-                      '${route.originName} -> ${route.destinationName}',
+                      result.driverName ?? 'Driver',
                       style: Theme.of(context).textTheme.titleSmall,
                     ),
                   ),
@@ -831,29 +978,69 @@ class _RouteCard extends StatelessWidget {
                   ),
                 ],
               ),
-              const SizedBox(height: 4),
+              const SizedBox(height: 6),
+              // Walking distance
               Row(
                 children: <Widget>[
-                  const Icon(Icons.access_time, size: 14),
+                  const Icon(Icons.directions_walk, size: 14),
                   const SizedBox(width: 4),
-                  Text(time),
+                  Text(
+                    result.walkingDistanceLabel,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
                   const SizedBox(width: 16),
                   const Icon(Icons.event_seat, size: 14),
                   const SizedBox(width: 4),
-                  Text('${route.availableSeats} seats left'),
-                  if (route.driverRating != null) ...<Widget>[
+                  Text(
+                    '${result.availableSeats} seats',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  if (result.driverRating != null) ...<Widget>[
                     const SizedBox(width: 16),
                     const Icon(Icons.star, size: 14, color: Colors.amber),
                     const SizedBox(width: 2),
-                    Text(route.driverRating!.toStringAsFixed(1)),
+                    Text(
+                      result.driverRating!.toStringAsFixed(1),
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
                   ],
                 ],
               ),
               const SizedBox(height: 4),
-              Text(
-                route.vehicleModel,
-                style: Theme.of(context).textTheme.bodySmall,
+              // Pickup time info
+              Row(
+                children: <Widget>[
+                  const Icon(Icons.access_time, size: 14),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Departs $departureTime · pickup ~$pickupTime',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ],
               ),
+              if (result.suggestedPickupName != null) ...<Widget>[
+                const SizedBox(height: 4),
+                Row(
+                  children: <Widget>[
+                    const Icon(Icons.place_outlined, size: 14),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: Text(
+                        result.suggestedPickupName!,
+                        style: Theme.of(context).textTheme.bodySmall,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+              if (result.vehicleLabel.isNotEmpty) ...<Widget>[
+                const SizedBox(height: 4),
+                Text(
+                  result.vehicleLabel,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
             ],
           ),
         ),

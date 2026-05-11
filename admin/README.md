@@ -201,8 +201,8 @@ Mock the API with MSW (Mock Service Worker) — set up once, used in both unit a
 docker build -t rishfy/admin:latest .
 docker run -p 3000:3000 \
   -e NEXTAUTH_SECRET=... \
-  -e NEXTAUTH_URL=https://admin.rishfy.tz \
-  -e RISHFY_API_URL=https://api.rishfy.tz \
+  -e NEXTAUTH_URL=https://admin.rishfy.com \
+  -e RISHFY_API_URL=https://api.rishfy.com \
   rishfy/admin:latest
 ```
 

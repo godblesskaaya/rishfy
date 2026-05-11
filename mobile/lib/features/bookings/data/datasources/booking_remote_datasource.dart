@@ -74,4 +74,13 @@ class BookingRemoteDataSource {
       },
     );
   }
+
+  Future<void> declineBooking(String bookingId, {String? reason}) async {
+    await _dio.post<void>(
+      '/api/v1/bookings/$bookingId/decline',
+      data: <String, dynamic>{
+        'reason': reason ?? 'Driver declined',
+      },
+    );
+  }
 }

@@ -10,6 +10,7 @@ class BookingEntity extends Equatable {
     required this.status,
     required this.paymentStatus,
     required this.createdAt,
+    this.driverId,
     this.confirmationCode,
     this.originName,
     this.destinationName,
@@ -17,6 +18,7 @@ class BookingEntity extends Equatable {
     this.driverName,
     this.vehiclePlate,
     this.paymentId,
+    this.suggestedPickupName,
   });
 
   final String bookingId;
@@ -27,6 +29,7 @@ class BookingEntity extends Equatable {
   final String status;
   final String paymentStatus;
   final DateTime createdAt;
+  final String? driverId;
   final String? confirmationCode;
   final String? originName;
   final String? destinationName;
@@ -34,6 +37,7 @@ class BookingEntity extends Equatable {
   final String? driverName;
   final String? vehiclePlate;
   final String? paymentId;
+  final String? suggestedPickupName;
 
   @override
   List<Object?> get props => <Object?>[bookingId];

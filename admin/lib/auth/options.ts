@@ -132,18 +132,20 @@ export const authOptions: NextAuthOptions = {
 async function refreshAccessToken(token: Record<string, unknown>): Promise<Record<string, unknown>> {
   try {
     const response = await apiClient.post<{
-      access_token: string;
-      refresh_token: string;
-      expires_in: number;
-    }>('/api/v1/auth/refresh', {
-      refresh_token: token.refreshToken,
+      tokens: {
+        accessToken: string;
+        refreshToken: string;
+        expiresInSeconds: number;
+      };
+    }>('/api/v1/auth/refresh-token', {
+      refreshToken: token.refreshToken,
     });
 
     return {
       ...token,
-      accessToken: response.data.access_token,
-      refreshToken: response.data.refresh_token ?? token.refreshToken,
-      accessTokenExpires: Date.now() + response.data.expires_in * 1000,
+      accessToken: response.data.tokens.accessToken,
+      refreshToken: response.data.tokens.refreshToken ?? token.refreshToken,
+      accessTokenExpires: Date.now() + response.data.tokens.expiresInSeconds * 1000,
     };
   } catch (error) {
     console.error('Token refresh failed:', error);

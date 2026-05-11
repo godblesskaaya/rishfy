@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 
 import '../../../../core/constants/app_constants.dart';
 import '../../../../shared/widgets/primary_button.dart';
+import '../../data/datasources/location_search_remote_datasource.dart';
 import '../../data/models/route_models.dart';
 import '../providers/route_provider.dart';
 
@@ -29,8 +30,18 @@ class _PostRouteScreenState extends ConsumerState<PostRouteScreen> {
   DateTime _departureDate = DateTime.now();
   TimeOfDay _departureTime = TimeOfDay.now();
   int _availableSeats = 1;
+  int _flexibilityMinutes = 15;
   bool _manualVehicleEntry = false;
   String? _selectedVehicleId;
+
+  LocationSearchResult? _originSelection;
+  LocationSearchResult? _destinationSelection;
+
+  List<LocationSearchResult> _originSuggestions = const <LocationSearchResult>[];
+  List<LocationSearchResult> _destinationSuggestions =
+      const <LocationSearchResult>[];
+  bool _loadingOriginSuggestions = false;
+  bool _loadingDestinationSuggestions = false;
 
   @override
   void initState() {
@@ -80,8 +91,98 @@ class _PostRouteScreenState extends ConsumerState<PostRouteScreen> {
 
   bool _isValidUuid(String value) => _uuidPattern.hasMatch(value.trim());
 
-  Future<void> _submit(List<DriverVehicleOption> vehicleOptions) async {
+  Future<void> _fetchSuggestions(String field, String query) async {
+    final String trimmed = query.trim();
+    if (trimmed.length < 3) {
+      setState(() {
+        if (field == 'origin') {
+          _originSuggestions = const <LocationSearchResult>[];
+          _loadingOriginSuggestions = false;
+        } else {
+          _destinationSuggestions = const <LocationSearchResult>[];
+          _loadingDestinationSuggestions = false;
+        }
+      });
+      return;
+    }
+    setState(() {
+      if (field == 'origin') {
+        _loadingOriginSuggestions = true;
+      } else {
+        _loadingDestinationSuggestions = true;
+      }
+    });
+    try {
+      final List<LocationSearchResult> results = await ref
+          .read(locationSearchDataSourceProvider)
+          .geocodeAddress(trimmed);
+      if (!mounted) return;
+      setState(() {
+        if (field == 'origin') {
+          _originSuggestions = results;
+          _loadingOriginSuggestions = false;
+        } else {
+          _destinationSuggestions = results;
+          _loadingDestinationSuggestions = false;
+        }
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        if (field == 'origin') {
+          _originSuggestions = const <LocationSearchResult>[];
+          _loadingOriginSuggestions = false;
+        } else {
+          _destinationSuggestions = const <LocationSearchResult>[];
+          _loadingDestinationSuggestions = false;
+        }
+      });
+    }
+  }
+
+  void _applySelection(String field, LocationSearchResult result) {
+    setState(() {
+      if (field == 'origin') {
+        _originSelection = result;
+        _originCtrl.text = result.label;
+        _originSuggestions = const <LocationSearchResult>[];
+      } else {
+        _destinationSelection = result;
+        _destinationCtrl.text = result.label;
+        _destinationSuggestions = const <LocationSearchResult>[];
+      }
+    });
+    // Reset preview when either endpoint changes
+    ref.read(previewRouteProvider.notifier).reset();
+  }
+
+  Future<void> _preview() async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
+
+    if (_originSelection == null || _destinationSelection == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content:
+              Text('Select origin and destination from the suggestion list.'),
+        ),
+      );
+      return;
+    }
+
+    await ref.read(previewRouteProvider.notifier).preview(
+          RoutePreviewRequest(
+            originLat: _originSelection!.latitude,
+            originLng: _originSelection!.longitude,
+            destinationLat: _destinationSelection!.latitude,
+            destinationLng: _destinationSelection!.longitude,
+            flexibilityMinutes: _flexibilityMinutes,
+          ),
+        );
+  }
+
+  Future<void> _submit(List<DriverVehicleOption> vehicleOptions) async {
+    final PreviewRouteState previewState = ref.read(previewRouteProvider);
+    if (previewState.status != PreviewRouteStatus.success) return;
 
     final bool useManualVehicle = vehicleOptions.isEmpty || _manualVehicleEntry;
     final String vehicleId = useManualVehicle
@@ -115,10 +216,15 @@ class _PostRouteScreenState extends ConsumerState<PostRouteScreen> {
           CreateRouteRequest(
             vehicleId: vehicleId,
             originName: _originCtrl.text.trim(),
+            originLat: _originSelection!.latitude,
+            originLng: _originSelection!.longitude,
             destinationName: _destinationCtrl.text.trim(),
+            destinationLat: _destinationSelection!.latitude,
+            destinationLng: _destinationSelection!.longitude,
             availableSeats: _availableSeats,
             pricePerSeat: price,
             departureTime: departure,
+            flexibilityMinutes: _flexibilityMinutes,
           ),
         );
 
@@ -140,10 +246,13 @@ class _PostRouteScreenState extends ConsumerState<PostRouteScreen> {
     final AsyncValue<List<DriverVehicleOption>> vehiclesAsync =
         ref.watch(myVehicleOptionsProvider);
     final CreateRouteState createState = ref.watch(createRouteProvider);
+    final PreviewRouteState previewState = ref.watch(previewRouteProvider);
     final List<DriverVehicleOption> vehicleOptions =
         vehiclesAsync.valueOrNull ?? const <DriverVehicleOption>[];
     final bool useManualVehicle = vehicleOptions.isEmpty || _manualVehicleEntry;
     final bool isSubmitting = createState.status == CreateRouteStatus.loading;
+    final bool isPreviewing = previewState.status == PreviewRouteStatus.loading;
+    final bool hasPreview = previewState.status == PreviewRouteStatus.success;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Post a route')),
@@ -154,14 +263,26 @@ class _PostRouteScreenState extends ConsumerState<PostRouteScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
+              // ── Origin ──────────────────────────────────────────────────
               TextFormField(
                 controller: _originCtrl,
                 textInputAction: TextInputAction.next,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: 'Origin',
-                  hintText: 'City name or lat,lng',
-                  border: OutlineInputBorder(),
+                  hintText: 'Search city or area',
+                  border: const OutlineInputBorder(),
+                  suffixIcon: _originSelection != null
+                      ? const Icon(Icons.check_circle_outline,
+                          color: Colors.green)
+                      : null,
                 ),
+                onChanged: (String v) {
+                  if (_originSelection?.label != v.trim()) {
+                    setState(() => _originSelection = null);
+                    ref.read(previewRouteProvider.notifier).reset();
+                  }
+                  _fetchSuggestions('origin', v);
+                },
                 validator: (String? value) {
                   if (value == null || value.trim().isEmpty) {
                     return 'Origin is required';
@@ -169,15 +290,40 @@ class _PostRouteScreenState extends ConsumerState<PostRouteScreen> {
                   return null;
                 },
               ),
+              if (_loadingOriginSuggestions) ...<Widget>[
+                const SizedBox(height: 4),
+                const LinearProgressIndicator(),
+              ],
+              if (_originSuggestions.isNotEmpty) ...<Widget>[
+                const SizedBox(height: 4),
+                _SuggestionList(
+                  suggestions: _originSuggestions,
+                  onSelect: (LocationSearchResult r) =>
+                      _applySelection('origin', r),
+                ),
+              ],
               const SizedBox(height: 12),
+
+              // ── Destination ──────────────────────────────────────────────
               TextFormField(
                 controller: _destinationCtrl,
                 textInputAction: TextInputAction.next,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: 'Destination',
-                  hintText: 'City name or lat,lng',
-                  border: OutlineInputBorder(),
+                  hintText: 'Search city or area',
+                  border: const OutlineInputBorder(),
+                  suffixIcon: _destinationSelection != null
+                      ? const Icon(Icons.check_circle_outline,
+                          color: Colors.green)
+                      : null,
                 ),
+                onChanged: (String v) {
+                  if (_destinationSelection?.label != v.trim()) {
+                    setState(() => _destinationSelection = null);
+                    ref.read(previewRouteProvider.notifier).reset();
+                  }
+                  _fetchSuggestions('destination', v);
+                },
                 validator: (String? value) {
                   if (value == null || value.trim().isEmpty) {
                     return 'Destination is required';
@@ -185,12 +331,21 @@ class _PostRouteScreenState extends ConsumerState<PostRouteScreen> {
                   return null;
                 },
               ),
-              const SizedBox(height: 6),
-              Text(
-                'Use a common city name in Tanzania (example: Dar es Salaam) or a lat,lng pair.',
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
+              if (_loadingDestinationSuggestions) ...<Widget>[
+                const SizedBox(height: 4),
+                const LinearProgressIndicator(),
+              ],
+              if (_destinationSuggestions.isNotEmpty) ...<Widget>[
+                const SizedBox(height: 4),
+                _SuggestionList(
+                  suggestions: _destinationSuggestions,
+                  onSelect: (LocationSearchResult r) =>
+                      _applySelection('destination', r),
+                ),
+              ],
               const SizedBox(height: 16),
+
+              // ── Departure date/time ──────────────────────────────────────
               Row(
                 children: <Widget>[
                   Expanded(
@@ -213,6 +368,40 @@ class _PostRouteScreenState extends ConsumerState<PostRouteScreen> {
                 ],
               ),
               const SizedBox(height: 16),
+
+              // ── Flexibility ──────────────────────────────────────────────
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    'Pickup flexibility',
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Passengers whose desired pickup time is within this window '
+                    'of your route will be matched.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    children: <int>[0, 5, 10, 15, 30].map((int m) {
+                      return ChoiceChip(
+                        label: Text(m == 0 ? 'Exact' : '$m min'),
+                        selected: _flexibilityMinutes == m,
+                        onSelected: (_) {
+                          setState(() => _flexibilityMinutes = m);
+                          ref.read(previewRouteProvider.notifier).reset();
+                        },
+                      );
+                    }).toList(),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+
+              // ── Available seats ──────────────────────────────────────────
               Row(
                 children: <Widget>[
                   Text('Available seats',
@@ -234,6 +423,8 @@ class _PostRouteScreenState extends ConsumerState<PostRouteScreen> {
                 ],
               ),
               const SizedBox(height: 16),
+
+              // ── Price ────────────────────────────────────────────────────
               TextFormField(
                 controller: _priceCtrl,
                 keyboardType: TextInputType.number,
@@ -251,6 +442,8 @@ class _PostRouteScreenState extends ConsumerState<PostRouteScreen> {
                 },
               ),
               const SizedBox(height: 16),
+
+              // ── Vehicle ──────────────────────────────────────────────────
               if (vehicleOptions.isNotEmpty) ...<Widget>[
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
@@ -314,39 +507,161 @@ class _PostRouteScreenState extends ConsumerState<PostRouteScreen> {
                   'No vehicles found on your driver profile yet.',
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: TextButton.icon(
-                    onPressed: () => context.push('/profile/vehicles'),
-                    icon: const Icon(Icons.directions_car_outlined),
-                    label: const Text('Open vehicle setup'),
-                  ),
-                ),
               ],
               if (vehiclesAsync.hasError) ...<Widget>[
                 const SizedBox(height: 8),
                 Text(
                   'Vehicle list unavailable. Enter vehicle UUID manually.',
-                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                  style: TextStyle(
+                      color: Theme.of(context).colorScheme.error),
                 ),
               ],
               const SizedBox(height: 24),
-              if (createState.error != null) ...<Widget>[
-                Text(
-                  createState.error!,
-                  style: TextStyle(color: Theme.of(context).colorScheme.error),
-                ),
+
+              // ── Preview result ───────────────────────────────────────────
+              if (previewState.error != null) ...<Widget>[
+                _ErrorCard(message: previewState.error!),
                 const SizedBox(height: 12),
               ],
-              PrimaryButton(
-                label: 'Post route',
-                icon: Icons.add_road,
-                loading: isSubmitting,
-                onPressed: isSubmitting ? null : () => _submit(vehicleOptions),
-              ),
+              if (hasPreview) ...<Widget>[
+                _PreviewCard(preview: previewState.preview!),
+                const SizedBox(height: 16),
+              ],
+
+              // ── Create errors ────────────────────────────────────────────
+              if (createState.error != null) ...<Widget>[
+                _ErrorCard(message: createState.error!),
+                const SizedBox(height: 12),
+              ],
+
+              // ── Action buttons ───────────────────────────────────────────
+              if (!hasPreview)
+                PrimaryButton(
+                  label: 'Preview route',
+                  icon: Icons.route,
+                  loading: isPreviewing,
+                  onPressed: isPreviewing ? null : _preview,
+                )
+              else
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    OutlinedButton.icon(
+                      onPressed: () {
+                        ref.read(previewRouteProvider.notifier).reset();
+                      },
+                      icon: const Icon(Icons.edit_outlined),
+                      label: const Text('Adjust route'),
+                    ),
+                    const SizedBox(height: 12),
+                    PrimaryButton(
+                      label: 'Post route',
+                      icon: Icons.add_road,
+                      loading: isSubmitting,
+                      onPressed:
+                          isSubmitting ? null : () => _submit(vehicleOptions),
+                    ),
+                  ],
+                ),
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _SuggestionList extends StatelessWidget {
+  const _SuggestionList({
+    required this.suggestions,
+    required this.onSelect,
+  });
+
+  final List<LocationSearchResult> suggestions;
+  final ValueChanged<LocationSearchResult> onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        border: Border.all(
+          color: Theme.of(context).colorScheme.outlineVariant,
+        ),
+        borderRadius: BorderRadius.circular(AppConstants.radiusMd),
+      ),
+      child: Column(
+        children: suggestions
+            .take(4)
+            .map(
+              (LocationSearchResult r) => ListTile(
+                dense: true,
+                leading: const Icon(Icons.place_outlined, size: 18),
+                title: Text(r.label,
+                    style: Theme.of(context).textTheme.bodySmall),
+                onTap: () => onSelect(r),
+              ),
+            )
+            .toList(),
+      ),
+    );
+  }
+}
+
+class _PreviewCard extends StatelessWidget {
+  const _PreviewCard({required this.preview});
+
+  final RoutePreviewDto preview;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(AppConstants.spaceMd),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.primaryContainer,
+        borderRadius: BorderRadius.circular(AppConstants.radiusMd),
+      ),
+      child: Row(
+        children: <Widget>[
+          const Icon(Icons.check_circle_outline),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  'Route preview',
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+                Text(
+                  '${preview.distanceLabel} · ${preview.durationLabel}',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ErrorCard extends StatelessWidget {
+  const _ErrorCard({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(AppConstants.spaceMd),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.errorContainer,
+        borderRadius: BorderRadius.circular(AppConstants.radiusMd),
+      ),
+      child: Text(
+        message,
+        style:
+            TextStyle(color: Theme.of(context).colorScheme.onErrorContainer),
       ),
     );
   }

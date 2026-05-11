@@ -16,9 +16,30 @@ import '../../data/models/booking_models.dart';
 import '../providers/booking_provider.dart';
 
 class CreateBookingScreen extends ConsumerStatefulWidget {
-  const CreateBookingScreen({required this.routeId, super.key});
+  const CreateBookingScreen({
+    required this.routeId,
+    super.key,
+    this.driverId,
+    this.pricePerSeat,
+    this.suggestedPickupName,
+    this.suggestedPickupLat,
+    this.suggestedPickupLng,
+    this.estimatedPickupTime,
+    this.walkingDistanceToPickup,
+    this.walkingTimeToPickup,
+    this.walkingDistanceFromDropoff,
+  });
 
   final String routeId;
+  final String? driverId;
+  final int? pricePerSeat;
+  final String? suggestedPickupName;
+  final double? suggestedPickupLat;
+  final double? suggestedPickupLng;
+  final DateTime? estimatedPickupTime;
+  final int? walkingDistanceToPickup;
+  final int? walkingTimeToPickup;
+  final int? walkingDistanceFromDropoff;
 
   @override
   ConsumerState<CreateBookingScreen> createState() =>
@@ -60,9 +81,9 @@ class _CreateBookingScreenState extends ConsumerState<CreateBookingScreen> {
     await ref.read(createBookingProvider.notifier).submit(
           CreateBookingRequest(
             routeId: widget.routeId,
-            driverId: route.driverUserId,
+            driverId: widget.driverId ?? route.driverUserId,
             seatsBooked: _seatCount,
-            pricePerSeat: route.pricePerSeatTzs,
+            pricePerSeat: widget.pricePerSeat ?? route.pricePerSeatTzs,
             paymentMethod: _paymentMethod,
             payerPhone: phone,
             idempotencyKey: const Uuid().v4(),
@@ -72,6 +93,13 @@ class _CreateBookingScreenState extends ConsumerState<CreateBookingScreen> {
             pickupLng: route.originLng,
             dropoffLat: route.destinationLat,
             dropoffLng: route.destinationLng,
+            suggestedPickupName: widget.suggestedPickupName,
+            pickupPointLat: widget.suggestedPickupLat,
+            pickupPointLng: widget.suggestedPickupLng,
+            estimatedPickupTime: widget.estimatedPickupTime,
+            pickupWalkingDistance: widget.walkingDistanceToPickup,
+            pickupWalkingTime: widget.walkingTimeToPickup,
+            dropoffWalkingDistance: widget.walkingDistanceFromDropoff,
           ),
         );
     final CreateBookingState s = ref.read(createBookingProvider);

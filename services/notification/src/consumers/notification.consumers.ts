@@ -8,6 +8,14 @@ const svc = new NotificationService();
 interface BookingCreatedPayload {
   bookingId: string; passengerId: string; driverId: string;
   confirmationCode: string; driverName?: string; departureTime?: string;
+  suggestedPickupName?: string;
+  suggestedPickupLat?: number;
+  suggestedPickupLng?: number;
+  estimatedPickupTime?: string;
+}
+
+interface BookingDeclinedPayload {
+  bookingId: string; passengerId: string; driverId: string; reason: string;
 }
 
 interface PaymentPayload {
@@ -33,8 +41,8 @@ interface BookingEmergencyPayload {
 interface TripPayload { bookingId: string; driverId: string; passengerId: string; driverName?: string }
 
 const TOPICS = [
-  'booking.created', 'booking.confirmed', 'booking.cancelled', 'booking.expired',
-  'booking.emergency',
+  'booking.created', 'booking.confirmed', 'booking.cancelled', 'booking.declined',
+  'booking.expired', 'booking.emergency',
   'booking.trip_started', 'booking.trip_completed', 'booking.rated',
   'payment.completed', 'payment.failed',
   'driver.arrived',
@@ -65,6 +73,7 @@ async function routeEvent(topic: string, p: Record<string, unknown>, redis: IORe
 
   if (topic === 'booking.created') {
     const d = p as unknown as BookingCreatedPayload;
+    // Notify passenger: booking received
     await enq({
       userId: d.passengerId,
       templateKey: 'booking.created',
@@ -74,6 +83,36 @@ async function routeEvent(topic: string, p: Record<string, unknown>, redis: IORe
         driver_name: d.driverName ?? 'your driver',
         departure_time: d.departureTime ?? '',
       },
+      sourceEventType: topic,
+      sourceEventId: d.bookingId,
+    });
+    // Notify driver: passenger will wait at suggested pickup point
+    await enq({
+      userId: d.driverId,
+      templateKey: 'booking.driver_new_booking',
+      channels: ['push', 'in_app'],
+      vars: {
+        pickup_name: d.suggestedPickupName ?? 'along your route',
+        estimated_pickup_time: d.estimatedPickupTime ?? '',
+        confirmation_code: d.confirmationCode,
+      },
+      sourceEventType: topic,
+      sourceEventId: d.bookingId,
+      data: {
+        bookingId: d.bookingId,
+        suggestedPickupLat: d.suggestedPickupLat,
+        suggestedPickupLng: d.suggestedPickupLng,
+      },
+    });
+  } else if (topic === 'booking.declined') {
+    const d = p as unknown as BookingDeclinedPayload;
+    await enq({
+      userId: d.passengerId,
+      templateKey: 'booking.declined',
+      channels: ['push', 'sms', 'in_app'],
+      vars: { reason: d.reason },
+      fallbackTitle: 'Booking declined',
+      fallbackBody: 'Your booking was declined by the driver. Your seat has been released — please search again.',
       sourceEventType: topic,
       sourceEventId: d.bookingId,
     });

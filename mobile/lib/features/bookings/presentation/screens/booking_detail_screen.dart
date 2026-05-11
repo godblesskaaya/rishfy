@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -5,6 +7,7 @@ import 'package:intl/intl.dart';
 import '../../../../core/constants/app_constants.dart';
 import '../../../../shared/widgets/async_views.dart';
 import '../../../../shared/widgets/primary_button.dart';
+import '../../../auth/presentation/providers/auth_provider.dart';
 import '../../domain/entities/booking_entity.dart';
 import '../providers/booking_provider.dart';
 
@@ -19,6 +22,30 @@ class BookingDetailScreen extends ConsumerStatefulWidget {
 
 class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
   bool _busy = false;
+  Timer? _countdownTimer;
+  Duration _declineTimeLeft = Duration.zero;
+
+  @override
+  void dispose() {
+    _countdownTimer?.cancel();
+    super.dispose();
+  }
+
+  void _startCountdown(DateTime createdAt) {
+    _countdownTimer?.cancel();
+    _updateCountdown(createdAt);
+    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      _updateCountdown(createdAt);
+    });
+  }
+
+  void _updateCountdown(DateTime createdAt) {
+    final DateTime expiresAt = createdAt.add(const Duration(minutes: 10));
+    final Duration left = expiresAt.difference(DateTime.now());
+    setState(() => _declineTimeLeft = left.isNegative ? Duration.zero : left);
+    if (_declineTimeLeft == Duration.zero) _countdownTimer?.cancel();
+  }
 
   Future<void> _cancelBooking() async {
     setState(() => _busy = true);
@@ -36,6 +63,59 @@ class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
     }
   }
 
+  Future<void> _declineBooking() async {
+    final String? reason = await _showDeclineReasonDialog();
+    if (reason == null) return;
+
+    final DeclineBookingState result = await ref
+        .read(declineBookingProvider.notifier)
+        .decline(widget.bookingId, reason: reason.isEmpty ? null : reason)
+        .then((_) => ref.read(declineBookingProvider));
+
+    if (!mounted) return;
+    if (result.status == DeclineBookingStatus.success) {
+      ref.invalidate(bookingDetailProvider(widget.bookingId));
+      ref.invalidate(myBookingsProvider);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Booking declined.')),
+      );
+    } else if (result.status == DeclineBookingStatus.failed) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(result.error ?? 'Failed to decline booking')),
+      );
+    }
+  }
+
+  Future<String?> _showDeclineReasonDialog() async {
+    final TextEditingController ctrl = TextEditingController();
+    final String? reason = await showDialog<String>(
+      context: context,
+      builder: (BuildContext ctx) => AlertDialog(
+        title: const Text('Decline booking'),
+        content: TextField(
+          controller: ctrl,
+          maxLines: 2,
+          decoration: const InputDecoration(
+            hintText: 'Reason (optional)',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(ctrl.text.trim()),
+            child: const Text('Decline'),
+          ),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    return reason;
+  }
+
   Future<void> _rateBooking() async {
     final TextEditingController commentCtrl = TextEditingController();
     int rating = 5;
@@ -44,7 +124,8 @@ class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
       context: context,
       builder: (BuildContext context) {
         return StatefulBuilder(
-          builder: (BuildContext context, void Function(void Function()) setDialogState) {
+          builder:
+              (BuildContext context, void Function(void Function()) setDialogState) {
             return AlertDialog(
               title: const Text('Rate this trip'),
               content: Column(
@@ -101,7 +182,9 @@ class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
       await ref.read(bookingDataSourceProvider).rateTrip(
             bookingId: widget.bookingId,
             rating: rating,
-            comment: commentCtrl.text.trim().isEmpty ? null : commentCtrl.text.trim(),
+            comment: commentCtrl.text.trim().isEmpty
+                ? null
+                : commentCtrl.text.trim(),
           );
       ref.invalidate(bookingDetailProvider(widget.bookingId));
       ref.invalidate(myBookingsProvider);
@@ -116,10 +199,18 @@ class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
     }
   }
 
+  String _formatCountdown(Duration d) {
+    final int mins = d.inMinutes;
+    final int secs = d.inSeconds % 60;
+    return '${mins.toString().padLeft(2, '0')}:${secs.toString().padLeft(2, '0')}';
+  }
+
   @override
   Widget build(BuildContext context) {
     final AsyncValue<BookingEntity> asyncBooking =
         ref.watch(bookingDetailProvider(widget.bookingId));
+    final String? currentUserId = ref.watch(currentUserProvider)?.userId;
+    final DeclineBookingState declineState = ref.watch(declineBookingProvider);
 
     return Scaffold(
       appBar: AppBar(title: const Text('Booking details')),
@@ -127,12 +218,25 @@ class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
         loading: () => const LoadingView(message: 'Loading booking...'),
         error: (Object e, _) => ErrorView(
           message: e.toString(),
-          onRetry: () => ref.invalidate(bookingDetailProvider(widget.bookingId)),
+          onRetry: () =>
+              ref.invalidate(bookingDetailProvider(widget.bookingId)),
         ),
         data: (BookingEntity booking) {
           final bool canCancel =
               booking.status == 'pending' || booking.status == 'confirmed';
           final bool canRate = booking.status == 'completed';
+          final bool isDriver = currentUserId != null &&
+              booking.driverId == currentUserId;
+          final bool canDecline = isDriver &&
+              booking.status == 'pending' &&
+              _declineTimeLeft > Duration.zero;
+          final bool declineWindowOpen = isDriver && booking.status == 'pending';
+
+          // Start countdown when booking data is first available
+          if (declineWindowOpen && _countdownTimer == null) {
+            WidgetsBinding.instance.addPostFrameCallback(
+                (_) => _startCountdown(booking.createdAt));
+          }
 
           return SingleChildScrollView(
             padding: const EdgeInsets.all(AppConstants.spaceLg),
@@ -146,11 +250,13 @@ class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: <Widget>[
                         Text(
-                          '${booking.originName ?? 'Route'} → ${booking.destinationName ?? ''}',
+                          '${booking.originName ?? 'Route'} → '
+                          '${booking.destinationName ?? ''}',
                           style: Theme.of(context).textTheme.titleMedium,
                         ),
                         const SizedBox(height: 8),
-                        _DetailRow(label: 'Booking ID', value: booking.bookingId),
+                        _DetailRow(
+                            label: 'Booking ID', value: booking.bookingId),
                         _DetailRow(
                           label: 'Created',
                           value: DateFormat('EEE, d MMM y · HH:mm')
@@ -163,30 +269,83 @@ class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
                                 .format(booking.departureDatetime!.toLocal()),
                           ),
                         _DetailRow(label: 'Status', value: booking.status),
-                        _DetailRow(label: 'Payment', value: booking.paymentStatus),
-                        _DetailRow(label: 'Seats', value: '${booking.seatCount}'),
+                        _DetailRow(
+                            label: 'Payment', value: booking.paymentStatus),
+                        _DetailRow(
+                            label: 'Seats', value: '${booking.seatCount}'),
                         _DetailRow(
                           label: 'Total',
-                          value: 'TZS ${NumberFormat('#,###').format(booking.totalPriceTzs)}',
+                          value:
+                              'TZS ${NumberFormat('#,###').format(booking.totalPriceTzs)}',
                         ),
                         if (booking.confirmationCode != null)
                           _DetailRow(
                             label: 'Confirmation code',
                             value: booking.confirmationCode!,
                           ),
+                        if (booking.suggestedPickupName != null)
+                          _DetailRow(
+                            label: 'Pickup point',
+                            value: booking.suggestedPickupName!,
+                          ),
                       ],
                     ),
                   ),
                 ),
                 const SizedBox(height: 16),
-                if (canCancel)
+                // ── Decline section (drivers only) ─────────────────────
+                if (declineWindowOpen) ...<Widget>[
+                  Container(
+                    padding: const EdgeInsets.all(AppConstants.spaceMd),
+                    decoration: BoxDecoration(
+                      color: _declineTimeLeft > Duration.zero
+                          ? Theme.of(context).colorScheme.tertiaryContainer
+                          : Theme.of(context).colorScheme.surfaceContainerHighest,
+                      borderRadius:
+                          BorderRadius.circular(AppConstants.radiusMd),
+                    ),
+                    child: Row(
+                      children: <Widget>[
+                        const Icon(Icons.timer_outlined, size: 18),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            _declineTimeLeft > Duration.zero
+                                ? 'Decline window: ${_formatCountdown(_declineTimeLeft)}'
+                                : 'Decline window expired',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  if (canDecline)
+                    OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor:
+                            Theme.of(context).colorScheme.error,
+                        side: BorderSide(
+                            color: Theme.of(context).colorScheme.error),
+                      ),
+                      onPressed: declineState.status ==
+                              DeclineBookingStatus.loading
+                          ? null
+                          : _declineBooking,
+                      icon: const Icon(Icons.close),
+                      label: const Text('Decline booking'),
+                    ),
+                  const SizedBox(height: 8),
+                ],
+                // ── Passenger actions ──────────────────────────────────
+                if (canCancel && !isDriver)
                   PrimaryButton(
                     label: 'Cancel booking',
                     loading: _busy,
                     onPressed: _busy ? null : _cancelBooking,
                   ),
                 if (canRate) ...<Widget>[
-                  if (canCancel) const SizedBox(height: 12),
+                  if (canCancel && !isDriver) const SizedBox(height: 12),
                   PrimaryButton(
                     label: 'Rate trip',
                     loading: _busy,

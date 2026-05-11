@@ -35,7 +35,7 @@ const nextConfig = {
   // Image optimization — allow remote avatars + vehicle photos from our S3/MinIO
   images: {
     remotePatterns: [
-      { protocol: 'https', hostname: '*.rishfy.tz' },
+      { protocol: 'https', hostname: '*.rishfy.com' },
       { protocol: 'http', hostname: 'localhost' },
       { protocol: 'http', hostname: 'minio' },
     ],

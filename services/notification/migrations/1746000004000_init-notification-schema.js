@@ -12,7 +12,7 @@ exports.up = (pgm) => {
     channel: { type: 'notification_channel', notNull: true },
     subject: { type: 'varchar(255)' },
     body_template: { type: 'text', notNull: true },
-    variables: { type: 'jsonb', default: "'[]'" },
+    variables: { type: 'jsonb', default: pgm.func("'[]'") },
     is_active: { type: 'boolean', notNull: true, default: true },
     created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
     updated_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
@@ -31,7 +31,7 @@ exports.up = (pgm) => {
     title: { type: 'varchar(255)' },
     body: { type: 'text', notNull: true },
 
-    data: { type: 'jsonb', default: "'{}'" },
+    data: { type: 'jsonb', default: pgm.func("'{}'") },
     is_read: { type: 'boolean', notNull: true, default: false },
     read_at: { type: 'timestamptz' },
 

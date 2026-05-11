@@ -10,6 +10,7 @@ class BookingDto {
     required this.status,
     required this.paymentStatus,
     required this.createdAt,
+    this.driverId,
     this.confirmationCode,
     this.originName,
     this.destinationName,
@@ -17,6 +18,7 @@ class BookingDto {
     this.driverName,
     this.vehiclePlate,
     this.paymentId,
+    this.suggestedPickupName,
   });
 
   final String bookingId;
@@ -27,6 +29,7 @@ class BookingDto {
   final String status;
   final String paymentStatus;
   final DateTime createdAt;
+  final String? driverId;
   final String? confirmationCode;
   final String? originName;
   final String? destinationName;
@@ -34,6 +37,7 @@ class BookingDto {
   final String? driverName;
   final String? vehiclePlate;
   final String? paymentId;
+  final String? suggestedPickupName;
 
   factory BookingDto.fromJson(Map<String, dynamic> j) => BookingDto(
         bookingId: (j['booking_id'] ?? j['id']) as String,
@@ -45,6 +49,7 @@ class BookingDto {
         status: j['status'] as String,
         paymentStatus: j['payment_status'] as String? ?? 'pending',
         createdAt: DateTime.parse(j['created_at'] as String),
+        driverId: j['driver_id'] as String?,
         confirmationCode: j['confirmation_code'] as String?,
         originName: j['origin_name'] as String?,
         destinationName: j['destination_name'] as String?,
@@ -54,6 +59,7 @@ class BookingDto {
         driverName: j['driver_name'] as String?,
         vehiclePlate: j['vehicle_plate'] as String?,
         paymentId: j['payment_id'] as String?,
+        suggestedPickupName: j['suggested_pickup_name'] as String?,
       );
 
   BookingEntity toDomain() => BookingEntity(
@@ -65,6 +71,7 @@ class BookingDto {
         status: status,
         paymentStatus: paymentStatus,
         createdAt: createdAt,
+        driverId: driverId,
         confirmationCode: confirmationCode,
         originName: originName,
         destinationName: destinationName,
@@ -72,6 +79,7 @@ class BookingDto {
         driverName: driverName,
         vehiclePlate: vehiclePlate,
         paymentId: paymentId,
+        suggestedPickupName: suggestedPickupName,
       );
 }
 
@@ -90,6 +98,15 @@ class CreateBookingRequest {
     this.pickupLng,
     this.dropoffLat,
     this.dropoffLng,
+    this.suggestedPickupName,
+    this.pickupPointLat,
+    this.pickupPointLng,
+    this.dropoffPointLat,
+    this.dropoffPointLng,
+    this.estimatedPickupTime,
+    this.pickupWalkingDistance,
+    this.pickupWalkingTime,
+    this.dropoffWalkingDistance,
   });
 
   final String routeId;
@@ -105,6 +122,15 @@ class CreateBookingRequest {
   final double? pickupLng;
   final double? dropoffLat;
   final double? dropoffLng;
+  final String? suggestedPickupName;
+  final double? pickupPointLat;
+  final double? pickupPointLng;
+  final double? dropoffPointLat;
+  final double? dropoffPointLng;
+  final DateTime? estimatedPickupTime;
+  final int? pickupWalkingDistance;
+  final int? pickupWalkingTime;
+  final int? dropoffWalkingDistance;
 
   int get totalAmountTzs => seatsBooked * pricePerSeat;
 
@@ -120,6 +146,18 @@ class CreateBookingRequest {
         if (pickupLng != null) 'pickupLng': pickupLng,
         if (dropoffLat != null) 'dropoffLat': dropoffLat,
         if (dropoffLng != null) 'dropoffLng': dropoffLng,
+        if (suggestedPickupName != null) 'suggestedPickupName': suggestedPickupName,
+        if (pickupPointLat != null) 'pickupPointLat': pickupPointLat,
+        if (pickupPointLng != null) 'pickupPointLng': pickupPointLng,
+        if (dropoffPointLat != null) 'dropoffPointLat': dropoffPointLat,
+        if (dropoffPointLng != null) 'dropoffPointLng': dropoffPointLng,
+        if (estimatedPickupTime != null)
+          'estimatedPickupTime': estimatedPickupTime!.toUtc().toIso8601String(),
+        if (pickupWalkingDistance != null)
+          'pickupWalkingDistance': pickupWalkingDistance,
+        if (pickupWalkingTime != null) 'pickupWalkingTime': pickupWalkingTime,
+        if (dropoffWalkingDistance != null)
+          'dropoffWalkingDistance': dropoffWalkingDistance,
       };
 
   Map<String, dynamic> toPaymentJson(String bookingId) => <String, dynamic>{

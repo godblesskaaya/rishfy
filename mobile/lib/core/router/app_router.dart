@@ -171,6 +171,18 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
               state.extra as Map<String, dynamic>?;
           return CreateBookingScreen(
             routeId: extra?['routeId'] as String? ?? '',
+            driverId: extra?['driverId'] as String?,
+            pricePerSeat: extra?['pricePerSeat'] as int?,
+            suggestedPickupName: extra?['suggestedPickupName'] as String?,
+            suggestedPickupLat: (extra?['suggestedPickupLat'] as num?)?.toDouble(),
+            suggestedPickupLng: (extra?['suggestedPickupLng'] as num?)?.toDouble(),
+            estimatedPickupTime: extra?['estimatedPickupTime'] != null
+                ? DateTime.tryParse(extra!['estimatedPickupTime'] as String)
+                : null,
+            walkingDistanceToPickup: extra?['walkingDistanceToPickup'] as int?,
+            walkingTimeToPickup: extra?['walkingTimeToPickup'] as int?,
+            walkingDistanceFromDropoff:
+                extra?['walkingDistanceFromDropoff'] as int?,
           );
         },
       ),
