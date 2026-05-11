@@ -3,6 +3,7 @@ import { config } from './config.js';
 import { pgPool } from './db.js';
 import { logger } from './logger.js';
 import { startGrpcServer } from './grpc/route.server.js';
+import { startRouteExpiryWorker } from './jobs/route-expiry.worker.js';
 import {
   createKafkaClient,
   createKafkaProducer,
@@ -24,10 +25,12 @@ async function main(): Promise<void> {
   logger.info(`HTTP server listening on :${config.HTTP_PORT}`);
 
   startGrpcServer();
+  const expiryTimer = startRouteExpiryWorker(pgPool);
 
   const shutdown = async (signal: string): Promise<void> => {
     logger.info({ signal }, 'Shutting down...');
     try {
+      clearInterval(expiryTimer);
       await app.close();
       await producer.disconnect();
       await pgPool.end();

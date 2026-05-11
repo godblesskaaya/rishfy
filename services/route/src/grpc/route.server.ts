@@ -50,8 +50,8 @@ const reserveSeats: Handler<ReserveSeatsReq, ReserveSeatsRes> = async (call, cal
 
 const releaseSeats: Handler<ReleaseSeatsReq, ReleaseSeatsRes> = async (call, callback) => {
   try {
-    const { bookingId } = call.request;
-    const route = await repo.findById(bookingId);
+    const { reservationId } = call.request; // reservationId carries the routeId
+    const route = await repo.findById(reservationId);
     if (!route) {
       callback(null, { success: false, seatsRemaining: 0 });
       return;

@@ -14,9 +14,10 @@ const configSchema = z.object({
 
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().url().optional(),
 
-  GOOGLE_MAPS_API_KEY: z.string().min(1),
+  GOOGLE_MAPS_API_KEY: z.string().default(''),
   USER_SERVICE_GRPC_URL: z.string().default('user-service:50052'),
   SEARCH_RADIUS_METERS: z.coerce.number().int().default(5000),
+  COARSE_MATCH_RADIUS_METERS: z.coerce.number().int().default(3000),
   ROUTE_CACHE_TTL_SECONDS: z.coerce.number().int().default(300),
 });
 

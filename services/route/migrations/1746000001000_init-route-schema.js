@@ -3,7 +3,6 @@
  */
 exports.up = (pgm) => {
   pgm.createExtension('uuid-ossp', { ifNotExists: true });
-  pgm.createExtension('postgis', { ifNotExists: true });
 
   pgm.createType('route_status', ['draft', 'active', 'full', 'cancelled', 'completed']);
   pgm.createType('recurrence_type', ['none', 'daily', 'weekdays', 'weekly', 'custom']);
@@ -14,11 +13,12 @@ exports.up = (pgm) => {
     vehicle_id: { type: 'uuid', notNull: true },
 
     origin_name: { type: 'varchar(500)', notNull: true },
-    origin_point: { type: 'geography(Point, 4326)', notNull: true },
+    origin_lat: { type: 'numeric(10,7)', notNull: true },
+    origin_lng: { type: 'numeric(10,7)', notNull: true },
     destination_name: { type: 'varchar(500)', notNull: true },
-    destination_point: { type: 'geography(Point, 4326)', notNull: true },
+    destination_lat: { type: 'numeric(10,7)', notNull: true },
+    destination_lng: { type: 'numeric(10,7)', notNull: true },
 
-    // Encoded Google Maps polyline for the route path
     polyline: { type: 'text' },
     distance_meters: { type: 'integer' },
     duration_seconds: { type: 'integer' },
@@ -31,11 +31,10 @@ exports.up = (pgm) => {
     status: { type: 'route_status', notNull: true, default: 'active' },
 
     recurrence: { type: 'recurrence_type', notNull: true, default: 'none' },
-    recurrence_days: { type: 'integer[]' }, // 0=Sun..6=Sat for custom
+    recurrence_days: { type: 'integer[]' },
     recurrence_end_date: { type: 'date' },
-    parent_route_id: { type: 'uuid' }, // for generated recurrences
+    parent_route_id: { type: 'uuid' },
 
-    // Denormalised driver info to avoid gRPC on every list
     driver_name: { type: 'varchar(255)' },
     driver_rating: { type: 'numeric(3,2)' },
     vehicle_make: { type: 'varchar(100)' },
@@ -47,20 +46,21 @@ exports.up = (pgm) => {
     updated_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
   });
 
-  // GIST indexes for spatial queries
-  pgm.createIndex('routes', 'origin_point', { method: 'gist' });
-  pgm.createIndex('routes', 'destination_point', { method: 'gist' });
+  pgm.createIndex('routes', 'origin_lat');
+  pgm.createIndex('routes', 'origin_lng');
+  pgm.createIndex('routes', 'destination_lat');
+  pgm.createIndex('routes', 'destination_lng');
   pgm.createIndex('routes', ['driver_id']);
   pgm.createIndex('routes', ['status']);
   pgm.createIndex('routes', ['departure_time']);
   pgm.createIndex('routes', ['parent_route_id']);
 
-  // Waypoints table for multi-stop routes (Sprint 3+)
   pgm.createTable('route_waypoints', {
     id: { type: 'uuid', primaryKey: true, default: pgm.func('uuid_generate_v4()') },
     route_id: { type: 'uuid', notNull: true, references: '"routes"', onDelete: 'CASCADE' },
     name: { type: 'varchar(500)', notNull: true },
-    point: { type: 'geography(Point, 4326)', notNull: true },
+    waypoint_lat: { type: 'numeric(10,7)', notNull: true },
+    waypoint_lng: { type: 'numeric(10,7)', notNull: true },
     sequence: { type: 'smallint', notNull: true },
   });
 

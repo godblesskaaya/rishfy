@@ -11,8 +11,8 @@ ENV NODE_ENV=production
 
 # ---- Dependencies (cached layer) ----------------------------------
 FROM base AS deps
-COPY package.json package-lock.json* ./
-RUN npm ci --ignore-scripts && npm cache clean --force
+COPY package.json package-lock.json* .npmrc* ./
+RUN npm install --legacy-peer-deps --ignore-scripts && npm cache clean --force
 
 # ---- Development image --------------------------------------------
 FROM base AS development

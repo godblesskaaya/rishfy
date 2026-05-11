@@ -5,15 +5,21 @@ export interface RouteRow {
   driver_id: string;
   vehicle_id: string;
   origin_name: string;
+  origin_lat: number;
+  origin_lng: number;
   destination_name: string;
+  destination_lat: number;
+  destination_lng: number;
   polyline: string | null;
+  route_geometry_geojson: string | null;
   distance_meters: number | null;
   duration_seconds: number | null;
+  flexibility_minutes: number;
   available_seats: number;
   booked_seats: number;
   price_per_seat: string;
   departure_time: Date;
-  status: 'draft' | 'active' | 'full' | 'cancelled' | 'completed';
+  status: 'draft' | 'active' | 'full' | 'departed' | 'cancelled' | 'completed';
   recurrence: 'none' | 'daily' | 'weekdays' | 'weekly' | 'custom';
   recurrence_days: number[] | null;
   recurrence_end_date: Date | null;
@@ -29,47 +35,52 @@ export interface RouteRow {
 }
 
 export interface SearchParams {
-  origin_lat: number;
-  origin_lng: number;
-  destination_lat: number;
-  destination_lng: number;
-  departure_after?: Date;
+  pickup_lat: number;
+  pickup_lng: number;
+  dropoff_lat: number;
+  dropoff_lng: number;
+  desired_departure_time?: Date;
+  time_flexibility_minutes?: number;
+  max_walking_distance_meters?: number;
   seats_needed?: number;
-  radius_meters?: number;
+  coarse_radius_meters?: number;
+}
+
+export interface SearchCandidate extends RouteRow {
+  pickup_fraction: number;
+  dropoff_fraction: number;
+  closest_pickup_geojson: string;
+  closest_dropoff_geojson: string;
 }
 
 export class RouteRepository {
   constructor(private readonly pool: Pool) {}
 
-  async create(data: Omit<RouteRow, 'id' | 'booked_seats' | 'created_at' | 'updated_at'>): Promise<RouteRow> {
-    const { rows } = await this.pool.query<RouteRow>(
+  async create(data: Omit<RouteRow, 'id' | 'booked_seats' | 'created_at' | 'updated_at' | 'route_geometry_geojson'> & {
+    route_geometry_wkt?: string | null;
+  }): Promise<RouteRow> {
+    const { rows } = await this.pool.query<RouteRow & { route_geometry_geojson: string | null }>(
       `INSERT INTO routes (
-        driver_id, vehicle_id, origin_name, destination_name,
-        origin_point, destination_point,
-        polyline, distance_meters, duration_seconds,
+        driver_id, vehicle_id, origin_name, origin_lat, origin_lng,
+        destination_name, destination_lat, destination_lng,
+        polyline, route_geometry, distance_meters, duration_seconds, flexibility_minutes,
         available_seats, price_per_seat, departure_time, status,
         recurrence, recurrence_days, recurrence_end_date, parent_route_id,
         driver_name, driver_rating, vehicle_make, vehicle_model, vehicle_color, vehicle_plate
       ) VALUES (
-        $1, $2, $3, $4,
-        ST_SetSRID(ST_MakePoint($5, $6), 4326)::geography,
-        ST_SetSRID(ST_MakePoint($7, $8), 4326)::geography,
-        $9, $10, $11,
-        $12, $13, $14, $15,
-        $16, $17, $18, $19,
-        $20, $21, $22, $23, $24, $25
-      ) RETURNING *,
-        ST_Y(origin_point::geometry) as origin_lat,
-        ST_X(origin_point::geometry) as origin_lng,
-        ST_Y(destination_point::geometry) as dest_lat,
-        ST_X(destination_point::geometry) as dest_lng`,
+        $1, $2, $3, $4, $5,
+        $6, $7, $8,
+        $9, CASE WHEN $10::text IS NOT NULL THEN ST_GeogFromText($10) ELSE NULL END,
+        $11, $12, $13,
+        $14, $15, $16, $17,
+        $18, $19, $20, $21,
+        $22, $23, $24, $25, $26, $27
+      ) RETURNING *, ST_AsGeoJSON(route_geometry) AS route_geometry_geojson`,
       [
-        data.driver_id, data.vehicle_id, data.origin_name, data.destination_name,
-        (data as unknown as Record<string, number>)['origin_lng'],
-        (data as unknown as Record<string, number>)['origin_lat'],
-        (data as unknown as Record<string, number>)['dest_lng'],
-        (data as unknown as Record<string, number>)['dest_lat'],
-        data.polyline, data.distance_meters, data.duration_seconds,
+        data.driver_id, data.vehicle_id, data.origin_name, data.origin_lat, data.origin_lng,
+        data.destination_name, data.destination_lat, data.destination_lng,
+        data.polyline, data.route_geometry_wkt ?? null,
+        data.distance_meters, data.duration_seconds, data.flexibility_minutes ?? 15,
         data.available_seats, data.price_per_seat, data.departure_time, data.status,
         data.recurrence, data.recurrence_days, data.recurrence_end_date, data.parent_route_id,
         data.driver_name, data.driver_rating, data.vehicle_make, data.vehicle_model,
@@ -81,12 +92,7 @@ export class RouteRepository {
 
   async findById(id: string): Promise<RouteRow | null> {
     const { rows } = await this.pool.query<RouteRow>(
-      `SELECT *,
-        ST_Y(origin_point::geometry) as origin_lat,
-        ST_X(origin_point::geometry) as origin_lng,
-        ST_Y(destination_point::geometry) as dest_lat,
-        ST_X(destination_point::geometry) as dest_lng
-       FROM routes WHERE id = $1`,
+      `SELECT *, ST_AsGeoJSON(route_geometry) AS route_geometry_geojson FROM routes WHERE id = $1`,
       [id],
     );
     return rows[0] ?? null;
@@ -94,11 +100,7 @@ export class RouteRepository {
 
   async findByDriver(driverId: string, limit = 20, offset = 0): Promise<RouteRow[]> {
     const { rows } = await this.pool.query<RouteRow>(
-      `SELECT *,
-        ST_Y(origin_point::geometry) as origin_lat,
-        ST_X(origin_point::geometry) as origin_lng,
-        ST_Y(destination_point::geometry) as dest_lat,
-        ST_X(destination_point::geometry) as dest_lng
+      `SELECT *, ST_AsGeoJSON(route_geometry) AS route_geometry_geojson
        FROM routes WHERE driver_id = $1 ORDER BY departure_time DESC LIMIT $2 OFFSET $3`,
       [driverId, limit, offset],
     );
@@ -110,7 +112,8 @@ export class RouteRepository {
     const values: unknown[] = [];
     let idx = 1;
     const allowed: (keyof RouteRow)[] = ['origin_name', 'destination_name', 'available_seats',
-      'price_per_seat', 'departure_time', 'status', 'recurrence', 'recurrence_days', 'recurrence_end_date'];
+      'price_per_seat', 'departure_time', 'status', 'recurrence', 'recurrence_days',
+      'recurrence_end_date', 'flexibility_minutes'];
     for (const key of allowed) {
       if (data[key] !== undefined) { fields.push(`${key} = $${idx++}`); values.push(data[key]); }
     }
@@ -118,7 +121,8 @@ export class RouteRepository {
     fields.push('updated_at = now()');
     values.push(id, driverId);
     const { rows } = await this.pool.query<RouteRow>(
-      `UPDATE routes SET ${fields.join(', ')} WHERE id = $${idx} AND driver_id = $${idx + 1} RETURNING *`,
+      `UPDATE routes SET ${fields.join(', ')} WHERE id = $${idx} AND driver_id = $${idx + 1}
+       RETURNING *, ST_AsGeoJSON(route_geometry) AS route_geometry_geojson`,
       values,
     );
     return rows[0] ?? null;
@@ -128,49 +132,63 @@ export class RouteRepository {
     const { rows } = await this.pool.query<RouteRow>(
       `UPDATE routes SET status = 'cancelled', updated_at = now()
        WHERE id = $1 AND driver_id = $2 AND status IN ('draft','active')
-       RETURNING *`,
+       RETURNING *, ST_AsGeoJSON(route_geometry) AS route_geometry_geojson`,
       [id, driverId],
     );
     return rows[0] ?? null;
   }
 
-  async searchNearby(params: SearchParams): Promise<RouteRow[]> {
-    const radius = params.radius_meters ?? 5000;
+  // Stages 1 + 2: PostGIS coarse spatial filter + sequence validation in one CTE
+  async searchNearby(params: SearchParams): Promise<SearchCandidate[]> {
     const seatsNeeded = params.seats_needed ?? 1;
-    const departureAfter = params.departure_after ?? new Date();
+    const coarseRadius = params.coarse_radius_meters ?? 3000;
 
-    const { rows } = await this.pool.query<RouteRow>(
-      `SELECT *,
-        ST_Y(origin_point::geometry) as origin_lat,
-        ST_X(origin_point::geometry) as origin_lng,
-        ST_Y(destination_point::geometry) as dest_lat,
-        ST_X(destination_point::geometry) as dest_lng,
-        ST_Distance(
-          origin_point,
-          ST_SetSRID(ST_MakePoint($2, $1), 4326)::geography
-        ) as origin_distance_m
-       FROM routes
-       WHERE status = 'active'
-         AND (available_seats - booked_seats) >= $3
-         AND departure_time >= $4
-         AND ST_DWithin(
-               origin_point,
-               ST_SetSRID(ST_MakePoint($2, $1), 4326)::geography,
-               $5
-             )
-         AND ST_DWithin(
-               destination_point,
-               ST_SetSRID(ST_MakePoint($7, $6), 4326)::geography,
-               $5
-             )
-       ORDER BY origin_distance_m ASC, departure_time ASC
-       LIMIT 50`,
+    const { rows } = await this.pool.query<SearchCandidate>(
+      `WITH stage1 AS (
+        SELECT r.*,
+          ST_AsGeoJSON(r.route_geometry) AS route_geometry_geojson,
+          ST_LineLocatePoint(
+            r.route_geometry::geometry,
+            ST_SetSRID(ST_MakePoint($2, $1), 4326)
+          ) AS pickup_fraction,
+          ST_LineLocatePoint(
+            r.route_geometry::geometry,
+            ST_SetSRID(ST_MakePoint($4, $3), 4326)
+          ) AS dropoff_fraction,
+          ST_AsGeoJSON(
+            ST_ClosestPoint(
+              r.route_geometry::geometry,
+              ST_SetSRID(ST_MakePoint($2, $1), 4326)
+            )
+          ) AS closest_pickup_geojson,
+          ST_AsGeoJSON(
+            ST_ClosestPoint(
+              r.route_geometry::geometry,
+              ST_SetSRID(ST_MakePoint($4, $3), 4326)
+            )
+          ) AS closest_dropoff_geojson
+        FROM routes r
+        WHERE r.status = 'active'
+          AND (r.available_seats - r.booked_seats) >= $5
+          AND r.route_geometry IS NOT NULL
+          AND ST_DWithin(
+            r.route_geometry,
+            ST_SetSRID(ST_MakePoint($2, $1), 4326)::geography,
+            $6
+          )
+          AND ST_DWithin(
+            r.route_geometry,
+            ST_SetSRID(ST_MakePoint($4, $3), 4326)::geography,
+            $6
+          )
+      )
+      SELECT * FROM stage1
+      WHERE pickup_fraction < dropoff_fraction
+      LIMIT 50`,
       [
-        params.origin_lat, params.origin_lng,
-        seatsNeeded,
-        departureAfter,
-        radius,
-        params.destination_lat, params.destination_lng,
+        params.pickup_lat, params.pickup_lng,
+        params.dropoff_lat, params.dropoff_lng,
+        seatsNeeded, coarseRadius,
       ],
     );
     return rows;
@@ -240,7 +258,7 @@ export class RouteRepository {
              ELSE status
            END,
            updated_at = now()
-       WHERE id = $1 AND status NOT IN ('cancelled','completed')
+       WHERE id = $1 AND status NOT IN ('cancelled','completed','departed')
        RETURNING available_seats, booked_seats`,
       [routeId, seatCount],
     );

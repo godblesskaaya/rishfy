@@ -25,7 +25,9 @@ services:
   # ---------------------------------------------------------------------------
 
   postgres:
-    image: timescale/timescaledb:2.15.0-pg16
+    build:
+      context: ./infrastructure/postgres
+      dockerfile: Dockerfile
     container_name: rishfy-postgres
     restart: unless-stopped
     environment:
@@ -61,7 +63,7 @@ services:
     volumes:
       - redis_data:/data
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6380:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -91,7 +93,7 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
-      CLUSTER_ID: rishfy-dev-cluster
+      CLUSTER_ID: xslkYSphRnqVLbyi7pnZ_w
     volumes:
       - kafka_data:/var/lib/kafka/data
     ports:
@@ -215,9 +217,11 @@ services:
       DATABASE_URL: postgres://route_user:${ROUTE_DB_PASSWORD:-dev_route_password}@postgres:5432/route_db
       REDIS_URL: redis://redis:6379/2
       KAFKA_BROKERS: kafka:9092
-      USER_GRPC_URL: user-service:50052
+      USER_SERVICE_GRPC_URL: user-service:50052
       GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY:-}
-      S2_CELL_LEVEL: 13             # ~1.2km cells
+      SEARCH_RADIUS_METERS: 5000
+      COARSE_MATCH_RADIUS_METERS: 3000
+      ROUTE_CACHE_TTL_SECONDS: 300
       LOG_LEVEL: debug
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
     volumes:
@@ -397,14 +401,20 @@ services:
       - ./docs/openapi:/usr/share/nginx/html/docs:ro
       - nginx_logs:/var/log/nginx
     ports:
-      - "80:80"
-      - "443:443"
+      - "8080:80"
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost/health"]
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/health"]
       interval: 10s
       timeout: 5s
       retries: 3
-    networks: [rishfy_net]
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=proxy"
+      - "traefik.http.routers.rishfy-api.rule=Host(`api.rishfy.com`)"
+      - "traefik.http.routers.rishfy-api.entrypoints=websecure"
+      - "traefik.http.routers.rishfy-api.tls.certresolver=letsencrypt"
+      - "traefik.http.services.rishfy-api.loadbalancer.server.port=80"
+    networks: [rishfy_net, proxy]
 
 
   nginx-exporter:
@@ -540,7 +550,7 @@ services:
       - nginx
     environment:
       NODE_ENV: development
-      NEXTAUTH_URL: http://localhost:3000
+      NEXTAUTH_URL: https://admin.rishfy.com
       NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-dev_nextauth_secret_replace_me_with_32_bytes}
       # Server-side calls bypass NGINX (same Docker network)
       RISHFY_API_URL: http://nginx
@@ -551,9 +561,14 @@ services:
       - ./admin:/app
       - /app/node_modules
       - /app/.next
-    ports:
-      - "3000:3000"
-    networks: [rishfy_net]
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=proxy"
+      - "traefik.http.routers.rishfy-admin.rule=Host(`admin.rishfy.com`) || Host(`rishfy.com`)"
+      - "traefik.http.routers.rishfy-admin.entrypoints=websecure"
+      - "traefik.http.routers.rishfy-admin.tls.certresolver=letsencrypt"
+      - "traefik.http.services.rishfy-admin.loadbalancer.server.port=3000"
+    networks: [rishfy_net, proxy]
 
 # =============================================================================
 # NETWORKS & VOLUMES
@@ -563,6 +578,8 @@ networks:
   rishfy_net:
     driver: bridge
     name: rishfy_network
+  proxy:
+    external: true
 
 volumes:
   postgres_data:
