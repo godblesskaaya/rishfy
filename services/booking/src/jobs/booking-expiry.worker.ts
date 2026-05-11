@@ -45,7 +45,7 @@ export async function scheduleExpiry(bookingId: string, connection: IORedis): Pr
     { bookingId },
     {
       delay: config.BOOKING_EXPIRY_SECONDS * 1000,
-      jobId: `expire:${bookingId}`,
+      jobId: `expire_${bookingId}`,
       removeOnComplete: true,
       removeOnFail: 50,
     },

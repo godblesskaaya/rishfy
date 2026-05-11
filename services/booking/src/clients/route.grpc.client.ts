@@ -30,7 +30,7 @@ function callUnary<T>(method: string, req: Record<string, unknown>): Promise<T> 
     const client = getClient() as unknown as Record<string, GrpcClientMethod<T>>;
     const fn = client[method];
     if (!fn) return reject(new Error(`gRPC method ${method} not found`));
-    fn(req, (err, res) => { if (err) reject(err); else resolve(res); });
+    fn.call(client, req, (err, res) => { if (err) reject(err); else resolve(res); });
   });
 }
 
@@ -45,9 +45,9 @@ export async function reserveSeats(routeId: string, seatCount: number, bookingId
   }
 }
 
-export async function releaseSeats(bookingId: string, reason: string): Promise<void> {
+export async function releaseSeats(routeId: string, bookingId: string, reason: string): Promise<void> {
   try {
-    await callUnary('releaseSeats', { reservationId: bookingId, bookingId, reason });
+    await callUnary('releaseSeats', { reservationId: routeId, bookingId, reason });
   } catch (err) {
     logger.warn({ err, bookingId }, 'releaseSeats gRPC failed');
   }

@@ -27,6 +27,15 @@ export async function bookingRoutes(app: FastifyInstance): Promise<void> {
       pickupLng?: number;
       dropoffLat?: number;
       dropoffLng?: number;
+      pickupWalkingDistance?: number;
+      dropoffWalkingDistance?: number;
+      pickupWalkingTime?: number;
+      estimatedPickupTime?: string;
+      suggestedPickupName?: string;
+      pickupPointLat?: number;
+      pickupPointLng?: number;
+      dropoffPointLat?: number;
+      dropoffPointLng?: number;
       idempotencyKey: string;
     };
 
@@ -43,6 +52,15 @@ export async function bookingRoutes(app: FastifyInstance): Promise<void> {
         pickupLng: body.pickupLng,
         dropoffLat: body.dropoffLat,
         dropoffLng: body.dropoffLng,
+        pickupWalkingDistance: body.pickupWalkingDistance,
+        dropoffWalkingDistance: body.dropoffWalkingDistance,
+        pickupWalkingTime: body.pickupWalkingTime,
+        estimatedPickupTime: body.estimatedPickupTime ? new Date(body.estimatedPickupTime) : undefined,
+        suggestedPickupName: body.suggestedPickupName,
+        pickupPointLat: body.pickupPointLat,
+        pickupPointLng: body.pickupPointLng,
+        dropoffPointLat: body.dropoffPointLat,
+        dropoffPointLng: body.dropoffPointLng,
         idempotencyKey: body.idempotencyKey,
       });
       // Schedule 2-minute expiry job
@@ -82,11 +100,11 @@ export async function bookingRoutes(app: FastifyInstance): Promise<void> {
     const userId = req.headers['x-user-id'] as string;
     if (!userId) return reply.status(401).send({ error: 'UNAUTHORIZED' });
     const { id } = req.params as { id: string };
-    const { reason = 'PASSENGER_CANCELLED' } = req.body as { reason?: string };
+    const { reason = 'PASSENGER_CANCELLED' } = (req.body as { reason?: string }) ?? {};
     try {
       const result = await service.cancelByPassengerWithRefund(id, userId, reason);
       // Remove expiry job if still pending
-      try { await getExpiryQueue(redis).remove(`expire:${id}`); } catch {}
+      try { await getExpiryQueue(redis).remove(`expire_${id}`); } catch {}
       return reply.send({
         ...result.booking,
         refund: result.refund,
@@ -107,7 +125,7 @@ export async function bookingRoutes(app: FastifyInstance): Promise<void> {
     if (!userId) return reply.status(401).send({ error: 'UNAUTHORIZED' });
 
     const { id } = req.params as { id: string };
-    const { reason = 'EMERGENCY_REPORTED' } = req.body as { reason?: string };
+    const { reason = 'EMERGENCY_REPORTED' } = (req.body as { reason?: string }) ?? {};
 
     try {
       const booking = await service.triggerEmergency(id, userId, reason);
@@ -155,6 +173,25 @@ export async function bookingRoutes(app: FastifyInstance): Promise<void> {
       if (code === 'NOT_FOUND') return reply.status(404).send({ error: 'NOT_FOUND' });
       if (code === 'FORBIDDEN') return reply.status(403).send({ error: 'FORBIDDEN' });
       return reply.status(409).send({ error: 'INVALID_STATE' });
+    }
+  });
+
+  // POST /api/v1/bookings/:id/decline (driver only, within 10 min window)
+  app.post('/api/v1/bookings/:id/decline', async (req, reply) => {
+    const userId = req.headers['x-user-id'] as string;
+    if (!userId) return reply.status(401).send({ error: 'UNAUTHORIZED' });
+    const { id } = req.params as { id: string };
+    const { reason = 'No reason given' } = (req.body as { reason?: string }) ?? {};
+    try {
+      const booking = await service.declineBooking(id, userId, reason);
+      return reply.send(booking);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === 'NOT_FOUND') return reply.status(404).send({ error: 'NOT_FOUND' });
+      if (code === 'FORBIDDEN') return reply.status(403).send({ error: 'FORBIDDEN' });
+      if (code === 'CANNOT_DECLINE') return reply.status(409).send({ error: 'CANNOT_DECLINE', message: 'Booking is not pending or decline window has expired' });
+      logger.error({ err }, 'POST /bookings/:id/decline failed');
+      return reply.status(500).send({ error: 'INTERNAL_ERROR' });
     }
   });
 

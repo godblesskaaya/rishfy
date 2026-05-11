@@ -30,7 +30,7 @@ function callUnary<T>(method: string, req: Record<string, unknown>): Promise<T> 
     const client = getClient() as unknown as Record<string, GrpcClientMethod<T>>;
     const fn = client[method];
     if (!fn) return reject(new Error(`gRPC method ${method} not found`));
-    fn(req, (err, res) => { if (err) reject(err); else resolve(res); });
+    fn.call(client, req, (err, res) => { if (err) reject(err); else resolve(res); });
   });
 }
 

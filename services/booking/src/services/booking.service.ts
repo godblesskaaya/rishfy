@@ -7,6 +7,7 @@ import {
   publishBookingCreated, publishBookingConfirmed, publishBookingCancelled,
   publishBookingCompleted, publishBookingExpired, publishTripStarted,
   publishTripCompleted, publishBookingRated, publishBookingEmergency,
+  publishBookingDeclined,
 } from '../events/booking.events.js';
 import type { BookingRow } from '../repositories/booking.repository.js';
 
@@ -22,6 +23,16 @@ export interface CreateBookingParams {
   pickupLng?: number;
   dropoffLat?: number;
   dropoffLng?: number;
+  // Matching-derived fields from search results
+  pickupWalkingDistance?: number;
+  dropoffWalkingDistance?: number;
+  pickupWalkingTime?: number;
+  estimatedPickupTime?: Date;
+  suggestedPickupName?: string;
+  pickupPointLat?: number;
+  pickupPointLng?: number;
+  dropoffPointLat?: number;
+  dropoffPointLng?: number;
   idempotencyKey: string;
 }
 
@@ -66,6 +77,15 @@ export class BookingService {
         pickupLng: params.pickupLng,
         dropoffLat: params.dropoffLat,
         dropoffLng: params.dropoffLng,
+        pickupWalkingDistance: params.pickupWalkingDistance,
+        dropoffWalkingDistance: params.dropoffWalkingDistance,
+        pickupWalkingTime: params.pickupWalkingTime,
+        estimatedPickupTime: params.estimatedPickupTime,
+        suggestedPickupName: params.suggestedPickupName,
+        pickupPointLat: params.pickupPointLat,
+        pickupPointLng: params.pickupPointLng,
+        dropoffPointLat: params.dropoffPointLat,
+        dropoffPointLng: params.dropoffPointLng,
         totalPrice,
         platformFee,
         driverEarnings,
@@ -74,7 +94,7 @@ export class BookingService {
       });
     } catch (err) {
       // Rollback seat reservation on DB failure
-      await releaseSeats(params.idempotencyKey, 'BOOKING_DB_ERROR');
+      await releaseSeats(params.routeId, params.idempotencyKey, 'BOOKING_DB_ERROR');
       throw err;
     }
 
@@ -89,6 +109,10 @@ export class BookingService {
       totalPrice,
       confirmationCode: booking.confirmation_code ?? '',
       timestamp: new Date().toISOString(),
+      suggestedPickupName: params.suggestedPickupName,
+      suggestedPickupLat: params.pickupPointLat,
+      suggestedPickupLng: params.pickupPointLng,
+      estimatedPickupTime: params.estimatedPickupTime?.toISOString(),
     });
 
     return booking;
@@ -117,7 +141,7 @@ export class BookingService {
     const updated = await this.repo.cancelByPassenger(bookingId, reason);
     if (!updated) throw Object.assign(new Error('Cannot cancel booking in current state'), { code: 'INVALID_STATE' });
 
-    await releaseSeats(bookingId, 'PASSENGER_CANCELLED');
+    await releaseSeats(updated.route_id, bookingId, 'PASSENGER_CANCELLED');
     await this.repo.appendEvent(bookingId, 'booking.cancelled', { reason, cancelledBy: 'passenger' });
     await publishBookingCancelled({
       bookingId, routeId: updated.route_id, passengerId: updated.passenger_id,
@@ -161,10 +185,29 @@ export class BookingService {
     return result.booking;
   }
 
+  async declineBooking(bookingId: string, driverId: string, reason: string): Promise<BookingRow> {
+    const booking = await this.repo.findById(bookingId);
+    if (!booking) throw Object.assign(new Error('Booking not found'), { code: 'NOT_FOUND' });
+    if (booking.driver_id !== driverId) throw Object.assign(new Error('Forbidden'), { code: 'FORBIDDEN' });
+
+    const updated = await this.repo.decline(bookingId, driverId, reason);
+    if (!updated) throw Object.assign(new Error('Cannot decline: booking is not pending or decline window has expired'), { code: 'CANNOT_DECLINE' });
+
+    await releaseSeats(updated.route_id, bookingId, 'DRIVER_DECLINED');
+    await this.repo.appendEvent(bookingId, 'booking.declined', { reason, declinedBy: driverId });
+    await publishBookingDeclined({
+      bookingId, routeId: updated.route_id,
+      passengerId: updated.passenger_id, driverId,
+      reason, timestamp: new Date().toISOString(),
+    });
+
+    return updated;
+  }
+
   async handleDriverCancelledRoute(routeId: string): Promise<void> {
     const bookings = await this.repo.cancelByDriver(routeId);
     await Promise.all(bookings.map(async (b) => {
-      await releaseSeats(b.id, 'DRIVER_CANCELLED_ROUTE');
+      await releaseSeats(routeId, b.id, 'DRIVER_CANCELLED_ROUTE');
       await this.repo.appendEvent(b.id, 'booking.cancelled', { reason: 'DRIVER_CANCELLED_ROUTE', cancelledBy: 'driver' });
       await publishBookingCancelled({
         bookingId: b.id, routeId, passengerId: b.passenger_id, driverId: b.driver_id,
@@ -177,7 +220,7 @@ export class BookingService {
     const booking = await this.repo.findById(bookingId);
     if (!booking || booking.status !== 'pending') return;
     await this.repo.markExpired(bookingId);
-    await releaseSeats(bookingId, 'EXPIRED');
+    await releaseSeats(booking.route_id, bookingId, 'EXPIRED');
     await this.repo.appendEvent(bookingId, 'booking.expired', {});
     await publishBookingExpired({
       bookingId, routeId: booking.route_id, passengerId: booking.passenger_id,
@@ -282,7 +325,7 @@ export class BookingService {
     const booking = await this.repo.findById(bookingId);
     if (!booking || booking.status !== 'pending') return;
     await this.repo.cancelByPassenger(bookingId, 'PAYMENT_FAILED');
-    await releaseSeats(bookingId, 'PAYMENT_FAILED');
+    await releaseSeats(booking.route_id, bookingId, 'PAYMENT_FAILED');
     logger.info({ bookingId }, 'Booking cancelled via payment.failed event');
   }
 }

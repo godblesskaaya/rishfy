@@ -33,7 +33,7 @@ exports.up = (pgm) => {
     expires_at: { type: 'timestamptz' },
 
     raw_callback_payload: { type: 'jsonb' },
-    metadata: { type: 'jsonb', default: "'{}'" },
+    metadata: { type: 'jsonb', default: pgm.func("'{}'") },
     created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
     updated_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
   });

@@ -10,6 +10,12 @@ const {
     createBooking: vi.fn(),
     triggerEmergency: vi.fn(),
     cancelByPassengerWithRefund: vi.fn(),
+    declineBooking: vi.fn(),
+    startTrip: vi.fn(),
+    completeTrip: vi.fn(),
+    submitRating: vi.fn(),
+    listMyBookings: vi.fn(),
+    getBooking: vi.fn(),
   },
   scheduleExpiryMock: vi.fn(),
   removeJobMock: vi.fn(),
@@ -105,6 +111,72 @@ describe('booking routes integration', () => {
     expect(res.statusCode).toBe(201);
     expect(serviceMock.createBooking).toHaveBeenCalledTimes(1);
     expect(scheduleExpiryMock).toHaveBeenCalledWith('booking-1', expect.anything());
+  });
+
+  // ── Decline booking ────────────────────────────────────────────────────────
+
+  it('POST /bookings/:id/decline returns 200 when driver declines within window', async () => {
+    const declinedBooking = {
+      id: 'booking-1', route_id: 'route-1', passenger_id: 'passenger-1',
+      driver_id: 'driver-1', seats_booked: 1, total_price: '5000',
+      status: 'declined', payment_status: 'pending', declined_reason: 'Full',
+      confirmation_code: null, created_at: new Date(), updated_at: new Date(),
+      platform_fee: '250', driver_earnings: '4750', expires_at: null,
+      payment_id: null, pickup_name: null, dropoff_name: null,
+      pickup_lat: null, pickup_lng: null, dropoff_lat: null, dropoff_lng: null,
+      pickup_walking_distance: null, dropoff_walking_distance: null,
+      pickup_walking_time: null, estimated_pickup_time: null,
+      suggested_pickup_name: null, pickup_point: null, dropoff_point: null,
+    };
+    serviceMock.declineBooking.mockResolvedValue(declinedBooking);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/bookings/booking-1/decline',
+      headers: { 'x-user-id': 'driver-1' },
+      payload: { reason: 'Full' },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(serviceMock.declineBooking).toHaveBeenCalledWith('booking-1', 'driver-1', 'Full');
+  });
+
+  it('POST /bookings/:id/decline returns 409 CANNOT_DECLINE when window expired', async () => {
+    const err = Object.assign(new Error('Cannot decline'), { code: 'CANNOT_DECLINE' });
+    serviceMock.declineBooking.mockRejectedValue(err);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/bookings/booking-1/decline',
+      headers: { 'x-user-id': 'driver-1' },
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(409);
+    expect(res.json()).toMatchObject({ error: 'CANNOT_DECLINE' });
+  });
+
+  it('POST /bookings/:id/decline returns 403 when driver is not the booking driver', async () => {
+    const err = Object.assign(new Error('Forbidden'), { code: 'FORBIDDEN' });
+    serviceMock.declineBooking.mockRejectedValue(err);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/bookings/booking-1/decline',
+      headers: { 'x-user-id': 'other-driver' },
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(403);
+  });
+
+  it('POST /bookings/:id/decline returns 401 without x-user-id', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/bookings/booking-1/decline',
+      payload: {},
+    });
+    expect(res.statusCode).toBe(401);
   });
 
   it('reports emergency and maps service response', async () => {
