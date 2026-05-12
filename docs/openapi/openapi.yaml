@@ -1,18 +1,28 @@
 openapi: 3.0.3
 info:
   title: Rishfy API
-  version: 0.4.0
+  version: 0.5.0
   description: |
-    Rishfy platform API. Sprint 4: Location service, WebSocket gateway, Admin dashboard.
+    Rishfy platform API — Tanzania D5-licensed ride-sharing.
+
+    **Sprint 5 changes:** PostGIS 5-stage matching pipeline (coarse spatial →
+    sequence → temporal → walking distance → ranking), route preview endpoint,
+    driver decline flow with 10-minute acceptance window, UUID-based identity
+    (JWT sub = profile_id UUID shared across all services), Google Maps walking
+    distance with geohash Redis cache, reverse-geocoded suggested pickup names.
 servers:
   - url: http://localhost/api/v1
-    description: Local gateway
+    description: Local gateway (nginx, port 8080)
 
 tags:
   - name: auth
     description: Authentication, OTP, JWT issuance
+  - name: users
+    description: User profiles, driver onboarding, vehicles, devices
+  - name: routes
+    description: Route posting, preview, PostGIS search, expiry
   - name: bookings
-    description: Booking saga, trip lifecycle, ratings
+    description: Booking saga, trip lifecycle, decline, ratings
   - name: payments
     description: Mobile money payments, settlements, refunds
   - name: notifications
@@ -23,6 +33,46 @@ tags:
     description: Admin dashboard — KPIs, user management, LATRA
 
 paths:
+  /auth/admin/login:
+    post:
+      tags: [auth]
+      summary: Admin login (phone + password)
+      description: Returns an access token and user object shaped for the Next.js admin panel.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone_number, password]
+              properties:
+                phone_number: { type: string, example: '+255700000001' }
+                password: { type: string }
+      responses:
+        '200':
+          description: Tokens issued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access_token: { type: string }
+                  refresh_token: { type: string }
+                  expires_in: { type: integer }
+                  user:
+                    type: object
+                    properties:
+                      user_id: { type: string, format: uuid }
+                      first_name: { type: string }
+                      last_name: { type: string }
+                      phone_number: { type: string }
+                      email: { type: string, format: email, nullable: true }
+                      role: { type: string, enum: [admin] }
+                      permissions: { type: array, items: { type: string } }
+        '401': { description: Invalid credentials }
+        '403': { description: Not an admin account }
+        '423': { description: Account locked }
+
   /auth/register:
     post:
       tags: [auth]
@@ -310,6 +360,24 @@ paths:
   # ===========================================================================
   # ROUTE SERVICE
   # ===========================================================================
+  /routes/preview:
+    post:
+      tags: [routes]
+      summary: Preview a route before posting — returns polyline and distance, no DB write
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PreviewRouteRequest' }
+      responses:
+        '200':
+          description: Route preview with polyline and GeoJSON
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoutePreviewResponse' }
+        '502': { description: Google Maps Directions API unavailable }
+
   /routes:
     post:
       tags: [routes]
@@ -326,22 +394,29 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Route' }
-        '403': { description: Driver not eligible }
+        '403': { description: Driver not eligible or profile not verified }
 
   /routes/search:
     get:
       tags: [routes]
-      summary: Search for routes near origin/destination
+      summary: Search routes via 5-stage PostGIS matching pipeline
+      description: |
+        Runs: coarse ST_DWithin spatial filter → sequence validation (pickup before
+        dropoff on route) → temporal filter (departure + flexibility windows) →
+        Google Maps walking distance per candidate (geohash-cached 1 hr) → ranked
+        by pickup walking distance ascending.
       parameters:
-        - { in: query, name: origin_lat, required: true, schema: { type: number } }
-        - { in: query, name: origin_lng, required: true, schema: { type: number } }
-        - { in: query, name: destination_lat, required: true, schema: { type: number } }
-        - { in: query, name: destination_lng, required: true, schema: { type: number } }
-        - { in: query, name: departure_after, schema: { type: string, format: date-time } }
+        - { in: query, name: pickup_lat, required: true, schema: { type: number }, description: Passenger pickup latitude }
+        - { in: query, name: pickup_lng, required: true, schema: { type: number }, description: Passenger pickup longitude }
+        - { in: query, name: dropoff_lat, required: true, schema: { type: number }, description: Passenger dropoff latitude }
+        - { in: query, name: dropoff_lng, required: true, schema: { type: number }, description: Passenger dropoff longitude }
+        - { in: query, name: desired_departure_time, schema: { type: string, format: date-time }, description: Desired pickup time (defaults to now) }
+        - { in: query, name: time_flexibility_minutes, schema: { type: integer, default: 30 }, description: Passenger time flexibility window in minutes }
+        - { in: query, name: max_walking_distance, schema: { type: integer, default: 1000 }, description: Max acceptable walking distance in meters }
         - { in: query, name: seats_needed, schema: { type: integer, default: 1 } }
       responses:
         '200':
-          description: Matching routes
+          description: Matching routes ranked by walking distance
           content:
             application/json:
               schema:
@@ -349,8 +424,7 @@ paths:
                 properties:
                   routes:
                     type: array
-                    items: { $ref: '#/components/schemas/Route' }
-                  total: { type: integer }
+                    items: { $ref: '#/components/schemas/RouteSearchResult' }
 
   /routes/me:
     get:
@@ -559,6 +633,44 @@ paths:
                 review: { type: string, maxLength: 500 }
       responses:
         '200': { description: Rating submitted }
+
+  /bookings/{id}/decline:
+    post:
+      tags: [bookings]
+      summary: Driver declines a pending booking (10-minute acceptance window)
+      description: |
+        Only the driver assigned to the booking may decline. The booking must be
+        in `pending` status and created within the last 10 minutes. On success,
+        the reserved seat is released back to the route and a `booking.declined`
+        event is published so the passenger receives a push/SMS notification.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string, maxLength: 500, example: 'Route is already full' }
+      responses:
+        '200':
+          description: Booking declined, seat released
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Booking' }
+        '403': { description: Not the assigned driver }
+        '404': { description: Booking not found }
+        '409':
+          description: Cannot decline — booking is not pending or 10-minute window has expired
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: string, enum: [CANNOT_DECLINE] }
+                  message: { type: string }
 
   # ===========================================================================
   # PAYMENT SERVICE
@@ -1023,21 +1135,94 @@ components:
       type: object
       properties:
         id: { type: string, format: uuid }
-        driver_id: { type: string }
-        vehicle_id: { type: string }
+        driver_id: { type: string, format: uuid }
+        vehicle_id: { type: string, format: uuid }
         origin_name: { type: string }
         destination_name: { type: string }
+        origin_lat: { type: number }
+        origin_lng: { type: number }
+        destination_lat: { type: number }
+        destination_lng: { type: number }
         available_seats: { type: integer }
         booked_seats: { type: integer }
         price_per_seat: { type: number }
         departure_time: { type: string, format: date-time }
-        status: { type: string, enum: [draft, active, full, cancelled, completed] }
-        polyline: { type: string, nullable: true }
+        flexibility_minutes: { type: integer, default: 15, description: Driver time flexibility window in minutes }
+        status:
+          type: string
+          enum: [draft, active, full, departed, cancelled, completed]
+          description: '`departed` set automatically when departure_time + flexibility_minutes passes'
+        polyline: { type: string, nullable: true, description: Google-encoded polyline }
+        route_geometry_geojson: { type: string, nullable: true, description: GeoJSON LineString of the route geometry }
         distance_meters: { type: integer, nullable: true }
         duration_seconds: { type: integer, nullable: true }
         recurrence: { type: string, enum: [none, daily, weekdays, weekly, custom] }
         driver_name: { type: string, nullable: true }
         driver_rating: { type: number, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    PreviewRouteRequest:
+      type: object
+      required: [origin_lat, origin_lng, destination_lat, destination_lng]
+      properties:
+        origin_lat: { type: number }
+        origin_lng: { type: number }
+        destination_lat: { type: number }
+        destination_lng: { type: number }
+        waypoints:
+          type: array
+          maxItems: 5
+          items:
+            type: object
+            required: [lat, lng]
+            properties:
+              lat: { type: number }
+              lng: { type: number }
+              name: { type: string }
+
+    RoutePreviewResponse:
+      type: object
+      properties:
+        polyline: { type: string, description: Google-encoded polyline }
+        geojson_linestring:
+          type: object
+          description: GeoJSON LineString
+          properties:
+            type: { type: string, enum: [LineString] }
+            coordinates:
+              type: array
+              items: { type: array, items: { type: number } }
+        distance_meters: { type: integer }
+        duration_seconds: { type: integer }
+
+    RouteSearchResult:
+      type: object
+      description: Single match returned by the 5-stage PostGIS matching pipeline
+      properties:
+        route_id: { type: string, format: uuid }
+        driver_id: { type: string, format: uuid }
+        driver_name: { type: string, nullable: true }
+        driver_rating: { type: string, nullable: true }
+        vehicle_make: { type: string, nullable: true }
+        vehicle_model: { type: string, nullable: true }
+        vehicle_color: { type: string, nullable: true }
+        vehicle_plate: { type: string, nullable: true }
+        walking_distance_to_pickup: { type: integer, description: Metres (Google Maps walking) }
+        walking_time_to_pickup: { type: integer, description: Seconds (Google Maps walking) }
+        suggested_pickup_point:
+          type: object
+          description: Closest point on route geometry to the passenger's pickup location
+          properties:
+            lat: { type: number }
+            lng: { type: number }
+            name: { type: string, nullable: true, description: Reverse-geocoded address }
+        walking_distance_from_dropoff: { type: integer, description: Metres from closest route point to dropoff }
+        walking_time_from_dropoff: { type: integer, description: Seconds }
+        driver_departure_time: { type: string, format: date-time }
+        estimated_pickup_time: { type: string, format: date-time, description: departure_time + travel fraction to pickup point }
+        available_seats: { type: integer }
+        price_per_seat: { type: string }
 
     CreateRouteRequest:
       type: object
@@ -1053,6 +1238,17 @@ components:
         available_seats: { type: integer }
         price_per_seat: { type: number }
         departure_time: { type: string, format: date-time }
+        flexibility_minutes: { type: integer, minimum: 0, maximum: 60, default: 15 }
+        waypoints:
+          type: array
+          maxItems: 5
+          items:
+            type: object
+            required: [lat, lng]
+            properties:
+              lat: { type: number }
+              lng: { type: number }
+              name: { type: string }
         recurrence: { type: string, enum: [none, daily, weekdays, weekly, custom], default: none }
         recurrence_days: { type: array, items: { type: integer } }
         recurrence_end_date: { type: string, format: date }
@@ -1067,7 +1263,8 @@ components:
         seats_booked: { type: integer }
         status:
           type: string
-          enum: [pending, confirmed, passenger_cancelled, driver_cancelled, completed]
+          enum: [pending, confirmed, passenger_cancelled, driver_cancelled, declined, completed]
+          description: '`declined` set when driver rejects within 10-minute window'
         payment_status: { type: string, enum: [pending, paid, failed, refunded], nullable: true }
         total_price: { type: number }
         platform_fee: { type: number }
@@ -1080,12 +1277,18 @@ components:
         pickup_lng: { type: number, nullable: true }
         dropoff_lat: { type: number, nullable: true }
         dropoff_lng: { type: number, nullable: true }
+        pickup_walking_distance: { type: integer, nullable: true, description: Metres from passenger to closest point on route }
+        dropoff_walking_distance: { type: integer, nullable: true, description: Metres from closest route point to passenger dropoff }
+        pickup_walking_time: { type: integer, nullable: true, description: Seconds }
+        estimated_pickup_time: { type: string, format: date-time, nullable: true }
+        suggested_pickup_name: { type: string, nullable: true, description: Reverse-geocoded suggested boarding point }
         passenger_rating: { type: integer, minimum: 1, maximum: 5, nullable: true }
         driver_rating: { type: integer, minimum: 1, maximum: 5, nullable: true }
         passenger_review: { type: string, nullable: true }
         driver_review: { type: string, nullable: true }
         payment_id: { type: string, format: uuid, nullable: true }
         cancellation_reason: { type: string, nullable: true }
+        declined_reason: { type: string, nullable: true }
         cancellation_policy: { type: string, nullable: true }
         cancelled_at: { type: string, format: date-time, nullable: true }
         trip_started_at: { type: string, format: date-time, nullable: true }
@@ -1108,6 +1311,15 @@ components:
         pickupLng: { type: number }
         dropoffLat: { type: number }
         dropoffLng: { type: number }
+        pickupWalkingDistance: { type: integer, description: Metres — from RouteSearchResult }
+        dropoffWalkingDistance: { type: integer }
+        pickupWalkingTime: { type: integer, description: Seconds }
+        estimatedPickupTime: { type: string, format: date-time }
+        suggestedPickupName: { type: string, description: Reverse-geocoded boarding point name }
+        pickupPointLat: { type: number, description: Closest route point lat (suggested boarding) }
+        pickupPointLng: { type: number }
+        dropoffPointLat: { type: number, description: Closest route point lat (suggested alighting) }
+        dropoffPointLng: { type: number }
         idempotencyKey: { type: string }
 
     RateRequest:
