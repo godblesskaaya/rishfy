@@ -76,13 +76,15 @@ export async function bookingRoutes(app: FastifyInstance): Promise<void> {
     }
   });
 
-  // GET /api/v1/bookings/me
+  // GET /api/v1/bookings/me?role=passenger|driver
   app.get('/api/v1/bookings/me', async (req, reply) => {
     const userId = req.headers['x-user-id'] as string;
     if (!userId) return reply.status(401).send({ error: 'UNAUTHORIZED' });
-    const userRole = (req.headers['x-user-role'] as string) ?? 'passenger';
-    const { limit = 20, offset = 0 } = req.query as { limit?: number; offset?: number };
-    const role = userRole === 'driver' ? 'driver' : 'passenger';
+    const headerRole = (req.headers['x-user-role'] as string) ?? '';
+    const query = req.query as { limit?: number; offset?: number; role?: string };
+    const requestedRole = (query.role ?? headerRole ?? 'passenger').toLowerCase();
+    const { limit = 20, offset = 0 } = query;
+    const role = requestedRole === 'driver' ? 'driver' : 'passenger';
     const bookings = await service.listMyBookings(userId, role, limit, offset);
     return reply.send({ bookings });
   });

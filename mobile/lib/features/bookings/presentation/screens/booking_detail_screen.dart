@@ -2,12 +2,15 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../../../core/constants/app_constants.dart';
+import '../../../../core/errors/app_exception.dart';
 import '../../../../shared/widgets/async_views.dart';
 import '../../../../shared/widgets/primary_button.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
+import '../../../trip/presentation/providers/trip_provider.dart';
 import '../../domain/entities/booking_entity.dart';
 import '../providers/booking_provider.dart';
 
@@ -47,20 +50,85 @@ class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
     if (_declineTimeLeft == Duration.zero) _countdownTimer?.cancel();
   }
 
+  Future<void> _startTrip(BookingEntity booking) async {
+    await ref
+        .read(driverBroadcastProvider.notifier)
+        .startStreaming(booking.bookingId);
+    final DriverBroadcastState s = ref.read(driverBroadcastProvider);
+    if (!mounted) return;
+    if (s.isStreaming) {
+      context.push('/trip/${booking.bookingId}');
+    } else if (s.error != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not start trip: ${s.error}')),
+      );
+    }
+  }
+
   Future<void> _cancelBooking() async {
+    final String? reason = await _showCancelReasonDialog();
+    if (reason == null) return;
+
     setState(() => _busy = true);
     try {
-      await ref.read(bookingDataSourceProvider).cancelBooking(widget.bookingId);
+      await ref
+          .read(bookingDataSourceProvider)
+          .cancelBooking(widget.bookingId, reason: reason);
       ref.invalidate(bookingDetailProvider(widget.bookingId));
       ref.invalidate(myBookingsProvider);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to cancel booking: $e')),
+        SnackBar(content: Text(_friendlyError(e, 'cancel booking'))),
       );
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  Future<String?> _showCancelReasonDialog() async {
+    final TextEditingController ctrl = TextEditingController();
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext ctx) => AlertDialog(
+        title: const Text('Cancel this booking?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            const Text('Let the driver know why (optional).'),
+            const SizedBox(height: 12),
+            TextField(
+              controller: ctrl,
+              maxLines: 2,
+              decoration: const InputDecoration(
+                hintText: 'Reason',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Keep booking'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Cancel booking'),
+          ),
+        ],
+      ),
+    );
+    final String value = ctrl.text;
+    ctrl.dispose();
+    if (confirmed != true) return null;
+    return value;
+  }
+
+  String _friendlyError(Object e, String action) {
+    if (e is AppException) return e.message;
+    return 'Failed to $action. Please try again.';
   }
 
   Future<void> _declineBooking() async {
@@ -191,7 +259,7 @@ class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to submit rating: $e')),
+        SnackBar(content: Text(_friendlyError(e, 'submit rating'))),
       );
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -231,6 +299,11 @@ class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
               booking.status == 'pending' &&
               _declineTimeLeft > Duration.zero;
           final bool declineWindowOpen = isDriver && booking.status == 'pending';
+          final bool isTrackable = booking.status == 'confirmed' ||
+              booking.status == 'in_progress';
+          final bool canStartTrip = isDriver && booking.status == 'confirmed';
+          final DriverBroadcastState broadcastState =
+              ref.watch(driverBroadcastProvider);
 
           // Start countdown when booking data is first available
           if (declineWindowOpen && _countdownTimer == null) {
@@ -336,6 +409,39 @@ class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
                       label: const Text('Decline booking'),
                     ),
                   const SizedBox(height: 8),
+                ],
+                // ── Live tracking entry (passenger or driver) ──────────
+                if (isTrackable) ...<Widget>[
+                  PrimaryButton(
+                    label: isDriver ? 'Open trip map' : 'Track driver',
+                    icon: Icons.location_on,
+                    onPressed: () =>
+                        context.push('/trip/${booking.bookingId}'),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+                // ── Driver: start trip (begins location broadcast) ─────
+                if (canStartTrip) ...<Widget>[
+                  PrimaryButton(
+                    label: broadcastState.isStreaming
+                        ? 'Trip in progress…'
+                        : 'Start trip',
+                    icon: Icons.play_arrow,
+                    onPressed: broadcastState.isStreaming
+                        ? null
+                        : () => _startTrip(booking),
+                  ),
+                  if (broadcastState.error != null) ...<Widget>[
+                    const SizedBox(height: 6),
+                    Text(
+                      broadcastState.error!,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 12),
                 ],
                 // ── Passenger actions ──────────────────────────────────
                 if (canCancel && !isDriver)

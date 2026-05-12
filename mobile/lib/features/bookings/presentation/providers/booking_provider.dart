@@ -1,9 +1,15 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../core/errors/app_exception.dart';
 import '../../../../core/network/dio_client.dart';
 import '../../data/datasources/booking_remote_datasource.dart';
 import '../../data/models/booking_models.dart';
 import '../../domain/entities/booking_entity.dart';
+
+String _errorMessage(Object e, String fallback) {
+  if (e is AppException) return e.message;
+  return fallback;
+}
 
 final Provider<BookingRemoteDataSource> bookingDataSourceProvider =
     Provider<BookingRemoteDataSource>(
@@ -64,7 +70,7 @@ class CreateBookingNotifier extends StateNotifier<CreateBookingState> {
     } catch (e) {
       state = state.copyWith(
         status: CreateBookingStatus.failed,
-        error: e.toString(),
+        error: _errorMessage(e, 'Could not start the booking. Please try again.'),
       );
     }
   }
@@ -94,13 +100,69 @@ class CreateBookingNotifier extends StateNotifier<CreateBookingState> {
   void reset() => state = const CreateBookingState();
 }
 
-// ---- My bookings list ----
+// ---- My bookings list (passenger view) ----
 
 final FutureProvider<List<BookingEntity>> myBookingsProvider =
     FutureProvider<List<BookingEntity>>((Ref ref) async {
   final BookingRemoteDataSource ds = ref.read(bookingDataSourceProvider);
   final List<BookingDto> dtos = await ds.listMyBookings();
   return dtos.map((BookingDto d) => d.toDomain()).toList();
+});
+
+// ---- Driver-side bookings (passengers who booked my routes) ----
+
+final FutureProvider<List<BookingEntity>> myDriverBookingsProvider =
+    FutureProvider<List<BookingEntity>>((Ref ref) async {
+  final BookingRemoteDataSource ds = ref.read(bookingDataSourceProvider);
+  final List<BookingDto> dtos = await ds.listMyBookings(role: 'driver');
+  return dtos.map((BookingDto d) => d.toDomain()).toList();
+});
+
+/// Computed weekly stats for the driver from completed bookings.
+class DriverEarningsStats {
+  const DriverEarningsStats({
+    required this.weekTotalTzs,
+    required this.weekTrips,
+    required this.lifetimeTrips,
+  });
+
+  final int weekTotalTzs;
+  final int weekTrips;
+  final int lifetimeTrips;
+}
+
+final Provider<AsyncValue<DriverEarningsStats>> driverEarningsStatsProvider =
+    Provider<AsyncValue<DriverEarningsStats>>((Ref ref) {
+  final AsyncValue<List<BookingEntity>> async =
+      ref.watch(myDriverBookingsProvider);
+  return async.whenData((List<BookingEntity> bookings) {
+    final DateTime now = DateTime.now();
+    final DateTime weekStart =
+        now.subtract(Duration(days: now.weekday - 1)).copyWith(
+              hour: 0,
+              minute: 0,
+              second: 0,
+              millisecond: 0,
+              microsecond: 0,
+            );
+    int weekTotal = 0;
+    int weekTrips = 0;
+    int lifetime = 0;
+    for (final BookingEntity b in bookings) {
+      if (b.status != 'completed') continue;
+      lifetime++;
+      final DateTime ts = b.departureDatetime ?? b.createdAt;
+      if (ts.isAfter(weekStart)) {
+        weekTrips++;
+        weekTotal += b.totalPriceTzs;
+      }
+    }
+    return DriverEarningsStats(
+      weekTotalTzs: weekTotal,
+      weekTrips: weekTrips,
+      lifetimeTrips: lifetime,
+    );
+  });
 });
 
 // ---- Single booking detail ----
@@ -155,7 +217,7 @@ class DeclineBookingNotifier extends StateNotifier<DeclineBookingState> {
     } catch (e) {
       state = state.copyWith(
         status: DeclineBookingStatus.failed,
-        error: e.toString(),
+        error: _errorMessage(e, 'Could not decline the booking.'),
       );
     }
   }
