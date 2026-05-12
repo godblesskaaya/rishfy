@@ -8,6 +8,7 @@ import '../../../../core/constants/app_constants.dart';
 import '../../../../shared/widgets/primary_button.dart';
 import '../../../bookings/domain/entities/booking_entity.dart';
 import '../../../bookings/presentation/providers/booking_provider.dart';
+import '../../../home/presentation/screens/shell_screen.dart';
 import '../../data/models/location_models.dart';
 import '../providers/trip_provider.dart';
 
@@ -67,32 +68,7 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
   }
 
   Future<void> _triggerEmergency(BuildContext ctx) async {
-    final bool? confirmed = await showDialog<bool>(
-      context: ctx,
-      builder: (_) => AlertDialog(
-        title: const Text('Emergency Alert'),
-        content: const Text(
-          'This will send an emergency alert to Rishfy support and your emergency contacts. Continue?',
-        ),
-        actions: <Widget>[
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Send Alert', style: TextStyle(color: Colors.white)),
-          ),
-        ],
-      ),
-    );
-    if (confirmed == true && ctx.mounted) {
-      ScaffoldMessenger.of(ctx).showSnackBar(
-        const SnackBar(
-          content: Text('Emergency alert sent. Stay calm — help is on the way.'),
-          backgroundColor: Colors.red,
-          duration: Duration(seconds: 5),
-        ),
-      );
-    }
+    await showEmergencyDialog(ctx);
   }
 
   @override

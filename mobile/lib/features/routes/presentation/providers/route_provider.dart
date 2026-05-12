@@ -1,10 +1,16 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../core/errors/app_exception.dart';
 import '../../../../core/network/dio_client.dart';
 import '../../data/datasources/location_search_remote_datasource.dart';
 import '../../data/datasources/route_remote_datasource.dart';
 import '../../data/models/route_models.dart';
 import '../../domain/entities/route_entity.dart';
+
+String _errorMessage(Object e, String fallback) {
+  if (e is AppException) return e.message;
+  return fallback;
+}
 
 final Provider<RouteRemoteDataSource> routeDataSourceProvider =
     Provider<RouteRemoteDataSource>(
@@ -62,7 +68,10 @@ class RouteSearchNotifier extends StateNotifier<RouteSearchState> {
       final List<SearchResultDto> results = await _ds.searchRoutes(params);
       state = state.copyWith(isLoading: false, results: results);
     } catch (e) {
-      state = state.copyWith(isLoading: false, error: e.toString());
+      state = state.copyWith(
+        isLoading: false,
+        error: _errorMessage(e, 'Could not search routes. Try again.'),
+      );
     }
   }
 
@@ -117,7 +126,7 @@ class PreviewRouteNotifier extends StateNotifier<PreviewRouteState> {
     } catch (e) {
       state = PreviewRouteState(
         status: PreviewRouteStatus.failed,
-        error: e.toString(),
+        error: _errorMessage(e, 'Could not preview the route.'),
       );
     }
   }
@@ -140,6 +149,15 @@ final myVehicleOptionsProvider =
     FutureProvider.autoDispose<List<DriverVehicleOption>>((Ref ref) async {
   final RouteRemoteDataSource ds = ref.read(routeDataSourceProvider);
   return ds.listMyVehicles();
+});
+
+// ---- Driver's own posted routes (driver home) ----
+
+final myRoutesProvider =
+    FutureProvider.autoDispose<List<RouteEntity>>((Ref ref) async {
+  final RouteRemoteDataSource ds = ref.read(routeDataSourceProvider);
+  final List<RouteDto> dtos = await ds.listMyRoutes();
+  return dtos.map((RouteDto d) => d.toDomain()).toList();
 });
 
 // ---- Create route ----
@@ -190,7 +208,7 @@ class CreateRouteNotifier extends StateNotifier<CreateRouteState> {
     } catch (e) {
       state = CreateRouteState(
         status: CreateRouteStatus.failed,
-        error: e.toString(),
+        error: _errorMessage(e, 'Could not post the route.'),
       );
     }
   }
