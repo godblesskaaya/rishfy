@@ -3,10 +3,14 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:intl/intl.dart';
 
 import '../../../../core/constants/app_constants.dart';
 import '../../../../shared/providers/active_role_provider.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
+import '../../../bookings/presentation/providers/booking_provider.dart';
+import '../../../routes/domain/entities/route_entity.dart';
+import '../../../routes/presentation/providers/route_provider.dart';
 
 class DriverHomeScreen extends ConsumerWidget {
   const DriverHomeScreen({super.key});
@@ -14,7 +18,12 @@ class DriverHomeScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final String? firstName = ref.watch(currentUserProvider)?.firstName;
+    final double? rating = ref.watch(currentUserProvider)?.ratingAverage;
     final ColorScheme scheme = Theme.of(context).colorScheme;
+    final AsyncValue<List<RouteEntity>> routesAsync =
+        ref.watch(myRoutesProvider);
+    final AsyncValue<DriverEarningsStats> statsAsync =
+        ref.watch(driverEarningsStatsProvider);
 
     return Scaffold(
       body: SafeArea(
@@ -87,56 +96,11 @@ class DriverHomeScreen extends ConsumerWidget {
                 ),
               ),
 
-              // Earnings card
-              Container(
-                padding: const EdgeInsets.all(AppConstants.spaceLg),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: <Color>[
-                      scheme.primary,
-                      scheme.primary.withValues(alpha: 0.8),
-                    ],
-                  ),
-                  borderRadius: BorderRadius.circular(AppConstants.radiusLg),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    Text(
-                      'This week',
-                      style: TextStyle(
-                        color: scheme.onPrimary.withValues(alpha: 0.8),
-                        fontSize: 14,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      '0 TZS',
-                      style: Theme.of(context).textTheme.displaySmall?.copyWith(
-                            color: scheme.onPrimary,
-                            fontWeight: FontWeight.bold,
-                          ),
-                    ),
-                    const SizedBox(height: 16),
-                    Row(
-                      children: <Widget>[
-                        _Stat(
-                          label: 'Trips',
-                          value: '0',
-                          color: scheme.onPrimary,
-                        ),
-                        const SizedBox(width: 32),
-                        _Stat(
-                          label: 'Rating',
-                          value: '—',
-                          color: scheme.onPrimary,
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
+              // Earnings card — real numbers from completed bookings.
+              _EarningsCard(
+                statsAsync: statsAsync,
+                rating: rating,
+                onRetry: () => ref.invalidate(myDriverBookingsProvider),
               ),
               const SizedBox(height: 24),
 
@@ -149,41 +113,24 @@ class DriverHomeScreen extends ConsumerWidget {
               const SizedBox(height: 24),
 
               // Active routes
-              Text(
-                'Your posted routes',
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
+              Row(
+                children: <Widget>[
+                  Text(
+                    'Your posted routes',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    icon: const Icon(Icons.refresh, size: 18),
+                    tooltip: 'Refresh',
+                    onPressed: () => ref.invalidate(myRoutesProvider),
+                  ),
+                ],
               ),
               const SizedBox(height: 12),
-              Container(
-                padding: const EdgeInsets.all(AppConstants.spaceLg),
-                decoration: BoxDecoration(
-                  color: scheme.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(AppConstants.radiusLg),
-                ),
-                child: Column(
-                  children: <Widget>[
-                    Icon(
-                      Icons.route,
-                      size: 48,
-                      color: scheme.onSurfaceVariant,
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      'No active routes',
-                      style: Theme.of(context).textTheme.bodyLarge,
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Post your commute to start earning',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: scheme.onSurfaceVariant,
-                          ),
-                    ),
-                  ],
-                ),
-              ),
+              _PostedRoutesSection(routesAsync: routesAsync),
             ],
           ),
         ),
@@ -230,6 +177,113 @@ class _RoleButton extends StatelessWidget {
   }
 }
 
+class _EarningsCard extends StatelessWidget {
+  const _EarningsCard({
+    required this.statsAsync,
+    required this.rating,
+    required this.onRetry,
+  });
+
+  final AsyncValue<DriverEarningsStats> statsAsync;
+  final double? rating;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+    final String formattedTotal = statsAsync.maybeWhen(
+      data: (DriverEarningsStats s) =>
+          'TZS ${NumberFormat('#,###').format(s.weekTotalTzs)}',
+      orElse: () => '—',
+    );
+    final int trips = statsAsync.maybeWhen(
+      data: (DriverEarningsStats s) => s.weekTrips,
+      orElse: () => 0,
+    );
+    final String ratingLabel = (rating == null || rating == 0)
+        ? '—'
+        : rating!.toStringAsFixed(1);
+
+    return Container(
+      padding: const EdgeInsets.all(AppConstants.spaceLg),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: <Color>[
+            scheme.primary,
+            scheme.primary.withValues(alpha: 0.8),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(AppConstants.radiusLg),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Text(
+                'This week',
+                style: TextStyle(
+                  color: scheme.onPrimary.withValues(alpha: 0.85),
+                  fontSize: 14,
+                ),
+              ),
+              const Spacer(),
+              if (statsAsync.hasError)
+                IconButton(
+                  visualDensity: VisualDensity.compact,
+                  icon: Icon(Icons.refresh, color: scheme.onPrimary),
+                  onPressed: onRetry,
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          statsAsync.isLoading
+              ? SizedBox(
+                  height: 32,
+                  child: Row(
+                    children: <Widget>[
+                      SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          color: scheme.onPrimary,
+                          strokeWidth: 2,
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              : Text(
+                  formattedTotal,
+                  style: Theme.of(context).textTheme.displaySmall?.copyWith(
+                        color: scheme.onPrimary,
+                        fontWeight: FontWeight.bold,
+                      ),
+                ),
+          const SizedBox(height: 16),
+          Row(
+            children: <Widget>[
+              _Stat(
+                label: 'Trips',
+                value: '$trips',
+                color: scheme.onPrimary,
+              ),
+              const SizedBox(width: 32),
+              _Stat(
+                label: 'Rating',
+                value: ratingLabel,
+                color: scheme.onPrimary,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _Stat extends StatelessWidget {
   const _Stat({required this.label, required this.value, required this.color});
 
@@ -256,6 +310,119 @@ class _Stat extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _PostedRoutesSection extends StatelessWidget {
+  const _PostedRoutesSection({required this.routesAsync});
+
+  final AsyncValue<List<RouteEntity>> routesAsync;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+
+    Widget emptyBox(String title, String? subtitle) => Container(
+          padding: const EdgeInsets.all(AppConstants.spaceLg),
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(AppConstants.radiusLg),
+          ),
+          child: Column(
+            children: <Widget>[
+              Icon(Icons.route, size: 48, color: scheme.onSurfaceVariant),
+              const SizedBox(height: 12),
+              Text(title, style: Theme.of(context).textTheme.bodyLarge),
+              if (subtitle != null) ...<Widget>[
+                const SizedBox(height: 4),
+                Text(
+                  subtitle,
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
+                ),
+              ],
+            ],
+          ),
+        );
+
+    return routesAsync.when(
+      loading: () => const Padding(
+        padding: EdgeInsets.symmetric(vertical: 24),
+        child: Center(child: CircularProgressIndicator()),
+      ),
+      error: (_, __) =>
+          emptyBox('Could not load your routes', 'Pull down or tap refresh.'),
+      data: (List<RouteEntity> routes) {
+        if (routes.isEmpty) {
+          return emptyBox(
+            'No active routes',
+            'Post your commute to start earning.',
+          );
+        }
+        return Column(
+          children: routes
+              .map((RouteEntity r) => Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: _PostedRouteCard(route: r),
+                  ))
+              .toList(),
+        );
+      },
+    );
+  }
+}
+
+class _PostedRouteCard extends StatelessWidget {
+  const _PostedRouteCard({required this.route});
+
+  final RouteEntity route;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+    return InkWell(
+      borderRadius: BorderRadius.circular(AppConstants.radiusLg),
+      onTap: () => context.push('/routes/${route.routeId}'),
+      child: Container(
+        padding: const EdgeInsets.all(AppConstants.spaceMd),
+        decoration: BoxDecoration(
+          border: Border.all(color: scheme.outlineVariant),
+          borderRadius: BorderRadius.circular(AppConstants.radiusLg),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              '${route.originName} → ${route.destinationName}',
+              style: Theme.of(context).textTheme.titleSmall,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            const SizedBox(height: 4),
+            Row(
+              children: <Widget>[
+                Icon(Icons.schedule, size: 14, color: scheme.onSurfaceVariant),
+                const SizedBox(width: 4),
+                Text(
+                  DateFormat('EEE d MMM, HH:mm')
+                      .format(route.departureDatetime.toLocal()),
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                const SizedBox(width: 12),
+                Icon(Icons.event_seat, size: 14, color: scheme.onSurfaceVariant),
+                const SizedBox(width: 4),
+                Text(
+                  '${route.availableSeats}/${route.totalSeats}',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

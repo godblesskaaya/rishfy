@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../constants/app_logger.dart';
 import '../../features/auth/presentation/providers/auth_provider.dart';
+import '../../features/auth/presentation/screens/forgot_password_screen.dart';
 import '../../features/auth/presentation/screens/login_screen.dart';
 import '../../features/auth/presentation/screens/onboarding_screen.dart';
 import '../../features/auth/presentation/screens/otp_verification_screen.dart';
@@ -15,7 +16,13 @@ import '../../features/bookings/presentation/screens/create_booking_screen.dart'
 import '../../features/home/presentation/screens/driver_home_screen.dart';
 import '../../features/home/presentation/screens/passenger_home_screen.dart';
 import '../../features/home/presentation/screens/shell_screen.dart';
+import '../../features/notifications/presentation/screens/notification_preferences_screen.dart';
 import '../../features/notifications/presentation/screens/notifications_screen.dart';
+import '../../features/profile/presentation/screens/edit_profile_screen.dart';
+import '../../features/profile/presentation/screens/emergency_contacts_screen.dart';
+import '../../features/profile/presentation/screens/help_support_screen.dart';
+import '../../features/profile/presentation/screens/legal_screen.dart';
+import '../../features/profile/presentation/screens/payment_methods_screen.dart';
 import '../../features/profile/presentation/screens/vehicle_management_screen.dart';
 import '../../features/profile/presentation/screens/profile_screen.dart';
 import '../../features/profile/presentation/screens/settings_screen.dart';
@@ -59,7 +66,8 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
       final bool onAuthRoute = path.startsWith('/auth') ||
           path == '/login' ||
           path == '/register' ||
-          path == '/onboarding';
+          path == '/onboarding' ||
+          path == '/forgot-password';
 
       // Not authenticated → force onto auth flow
       if (!isAuthed && !loading && !onAuthRoute) {
@@ -93,6 +101,10 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
       GoRoute(
         path: '/register',
         builder: (_, __) => const RegisterScreen(),
+      ),
+      GoRoute(
+        path: '/forgot-password',
+        builder: (_, __) => const ForgotPasswordScreen(),
       ),
       GoRoute(
         path: '/auth/otp',
@@ -211,6 +223,11 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
       ),
       GoRoute(
         parentNavigatorKey: _rootNavKey,
+        path: '/notifications/preferences',
+        builder: (_, __) => const NotificationPreferencesScreen(),
+      ),
+      GoRoute(
+        parentNavigatorKey: _rootNavKey,
         path: '/settings',
         builder: (_, __) => const SettingsScreen(),
       ),
@@ -218,6 +235,38 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
         parentNavigatorKey: _rootNavKey,
         path: '/profile/vehicles',
         builder: (_, __) => const VehicleManagementScreen(),
+      ),
+      GoRoute(
+        parentNavigatorKey: _rootNavKey,
+        path: '/profile/edit',
+        builder: (_, __) => const EditProfileScreen(),
+      ),
+      GoRoute(
+        parentNavigatorKey: _rootNavKey,
+        path: '/profile/emergency-contacts',
+        builder: (_, __) => const EmergencyContactsScreen(),
+      ),
+      GoRoute(
+        parentNavigatorKey: _rootNavKey,
+        path: '/profile/payment-methods',
+        builder: (_, __) => const PaymentMethodsScreen(),
+      ),
+      GoRoute(
+        parentNavigatorKey: _rootNavKey,
+        path: '/help',
+        builder: (_, __) => const HelpSupportScreen(),
+      ),
+      GoRoute(
+        parentNavigatorKey: _rootNavKey,
+        path: '/legal/privacy',
+        builder: (_, __) =>
+            const LegalScreen(document: LegalDocument.privacy),
+      ),
+      GoRoute(
+        parentNavigatorKey: _rootNavKey,
+        path: '/legal/terms',
+        builder: (_, __) =>
+            const LegalScreen(document: LegalDocument.terms),
       ),
     ],
     errorBuilder: (BuildContext context, GoRouterState state) {
