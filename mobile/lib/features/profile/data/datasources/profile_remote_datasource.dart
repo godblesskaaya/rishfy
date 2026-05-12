@@ -109,13 +109,6 @@ class ProfileRemoteDataSource {
     return DriverVehicleOption.fromJson(_asMap(response.data));
   }
 
-  Future<DriverVehicleOption> setActiveVehicle(String vehicleId) async {
-    final Response<dynamic> response = await _dio.put<dynamic>(
-      '/api/v1/users/me/vehicles/$vehicleId/active',
-    );
-    return DriverVehicleOption.fromJson(_asMap(response.data));
-  }
-
   Future<void> deleteVehicle(String vehicleId) async {
     await _dio.delete<void>('/api/v1/users/me/vehicles/$vehicleId');
   }

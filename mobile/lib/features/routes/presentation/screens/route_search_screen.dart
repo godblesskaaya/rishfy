@@ -403,8 +403,15 @@ class _RouteSearchScreenState extends ConsumerState<RouteSearchScreen> {
       body: SafeArea(
         child: LayoutBuilder(
           builder: (BuildContext context, BoxConstraints constraints) {
+            final double bottomInset =
+                MediaQuery.of(context).padding.bottom + 96;
             return SingleChildScrollView(
-              padding: const EdgeInsets.all(AppConstants.spaceLg),
+              padding: EdgeInsets.fromLTRB(
+                AppConstants.spaceLg,
+                AppConstants.spaceLg,
+                AppConstants.spaceLg,
+                AppConstants.spaceLg + bottomInset,
+              ),
               child: ConstrainedBox(
                 constraints: BoxConstraints(minHeight: constraints.maxHeight),
                 child: Column(

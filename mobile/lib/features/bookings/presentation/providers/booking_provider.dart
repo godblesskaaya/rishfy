@@ -136,9 +136,9 @@ class DeclineBookingState {
       );
 }
 
-final StateNotifierProvider<DeclineBookingNotifier, DeclineBookingState>
-    declineBookingProvider = StateNotifierProvider.autoDispose<
-        DeclineBookingNotifier, DeclineBookingState>(
+final declineBookingProvider =
+    StateNotifierProvider.autoDispose<DeclineBookingNotifier,
+        DeclineBookingState>(
   (Ref ref) => DeclineBookingNotifier(ref.read(bookingDataSourceProvider)),
 );
 

@@ -96,9 +96,8 @@ class PreviewRouteState {
       );
 }
 
-final StateNotifierProvider<PreviewRouteNotifier, PreviewRouteState>
-    previewRouteProvider = StateNotifierProvider.autoDispose<PreviewRouteNotifier,
-        PreviewRouteState>(
+final previewRouteProvider =
+    StateNotifierProvider.autoDispose<PreviewRouteNotifier, PreviewRouteState>(
   (Ref ref) => PreviewRouteNotifier(ref.read(routeDataSourceProvider)),
 );
 

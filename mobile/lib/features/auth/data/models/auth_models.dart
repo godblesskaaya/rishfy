@@ -66,10 +66,11 @@ class UserDto {
           false,
       ratingAverage: _readNum(
         json,
-        <String>['ratingAverage', 'rating_average'],
+        <String>['ratingAverage', 'rating_average', 'average_rating'],
       )?.toDouble(),
       ratingCount:
-          _readNum(json, <String>['ratingCount', 'rating_count'])?.toInt(),
+          _readNum(json, <String>['ratingCount', 'rating_count', 'total_ratings'])
+              ?.toInt(),
       language: _readString(json, <String>['language']),
     );
   }

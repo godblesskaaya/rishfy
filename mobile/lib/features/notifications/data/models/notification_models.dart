@@ -18,12 +18,15 @@ class NotificationDto {
   final Map<String, dynamic>? data;
 
   factory NotificationDto.fromJson(Map<String, dynamic> j) => NotificationDto(
-        notificationId: j['notification_id'] as String,
+        notificationId: (j['notification_id'] ?? j['id']) as String,
         title: j['title'] as String,
         body: j['body'] as String,
-        type: j['type'] as String? ?? 'info',
+        type: (j['type'] ?? j['channel'] ?? j['template_key']) as String? ??
+            'info',
         isRead: j['is_read'] as bool? ?? false,
         createdAt: DateTime.parse(j['created_at'] as String),
-        data: j['data'] as Map<String, dynamic>?,
+        data: j['data'] is Map<String, dynamic>
+            ? j['data'] as Map<String, dynamic>
+            : (j['data'] is Map ? Map<String, dynamic>.from(j['data'] as Map) : null),
       );
 }
