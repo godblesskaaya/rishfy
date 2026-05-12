@@ -4,6 +4,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/constants/app_constants.dart';
 
+const String _kThemeModeKey = 'theme_mode';
+
 /// Current app locale. Persisted via SharedPreferences.
 final StateNotifierProvider<LocaleNotifier, Locale> localeProvider =
     StateNotifierProvider<LocaleNotifier, Locale>(
@@ -35,8 +37,30 @@ class LocaleNotifier extends StateNotifier<Locale> {
   }
 }
 
-/// Currently-active role for users who are both passenger and driver.
-/// Default: 'passenger'. Changed from the home screen's role switcher.
-final StateProvider<String> activeRoleProvider = StateProvider<String>(
-  (Ref ref) => 'passenger',
+/// Theme mode (system / light / dark). Persisted via SharedPreferences.
+final StateNotifierProvider<ThemeModeNotifier, ThemeMode> themeModeProvider =
+    StateNotifierProvider<ThemeModeNotifier, ThemeMode>(
+  (Ref ref) => ThemeModeNotifier(),
 );
+
+class ThemeModeNotifier extends StateNotifier<ThemeMode> {
+  ThemeModeNotifier() : super(ThemeMode.system) {
+    _load();
+  }
+
+  Future<void> _load() async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    final String? saved = prefs.getString(_kThemeModeKey);
+    state = switch (saved) {
+      'light' => ThemeMode.light,
+      'dark' => ThemeMode.dark,
+      _ => ThemeMode.system,
+    };
+  }
+
+  Future<void> setMode(ThemeMode mode) async {
+    state = mode;
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kThemeModeKey, mode.name);
+  }
+}

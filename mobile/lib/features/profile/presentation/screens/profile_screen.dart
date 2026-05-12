@@ -53,7 +53,7 @@ class ProfileScreen extends ConsumerWidget {
             leading: const Icon(Icons.person_outline),
             title: const Text('Edit profile'),
             trailing: const Icon(Icons.chevron_right),
-            onTap: () {},
+            onTap: () => context.push('/profile/edit'),
           ),
           ListTile(
             leading: const Icon(Icons.directions_car_outlined),
@@ -65,13 +65,13 @@ class ProfileScreen extends ConsumerWidget {
             leading: const Icon(Icons.emergency_outlined),
             title: const Text('Emergency contacts'),
             trailing: const Icon(Icons.chevron_right),
-            onTap: () {},
+            onTap: () => context.push('/profile/emergency-contacts'),
           ),
           ListTile(
             leading: const Icon(Icons.payment),
             title: const Text('Payment methods'),
             trailing: const Icon(Icons.chevron_right),
-            onTap: () {},
+            onTap: () => context.push('/profile/payment-methods'),
           ),
           const Divider(),
           ListTile(
@@ -84,7 +84,7 @@ class ProfileScreen extends ConsumerWidget {
             leading: const Icon(Icons.help_outline),
             title: const Text('Help & support'),
             trailing: const Icon(Icons.chevron_right),
-            onTap: () {},
+            onTap: () => context.push('/help'),
           ),
           const Divider(),
           ListTile(

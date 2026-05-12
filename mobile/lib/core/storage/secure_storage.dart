@@ -96,4 +96,17 @@ class SecureStorage {
   }
 
   Future<bool> containsKey(String key) => _storage.containsKey(key: key);
+
+  // ------------------------------ Generic ------------------------------------
+
+  /// Read an arbitrary string value. Use for feature-owned blobs (e.g. JSON
+  /// for emergency contacts, payment methods).
+  Future<String?> readString(String key) => _storage.read(key: key);
+
+  /// Write an arbitrary string value.
+  Future<void> writeString(String key, String value) =>
+      _storage.write(key: key, value: value);
+
+  /// Delete a single key.
+  Future<void> deleteKey(String key) => _storage.delete(key: key);
 }
