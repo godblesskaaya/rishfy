@@ -6,6 +6,7 @@ import 'package:intl_phone_field/phone_number.dart';
 
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/errors/app_exception.dart';
+import '../../../../core/localization/app_localizations.dart';
 import '../../../../shared/widgets/primary_button.dart';
 import '../providers/auth_provider.dart';
 
@@ -63,6 +64,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final AppLocalizations l = AppLocalizations.of(context);
     return Scaffold(
       body: SafeArea(
         child: SingleChildScrollView(
@@ -74,7 +76,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
               children: <Widget>[
                 const SizedBox(height: 40),
                 Text(
-                  'Welcome back',
+                  l.t('welcome'),
                   style: Theme.of(context).textTheme.displaySmall?.copyWith(
                         fontWeight: FontWeight.bold,
                       ),
@@ -89,8 +91,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 const SizedBox(height: 48),
                 IntlPhoneField(
                   initialCountryCode: 'TZ',
-                  decoration: const InputDecoration(
-                    labelText: 'Phone number',
+                  decoration: InputDecoration(
+                    labelText: l.t('phone_number'),
                     hintText: '712 345 678',
                   ),
                   onChanged: (PhoneNumber phone) {
@@ -160,9 +162,17 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     ),
                   ),
                 ],
-                const SizedBox(height: 32),
+                const SizedBox(height: 8),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: () => context.push('/forgot-password'),
+                    child: const Text('Forgot password?'),
+                  ),
+                ),
+                const SizedBox(height: 16),
                 PrimaryButton(
-                  label: 'Log in',
+                  label: l.t('login'),
                   loading: _submitting,
                   onPressed: _submit,
                 ),
@@ -171,12 +181,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: <Widget>[
                     Text(
-                      "Don't have an account?",
+                      l.locale.languageCode == 'sw'
+                          ? 'Huna akaunti?'
+                          : "Don't have an account?",
                       style: Theme.of(context).textTheme.bodyMedium,
                     ),
                     TextButton(
                       onPressed: () => context.push('/register'),
-                      child: const Text('Sign up'),
+                      child: Text(l.t('register')),
                     ),
                   ],
                 ),

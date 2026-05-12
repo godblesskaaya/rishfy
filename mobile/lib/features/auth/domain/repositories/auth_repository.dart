@@ -35,4 +35,20 @@ abstract class AuthRepository {
 
   /// Update the cached user profile without changing stored tokens.
   Future<void> cacheUser(User user);
+
+  /// Request a password reset OTP for the given identifier (email or phone).
+  Future<void> requestPasswordReset({required String identifier});
+
+  /// Complete a password reset using the OTP that was sent.
+  Future<void> confirmPasswordReset({
+    required String identifier,
+    required String otpCode,
+    required String newPassword,
+  });
+
+  /// Re-issue an OTP for an in-flight registration or password reset.
+  Future<void> resendOtp({
+    required String userId,
+    String purpose = 'register',
+  });
 }

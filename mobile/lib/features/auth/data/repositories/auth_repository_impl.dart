@@ -166,6 +166,32 @@ class AuthRepositoryImpl implements AuthRepository {
   }
 
   @override
+  Future<void> requestPasswordReset({required String identifier}) {
+    return _remote.requestPasswordReset(identifier: identifier);
+  }
+
+  @override
+  Future<void> confirmPasswordReset({
+    required String identifier,
+    required String otpCode,
+    required String newPassword,
+  }) {
+    return _remote.confirmPasswordReset(
+      identifier: identifier,
+      otpCode: otpCode,
+      newPassword: newPassword,
+    );
+  }
+
+  @override
+  Future<void> resendOtp({
+    required String userId,
+    String purpose = 'register',
+  }) {
+    return _remote.resendOtp(userId: userId, purpose: purpose);
+  }
+
+  @override
   Future<void> cacheUser(User user) async {
     await _storage.writeUserSnapshot(jsonEncode(userToStorageJson(user)));
     AppLogger.info('AuthRepository.cacheUser updated snapshot for ${user.userId}');

@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../../../core/constants/app_constants.dart';
 import '../providers/auth_provider.dart';
 
 class SplashScreen extends ConsumerStatefulWidget {
@@ -24,19 +26,23 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
     if (!mounted) return;
 
     final AsyncValue<AuthState> auth = ref.read(authControllerProvider);
-    auth.when(
-      data: (AuthState state) {
+    await auth.when(
+      data: (AuthState state) async {
         if (state.isAuthenticated) {
           context.go('/home');
-        } else {
-          context.go('/login');
+          return;
         }
+        final SharedPreferences prefs = await SharedPreferences.getInstance();
+        final bool seenOnboarding =
+            prefs.getBool(AppConstants.keyOnboardingComplete) ?? false;
+        if (!mounted) return;
+        context.go(seenOnboarding ? '/login' : '/onboarding');
       },
-      loading: () {
+      loading: () async {
         // Try again shortly
         Future<void>.delayed(const Duration(milliseconds: 300), _decide);
       },
-      error: (_, __) => context.go('/login'),
+      error: (_, __) async => context.go('/login'),
     );
   }
 

@@ -126,6 +126,29 @@ class AuthController extends AsyncNotifier<AuthState> {
     );
   }
 
+  Future<void> requestPasswordReset({required String identifier}) {
+    return _repo.requestPasswordReset(identifier: identifier);
+  }
+
+  Future<void> confirmPasswordReset({
+    required String identifier,
+    required String otpCode,
+    required String newPassword,
+  }) {
+    return _repo.confirmPasswordReset(
+      identifier: identifier,
+      otpCode: otpCode,
+      newPassword: newPassword,
+    );
+  }
+
+  Future<void> resendOtp({
+    required String userId,
+    String purpose = 'register',
+  }) {
+    return _repo.resendOtp(userId: userId, purpose: purpose);
+  }
+
   Future<void> verifyOtp({
     required String userId,
     required String otpCode,

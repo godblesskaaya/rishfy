@@ -5,6 +5,7 @@ import {
   logoutSchema,
   refreshTokenSchema,
   registerSchema,
+  resendOtpSchema,
   resetPasswordSchema,
   verifyOtpSchema,
 } from './auth.schemas.js';
@@ -48,6 +49,11 @@ export const authRoutes: FastifyPluginAsync<AuthRoutesOptions> = async (app, opt
   app.post('/verify-otp', { preHandler: createRateLimit({ bucket: 'auth-otp', max: 3, windowMs: 60_000 }) }, async (request) => {
     const payload = verifyOtpSchema.parse(request.body);
     return authService.verifyOtp(payload);
+  });
+
+  app.post('/resend-otp', { preHandler: createRateLimit({ bucket: 'auth-otp-resend', max: 3, windowMs: 60_000 }) }, async (request) => {
+    const payload = resendOtpSchema.parse(request.body);
+    return authService.resendOtp(payload);
   });
 
   app.post('/login', { preHandler: createRateLimit({ bucket: 'auth-login', max: 5, windowMs: 60_000 }) }, async (request) => {

@@ -67,6 +67,59 @@ class AuthRemoteDataSource {
     );
   }
 
+  /// Initiate password reset — backend issues an OTP to the user's contact.
+  Future<void> requestPasswordReset({required String identifier}) async {
+    try {
+      await _dio.post<Map<String, dynamic>>(
+        '$_basePath/reset-password',
+        data: <String, dynamic>{'identifier': identifier},
+      );
+    } on DioException catch (error) {
+      final Object? mapped = error.error;
+      if (mapped is AppException) throw mapped;
+      rethrow;
+    }
+  }
+
+  /// Confirm password reset with the OTP and a new password.
+  Future<void> confirmPasswordReset({
+    required String identifier,
+    required String otpCode,
+    required String newPassword,
+  }) async {
+    try {
+      await _dio.post<Map<String, dynamic>>(
+        '$_basePath/reset-password',
+        data: <String, dynamic>{
+          'identifier': identifier,
+          'otpCode': otpCode,
+          'newPassword': newPassword,
+        },
+      );
+    } on DioException catch (error) {
+      final Object? mapped = error.error;
+      if (mapped is AppException) throw mapped;
+      rethrow;
+    }
+  }
+
+  /// Re-issue an OTP for the given user (register or reset-password purpose).
+  Future<void> resendOtp({
+    required String userId,
+    String purpose = 'register',
+  }) async {
+    try {
+      await _dio.post<Map<String, dynamic>>(
+        '$_basePath/resend-otp',
+        data: <String, dynamic>{'userId': userId, 'purpose': purpose},
+      );
+    } on DioException catch (error) {
+      final Object? mapped = error.error;
+      if (mapped is AppException) throw mapped;
+      rethrow;
+    }
+  }
+
   Future<RefreshResponseDto> refresh({
     required String refreshToken,
   }) {

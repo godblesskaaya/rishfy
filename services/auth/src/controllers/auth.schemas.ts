@@ -17,6 +17,11 @@ export const verifyOtpSchema = z.object({
   otpCode: z.string().length(6),
 });
 
+export const resendOtpSchema = z.object({
+  userId: z.string().uuid(),
+  purpose: z.enum(['register', 'reset-password']).optional().default('register'),
+});
+
 export const loginSchema = z.object({
   identifier: z.string().min(3),
   password: z.string().min(8),
@@ -47,6 +52,7 @@ export const resetPasswordSchema = z.object({
 
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type VerifyOtpInput = z.infer<typeof verifyOtpSchema>;
+export type ResendOtpInput = z.infer<typeof resendOtpSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type RefreshTokenInput = z.infer<typeof refreshTokenSchema>;
 export type LogoutInput = z.infer<typeof logoutSchema>;
