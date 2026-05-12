@@ -29,9 +29,12 @@ class BookingRemoteDataSource {
     });
   }
 
-  Future<List<BookingDto>> listMyBookings() async {
+  Future<List<BookingDto>> listMyBookings({String role = 'passenger'}) async {
     final Response<Map<String, dynamic>> res =
-        await _dio.get<Map<String, dynamic>>('/api/v1/bookings/me');
+        await _dio.get<Map<String, dynamic>>(
+      '/api/v1/bookings/me',
+      queryParameters: <String, dynamic>{'role': role},
+    );
     final List<dynamic> data =
         res.data?['bookings'] as List<dynamic>? ?? <dynamic>[];
     return data
@@ -54,10 +57,14 @@ class BookingRemoteDataSource {
     return res.data?['status'] as String? ?? 'pending';
   }
 
-  Future<void> cancelBooking(String bookingId) async {
+  Future<void> cancelBooking(String bookingId, {String? reason}) async {
     await _dio.post<void>(
       '/api/v1/bookings/$bookingId/cancel',
-      data: const <String, dynamic>{'reason': 'PASSENGER_CANCELLED'},
+      data: <String, dynamic>{
+        'reason': (reason == null || reason.trim().isEmpty)
+            ? 'PASSENGER_CANCELLED'
+            : reason.trim(),
+      },
     );
   }
 

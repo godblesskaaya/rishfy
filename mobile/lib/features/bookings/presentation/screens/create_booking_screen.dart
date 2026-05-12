@@ -4,12 +4,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import 'package:intl_phone_field/intl_phone_field.dart';
+import 'package:intl_phone_field/phone_number.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../../../core/constants/app_constants.dart';
 import '../../../../shared/widgets/primary_button.dart';
-import '../../../auth/domain/entities/user.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
+import '../../../profile/domain/payment_method.dart';
+import '../../../profile/presentation/providers/payment_methods_provider.dart';
 import '../../../routes/domain/entities/route_entity.dart';
 import '../../../routes/presentation/providers/route_provider.dart';
 import '../../data/models/booking_models.dart';
@@ -48,14 +51,30 @@ class CreateBookingScreen extends ConsumerStatefulWidget {
 
 class _CreateBookingScreenState extends ConsumerState<CreateBookingScreen> {
   String _paymentMethod = 'mpesa_tz';
-  final TextEditingController _phoneCtrl = TextEditingController();
+  String _payerPhone = '';
+  String _payerCountryCode = '+255';
+  String _payerInitial = '';
   int _seatCount = 1;
   Timer? _pollTimer;
 
   @override
+  void initState() {
+    super.initState();
+    // Seed phone field from current user once.
+    final String? userPhone =
+        ref.read(currentUserProvider)?.phoneNumber;
+    if (userPhone != null && userPhone.isNotEmpty) {
+      // The user entity stores +255712345678 style. Strip the country code so
+      // IntlPhoneField can render the local number.
+      final RegExp tzPrefix = RegExp(r'^\+255');
+      _payerInitial = userPhone.replaceFirst(tzPrefix, '');
+      _payerPhone = _payerInitial;
+    }
+  }
+
+  @override
   void dispose() {
     _pollTimer?.cancel();
-    _phoneCtrl.dispose();
     super.dispose();
   }
 
@@ -71,13 +90,25 @@ class _CreateBookingScreenState extends ConsumerState<CreateBookingScreen> {
     });
   }
 
+  String _strip(String full) {
+    if (full.startsWith('+255')) return full.substring(4);
+    if (full.startsWith('+')) {
+      // Strip "+CC" where CC is 1-3 digits
+      final RegExpMatch? m = RegExp(r'^\+\d{1,3}').firstMatch(full);
+      if (m != null) return full.substring(m.end);
+    }
+    return full;
+  }
+
   Future<void> _submit(RouteEntity route) async {
-    final String phone = _phoneCtrl.text.trim();
-    if (phone.isEmpty) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Enter your phone number')));
+    final String number = _payerPhone.trim();
+    if (number.isEmpty || number.length < 9) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter a valid mobile money number')),
+      );
       return;
     }
+    final String phone = '$_payerCountryCode$number';
     await ref.read(createBookingProvider.notifier).submit(
           CreateBookingRequest(
             routeId: widget.routeId,
@@ -143,11 +174,14 @@ class _CreateBookingScreenState extends ConsumerState<CreateBookingScreen> {
         totalTzs: totalTzs,
         onDone: () {
           _pollTimer?.cancel();
-          Navigator.of(ctx).pop();
           final CreateBookingState s = ref.read(createBookingProvider);
+          Navigator.of(ctx).pop();
           if (s.status == CreateBookingStatus.completed &&
               s.paymentResponse != null) {
             context.go('/bookings/${s.paymentResponse!.bookingId}');
+          } else if (s.status == CreateBookingStatus.failed) {
+            // Reset so the next submit goes through cleanly.
+            ref.read(createBookingProvider.notifier).reset();
           }
         },
       ),
@@ -158,10 +192,6 @@ class _CreateBookingScreenState extends ConsumerState<CreateBookingScreen> {
   Widget build(BuildContext context) {
     final AsyncValue<RouteEntity> asyncRoute =
         ref.watch(routeDetailProvider(widget.routeId));
-    final User? user = ref.watch(currentUserProvider);
-    if (_phoneCtrl.text.isEmpty && user?.phoneNumber != null) {
-      _phoneCtrl.text = user!.phoneNumber;
-    }
     return Scaffold(
       appBar: AppBar(title: const Text('Confirm booking')),
       body: asyncRoute.when(
@@ -221,17 +251,59 @@ class _CreateBookingScreenState extends ConsumerState<CreateBookingScreen> {
           const SizedBox(height: 20),
           Text('Mobile money number', style: Theme.of(context).textTheme.titleSmall),
           const SizedBox(height: 8),
-          TextField(
-            controller: _phoneCtrl,
-            keyboardType: TextInputType.phone,
+          IntlPhoneField(
+            // Key forces rebuild when a saved method is tapped so initialValue takes effect.
+            key: ValueKey<String>('phone_$_payerInitial'),
+            initialCountryCode: 'TZ',
+            initialValue: _payerInitial,
             decoration: const InputDecoration(
-              prefixText: '+255 ',
-              border: OutlineInputBorder(),
+              labelText: 'Phone number',
               hintText: '712 345 678',
+              border: OutlineInputBorder(),
             ),
+            onChanged: (PhoneNumber phone) {
+              setState(() {
+                _payerPhone = phone.number;
+                _payerCountryCode = phone.countryCode;
+              });
+            },
           ),
           const SizedBox(height: 20),
           Text('Payment method', style: Theme.of(context).textTheme.titleSmall),
+          Consumer(builder: (BuildContext ctx, WidgetRef ref, _) {
+            final List<PaymentMethod> saved =
+                ref.watch(paymentMethodsProvider);
+            if (saved.isEmpty) return const SizedBox.shrink();
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Wrap(
+                spacing: 8,
+                children: saved.map((PaymentMethod m) {
+                  final bool selected =
+                      m.provider == _paymentMethod && _payerPhone == _strip(m.phone);
+                  return ChoiceChip(
+                    avatar: const Icon(Icons.account_balance_wallet, size: 16),
+                    label: Text(
+                      m.label.isEmpty
+                          ? '${m.providerDisplayName} · ${m.phone}'
+                          : '${m.label} · ${m.providerDisplayName}',
+                    ),
+                    selected: selected,
+                    onSelected: (_) {
+                      setState(() {
+                        _paymentMethod = m.provider;
+                        _payerInitial = _strip(m.phone);
+                        _payerPhone = _payerInitial;
+                        if (m.phone.startsWith('+255')) {
+                          _payerCountryCode = '+255';
+                        }
+                      });
+                    },
+                  );
+                }).toList(),
+              ),
+            );
+          }),
           RadioListTile<String>(
             title: const Text('M-Pesa'),
             value: 'mpesa_tz',
