@@ -3,10 +3,13 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:intl/intl.dart';
 
 import '../../../../core/constants/app_constants.dart';
 import '../../../../shared/providers/active_role_provider.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
+import '../../../bookings/domain/entities/booking_entity.dart';
+import '../../../bookings/presentation/providers/booking_provider.dart';
 
 class PassengerHomeScreen extends ConsumerWidget {
   const PassengerHomeScreen({super.key});
@@ -15,6 +18,8 @@ class PassengerHomeScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final String? firstName = ref.watch(currentUserProvider)?.firstName;
     final bool canSwitch = ref.watch(canSwitchRolesProvider);
+    final AsyncValue<List<BookingEntity>> bookingsAsync =
+        ref.watch(myBookingsProvider);
 
     return Scaffold(
       body: SafeArea(
@@ -151,7 +156,7 @@ class PassengerHomeScreen extends ConsumerWidget {
               ),
               const SizedBox(height: 32),
 
-              // Upcoming bookings placeholder
+              // Upcoming trips
               Text(
                 'Upcoming trips',
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
@@ -159,36 +164,134 @@ class PassengerHomeScreen extends ConsumerWidget {
                     ),
               ),
               const SizedBox(height: 12),
-              Container(
-                padding: const EdgeInsets.all(AppConstants.spaceLg),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(AppConstants.radiusLg),
-                ),
-                child: Column(
-                  children: <Widget>[
-                    Icon(
-                      Icons.event_available,
-                      size: 48,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      'No upcoming trips',
-                      style: Theme.of(context).textTheme.bodyLarge,
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Search for routes to book your next ride',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: Theme.of(context).colorScheme.onSurfaceVariant,
-                          ),
-                    ),
-                  ],
-                ),
-              ),
+              _UpcomingTripsCard(bookingsAsync: bookingsAsync),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _UpcomingTripsCard extends StatelessWidget {
+  const _UpcomingTripsCard({required this.bookingsAsync});
+
+  final AsyncValue<List<BookingEntity>> bookingsAsync;
+
+  bool _isUpcoming(BookingEntity b) {
+    if (b.status.contains('cancelled')) return false;
+    if (b.status == 'completed' || b.status == 'expired') return false;
+    return true;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+
+    Widget emptyBox(String title, String? subtitle) => Container(
+          padding: const EdgeInsets.all(AppConstants.spaceLg),
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(AppConstants.radiusLg),
+          ),
+          child: Column(
+            children: <Widget>[
+              Icon(Icons.event_available,
+                  size: 48, color: scheme.onSurfaceVariant),
+              const SizedBox(height: 12),
+              Text(title, style: Theme.of(context).textTheme.bodyLarge),
+              if (subtitle != null) ...<Widget>[
+                const SizedBox(height: 4),
+                Text(
+                  subtitle,
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
+                ),
+              ],
+            ],
+          ),
+        );
+
+    return bookingsAsync.when(
+      loading: () => const Padding(
+        padding: EdgeInsets.symmetric(vertical: 24),
+        child: Center(child: CircularProgressIndicator()),
+      ),
+      error: (_, __) => emptyBox(
+        'Could not load your trips',
+        'Pull to refresh from the Bookings tab.',
+      ),
+      data: (List<BookingEntity> bookings) {
+        final List<BookingEntity> upcoming = bookings.where(_isUpcoming).toList()
+          ..sort((BookingEntity a, BookingEntity b) =>
+              (a.departureDatetime ?? a.createdAt)
+                  .compareTo(b.departureDatetime ?? b.createdAt));
+        if (upcoming.isEmpty) {
+          return emptyBox(
+            'No upcoming trips',
+            'Search for routes to book your next ride.',
+          );
+        }
+        return Column(
+          children: upcoming
+              .take(2)
+              .map((BookingEntity b) => Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: _UpcomingTripTile(booking: b),
+                  ))
+              .toList(),
+        );
+      },
+    );
+  }
+}
+
+class _UpcomingTripTile extends StatelessWidget {
+  const _UpcomingTripTile({required this.booking});
+
+  final BookingEntity booking;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+    final DateTime when = booking.departureDatetime ?? booking.createdAt;
+    return InkWell(
+      borderRadius: BorderRadius.circular(AppConstants.radiusLg),
+      onTap: () => context.push('/bookings/${booking.bookingId}'),
+      child: Container(
+        padding: const EdgeInsets.all(AppConstants.spaceMd),
+        decoration: BoxDecoration(
+          border: Border.all(color: scheme.outlineVariant),
+          borderRadius: BorderRadius.circular(AppConstants.radiusLg),
+        ),
+        child: Row(
+          children: <Widget>[
+            Icon(Icons.event, color: scheme.primary),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    '${booking.originName ?? 'Route'} → '
+                    '${booking.destinationName ?? ''}',
+                    style: Theme.of(context).textTheme.titleSmall,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${DateFormat('EEE d MMM, HH:mm').format(when.toLocal())}'
+                    ' · ${booking.status.replaceAll('_', ' ')}',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right),
+          ],
         ),
       ),
     );

@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:timeago/timeago.dart' as timeago;
 
 import '../../../../shared/widgets/async_views.dart';
 import '../../data/models/notification_models.dart';
+import '../providers/notification_preferences_provider.dart';
 import '../providers/notification_provider.dart';
 
 class NotificationsScreen extends ConsumerWidget {
@@ -18,6 +20,45 @@ class NotificationsScreen extends ConsumerWidget {
       case 'payment_confirmed': return Icons.payments;
       case 'payment_failed': return Icons.payment;
       default: return Icons.notifications;
+    }
+  }
+
+  void _handleNotificationTap(BuildContext ctx, NotificationDto n) {
+    final Map<String, dynamic>? data = n.data;
+    String? readString(List<String> keys) {
+      if (data == null) return null;
+      for (final String key in keys) {
+        final Object? value = data[key];
+        if (value is String && value.isNotEmpty) return value;
+        if (value is num) return value.toString();
+      }
+      return null;
+    }
+
+    // Trip events take precedence — they're time-sensitive.
+    if (n.type == 'trip_started' || n.type == 'trip_completed') {
+      final String? bookingId =
+          readString(<String>['booking_id', 'bookingId', 'trip_id', 'tripId']);
+      if (bookingId != null) {
+        ctx.push(
+          n.type == 'trip_started'
+              ? '/trip/$bookingId'
+              : '/bookings/$bookingId',
+        );
+        return;
+      }
+    }
+
+    final String? bookingId =
+        readString(<String>['booking_id', 'bookingId']);
+    if (bookingId != null) {
+      ctx.push('/bookings/$bookingId');
+      return;
+    }
+
+    final String? routeId = readString(<String>['route_id', 'routeId']);
+    if (routeId != null) {
+      ctx.push('/routes/$routeId');
     }
   }
 
@@ -72,16 +113,23 @@ class NotificationsScreen extends ConsumerWidget {
   }
 
   Widget _buildBody(BuildContext context, WidgetRef ref, NotificationState state) {
-    if (state.isLoading && state.notifications.isEmpty) {
+    final NotificationPreferences prefs =
+        ref.watch(notificationPreferencesProvider);
+    final List<NotificationDto> visible = state.notifications
+        .where((NotificationDto n) =>
+            prefs.isEnabled(categoryFor(n.type)) ||
+            categoryFor(n.type) == NotificationCategory.system)
+        .toList();
+    if (state.isLoading && visible.isEmpty) {
       return const Center(child: CircularProgressIndicator());
     }
-    if (state.error != null && state.notifications.isEmpty) {
+    if (state.error != null && visible.isEmpty) {
       return ErrorView(
         message: state.error!,
         onRetry: () => ref.read(notificationProvider.notifier).load(),
       );
     }
-    if (state.notifications.isEmpty) {
+    if (visible.isEmpty) {
       return const EmptyView(
         icon: Icons.notifications_none,
         title: 'No notifications yet',
@@ -91,10 +139,10 @@ class NotificationsScreen extends ConsumerWidget {
     return RefreshIndicator(
       onRefresh: () => ref.read(notificationProvider.notifier).load(),
       child: ListView.separated(
-        itemCount: state.notifications.length,
+        itemCount: visible.length,
         separatorBuilder: (_, __) => const Divider(height: 1),
         itemBuilder: (BuildContext ctx, int i) {
-          final NotificationDto n = state.notifications[i];
+          final NotificationDto n = visible[i];
           return _NotificationTile(
             notification: n,
             icon: _iconForType(n.type),
@@ -103,6 +151,7 @@ class NotificationsScreen extends ConsumerWidget {
               if (!n.isRead) {
                 ref.read(notificationProvider.notifier).markRead(n.notificationId);
               }
+              _handleNotificationTap(ctx, n);
             },
           );
         },
