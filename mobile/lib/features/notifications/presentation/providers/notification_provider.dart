@@ -48,16 +48,15 @@ class NotificationNotifier extends StateNotifier<NotificationState> {
     state = state.copyWith(isLoading: true, error: null);
     try {
       final Response<Map<String, dynamic>> res =
-          await _dio.get<Map<String, dynamic>>('/api/v1/notifications');
-      final List<dynamic> raw =
-          res.data?['notifications'] as List<dynamic>? ?? <dynamic>[];
+          await _loadNotificationsResponse();
+      final List<dynamic> raw = _readNotificationsList(res.data);
       state = state.copyWith(
         isLoading: false,
         notifications: raw
             .map((dynamic e) =>
                 NotificationDto.fromJson(e as Map<String, dynamic>))
             .toList(),
-        unreadCount: res.data?['unread'] as int? ?? 0,
+        unreadCount: _readUnreadCount(res.data, raw),
       );
     } catch (e) {
       state = state.copyWith(isLoading: false, error: e.toString());
@@ -89,7 +88,14 @@ class NotificationNotifier extends StateNotifier<NotificationState> {
 
   Future<void> markAllRead() async {
     try {
-      await _dio.patch<void>('/api/v1/notifications/read-all');
+      try {
+        await _dio.patch<void>('/api/v1/notifications/read-all');
+      } on DioException catch (error) {
+        if (error.response?.statusCode != 404) {
+          rethrow;
+        }
+        await _dio.post<void>('/api/v1/notifications/me/mark-all-read');
+      }
       state = state.copyWith(
         notifications: state.notifications.map((NotificationDto n) {
           return NotificationDto(
@@ -105,5 +111,56 @@ class NotificationNotifier extends StateNotifier<NotificationState> {
         unreadCount: 0,
       );
     } catch (_) {}
+  }
+
+  Future<Response<Map<String, dynamic>>> _loadNotificationsResponse() async {
+    try {
+      return await _dio.get<Map<String, dynamic>>('/api/v1/notifications');
+    } on DioException catch (error) {
+      if (error.response?.statusCode != 404) {
+        rethrow;
+      }
+    }
+
+    return _dio.get<Map<String, dynamic>>('/api/v1/notifications/me');
+  }
+
+  List<dynamic> _readNotificationsList(Map<String, dynamic>? data) {
+    if (data == null) {
+      return const <dynamic>[];
+    }
+
+    final Object? primary = data['notifications'];
+    if (primary is List<dynamic>) {
+      return primary;
+    }
+
+    final Object? wrapped = data['data'];
+    if (wrapped is List<dynamic>) {
+      return wrapped;
+    }
+
+    return const <dynamic>[];
+  }
+
+  int _readUnreadCount(Map<String, dynamic>? data, List<dynamic> raw) {
+    if (data == null) {
+      return 0;
+    }
+
+    final Object? explicit = data['unread'];
+    if (explicit is int) {
+      return explicit;
+    }
+    if (explicit is num) {
+      return explicit.toInt();
+    }
+
+    return raw.where((dynamic item) {
+      if (item is! Map<String, dynamic>) {
+        return false;
+      }
+      return item['is_read'] == false || item['read'] == false;
+    }).length;
   }
 }
