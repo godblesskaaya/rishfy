@@ -141,6 +141,8 @@ class AuthInterceptor extends Interceptor {
       '/api/v1/auth/login',
       '/api/v1/auth/register',
       '/api/v1/auth/verify-otp',
+      '/api/v1/auth/resend-otp',
+      '/api/v1/auth/reset-password',
       '/api/v1/auth/refresh-token',
     ];
     return publicPaths.any((String p) => path.contains(p));

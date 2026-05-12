@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/errors/app_exception.dart';
+import '../../../../core/localization/app_localizations.dart';
 import '../../../../shared/widgets/primary_button.dart';
 import '../providers/auth_provider.dart';
 
@@ -37,10 +38,20 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
   );
 
   bool _submitting = false;
+  bool _resending = false;
   String? _error;
+  Timer? _resendTimer;
+  int _resendSecondsLeft = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _startResendCooldown();
+  }
 
   @override
   void dispose() {
+    _resendTimer?.cancel();
     for (final TextEditingController controller in _controllers) {
       controller.dispose();
     }
@@ -48,6 +59,50 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
       focusNode.dispose();
     }
     super.dispose();
+  }
+
+  void _startResendCooldown() {
+    _resendTimer?.cancel();
+    setState(() => _resendSecondsLeft =
+        AppConstants.otpResendCooldown.inSeconds);
+    _resendTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      if (_resendSecondsLeft <= 1) {
+        _resendTimer?.cancel();
+        setState(() => _resendSecondsLeft = 0);
+      } else {
+        setState(() => _resendSecondsLeft--);
+      }
+    });
+  }
+
+  Future<void> _resendCode() async {
+    if (widget.userId.isEmpty) {
+      setState(() => _error = 'Missing user reference. Please register again.');
+      return;
+    }
+    setState(() {
+      _resending = true;
+      _error = null;
+    });
+    try {
+      await ref
+          .read(authControllerProvider.notifier)
+          .resendOtp(userId: widget.userId);
+      if (!mounted) return;
+      _startResendCooldown();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('A new code has been sent.')),
+      );
+    } on AppException catch (e) {
+      if (!mounted) return;
+      setState(() => _error = e.message);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _error = 'Could not resend the code. Try again.');
+    } finally {
+      if (mounted) setState(() => _resending = false);
+    }
   }
 
   String get _otpCode =>
@@ -170,11 +225,29 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
                 ),
               ],
               const SizedBox(height: 32),
-              PrimaryButton(
-                label: 'Verify',
-                loading: _submitting,
-                onPressed: _verify,
-              ),
+              Builder(builder: (BuildContext ctx) {
+                final AppLocalizations l = AppLocalizations.of(ctx);
+                return Column(
+                  children: <Widget>[
+                    PrimaryButton(
+                      label: l.t('verify'),
+                      loading: _submitting,
+                      onPressed: _verify,
+                    ),
+                    const SizedBox(height: 12),
+                    TextButton(
+                      onPressed: _resendSecondsLeft > 0 || _resending
+                          ? null
+                          : _resendCode,
+                      child: Text(
+                        _resendSecondsLeft > 0
+                            ? '${l.t('resend_otp')} ($_resendSecondsLeft s)'
+                            : l.t('resend_otp'),
+                      ),
+                    ),
+                  ],
+                );
+              }),
             ],
           ),
         ),

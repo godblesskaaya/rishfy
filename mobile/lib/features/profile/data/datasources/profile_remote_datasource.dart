@@ -53,6 +53,22 @@ class ProfileRemoteDataSource {
         .toDomain();
   }
 
+  Future<User> updateProfile({String? fullName, String? email}) async {
+    final Map<String, dynamic> body = <String, dynamic>{
+      if (fullName != null && fullName.trim().isNotEmpty)
+        'full_name': fullName.trim(),
+      if (email != null && email.trim().isNotEmpty) 'email': email.trim(),
+    };
+    if (body.isEmpty) {
+      return getCurrentUser();
+    }
+    final Response<dynamic> response =
+        await _dio.patch<dynamic>('/api/v1/users/me', data: body);
+    final Map<String, dynamic> payload = _asMap(response.data);
+    return UserDto.fromJson(payload['data'] as Map<String, dynamic>? ?? payload)
+        .toDomain();
+  }
+
   Future<User> becomeDriver(BecomeDriverRequest request) async {
     final Response<dynamic> response = await _dio.post<dynamic>(
       '/api/v1/users/me/become-driver',
@@ -111,6 +127,12 @@ class ProfileRemoteDataSource {
 
   Future<void> deleteVehicle(String vehicleId) async {
     await _dio.delete<void>('/api/v1/users/me/vehicles/$vehicleId');
+  }
+
+  Future<void> setActiveVehicle(String vehicleId) async {
+    await _dio.put<void>(
+      '/api/v1/users/me/vehicles/$vehicleId/active',
+    );
   }
 
   Map<String, dynamic> _asMap(dynamic value) {

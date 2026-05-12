@@ -85,6 +85,26 @@ class _VehicleManagementScreenState
     }
   }
 
+  Future<void> _setActiveVehicle(String vehicleId) async {
+    setState(() => _mutatingVehicle = true);
+    try {
+      await ref
+          .read(profileRemoteDataSourceProvider)
+          .setActiveVehicle(vehicleId);
+      ref.invalidate(myVehiclesProvider);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Active vehicle updated.')),
+      );
+    } catch (error) {
+      await _showError(error);
+    } finally {
+      if (mounted) {
+        setState(() => _mutatingVehicle = false);
+      }
+    }
+  }
+
   Future<void> _deleteVehicle(String vehicleId) async {
     final bool? confirmed = await showDialog<bool>(
       context: context,
@@ -166,6 +186,9 @@ class _VehicleManagementScreenState
                           vehicle: vehicle,
                           busy: _mutatingVehicle,
                           onDelete: () => _deleteVehicle(vehicle.id),
+                          onSetActive: vehicle.isActive
+                              ? null
+                              : () => _setActiveVehicle(vehicle.id),
                         );
                       },
                     );
@@ -301,11 +324,13 @@ class _VehicleCard extends StatelessWidget {
     required this.vehicle,
     required this.busy,
     required this.onDelete,
+    this.onSetActive,
   });
 
   final DriverVehicleOption vehicle;
   final bool busy;
   final VoidCallback onDelete;
+  final VoidCallback? onSetActive;
 
   @override
   Widget build(BuildContext context) {
@@ -353,6 +378,15 @@ class _VehicleCard extends StatelessWidget {
           const SizedBox(height: AppConstants.spaceMd),
           Row(
             children: <Widget>[
+              if (onSetActive != null) ...<Widget>[
+                Expanded(
+                  child: FilledButton.tonal(
+                    onPressed: busy ? null : onSetActive,
+                    child: const Text('Set active'),
+                  ),
+                ),
+                const SizedBox(width: AppConstants.spaceSm),
+              ],
               Expanded(
                 child: OutlinedButton(
                   onPressed: busy ? null : onDelete,

@@ -7,6 +7,7 @@ import type {
   LoginInput,
   RefreshTokenInput,
   RegisterInput,
+  ResendOtpInput,
   ResetPasswordInput,
   VerifyOtpInput,
 } from '../controllers/auth.schemas.js';
@@ -128,6 +129,19 @@ export class AuthService {
       await this.deps.repository.updateRefreshSession(session);
     }
     return { success: true };
+  }
+
+  async resendOtp(input: ResendOtpInput): Promise<{ status: 'otp_sent'; otpExpiresAt: string }> {
+    const user = await this.requireUser(input.userId);
+    if (input.purpose === 'register' && user.isVerified) {
+      // Idempotent — verified accounts don't need another register-OTP.
+      return { status: 'otp_sent', otpExpiresAt: new Date(Date.now() + OTP_EXPIRY_MS).toISOString() };
+    }
+    const otpCode = this.generateOtpCode();
+    const expiresAt = new Date(Date.now() + OTP_EXPIRY_MS);
+    await this.deps.repository.createOtp(user.id, input.purpose, otpCode, expiresAt);
+    await this.dispatchOtp(user, otpCode, input.purpose);
+    return { status: 'otp_sent', otpExpiresAt: expiresAt.toISOString() };
   }
 
   async resetPassword(input: ResetPasswordInput): Promise<{ status: 'otp_sent' | 'password_reset'; otpCode?: string }> {
