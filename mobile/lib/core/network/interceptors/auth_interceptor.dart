@@ -14,17 +14,16 @@ class AuthInterceptor extends Interceptor {
 
   final Ref _ref;
 
-  // Avoid refresh storm â€” if multiple requests fail at the same time, only one
-  // should trigger a refresh; the rest wait for it.
+  // Avoid a refresh storm. When multiple requests fail with 401 at once,
+  // one request refreshes and the rest await the same outcome.
   static bool _isRefreshing = false;
-  static final List<RequestOptions> _queue = <RequestOptions>[];
+  static Future<bool>? _refreshFuture;
 
   @override
   Future<void> onRequest(
     RequestOptions options,
     RequestInterceptorHandler handler,
   ) async {
-    // Skip auth for login, register, OTP, and webhook endpoints.
     if (_isPublicEndpoint(options.path)) {
       return handler.next(options);
     }
@@ -44,39 +43,42 @@ class AuthInterceptor extends Interceptor {
     DioException err,
     ErrorInterceptorHandler handler,
   ) async {
-    // Only intercept 401 from authenticated endpoints
     if (err.response?.statusCode != 401 ||
         _isPublicEndpoint(err.requestOptions.path)) {
       return handler.next(err);
     }
 
-    // Prevent retrying a refresh endpoint itself
     if (err.requestOptions.path.contains('/auth/refresh-token')) {
       await _logout();
       return handler.next(err);
     }
 
     if (_isRefreshing) {
-      // Queue and wait
-      _queue.add(err.requestOptions);
-      return;
+      final bool refreshed = await _waitForRefresh();
+      if (!refreshed) {
+        return handler.next(err);
+      }
+
+      try {
+        final Response<dynamic> retried = await _retry(err.requestOptions);
+        return handler.resolve(retried);
+      } on DioException catch (retryErr) {
+        return handler.next(retryErr);
+      }
     }
 
     _isRefreshing = true;
+    _refreshFuture = _performRefresh();
 
     try {
-      final bool refreshed = await _ref
-          .read(authControllerProvider.notifier)
-          .refreshSession();
+      final bool refreshed = await _refreshFuture!;
 
       if (!refreshed) {
         await _logout();
         return handler.next(err);
       }
 
-      // Retry the original request with the new token
       final Response<dynamic> retried = await _retry(err.requestOptions);
-      await _processQueue();
       return handler.resolve(retried);
     } catch (e, s) {
       AppLogger.error('Token refresh failed', error: e, stackTrace: s);
@@ -84,6 +86,29 @@ class AuthInterceptor extends Interceptor {
       return handler.next(err);
     } finally {
       _isRefreshing = false;
+      _refreshFuture = null;
+    }
+  }
+
+  Future<bool> _performRefresh() {
+    return _ref.read(authControllerProvider.notifier).refreshSession();
+  }
+
+  Future<bool> _waitForRefresh() async {
+    final Future<bool>? refresh = _refreshFuture;
+    if (refresh == null) {
+      return false;
+    }
+
+    try {
+      return await refresh;
+    } catch (e, s) {
+      AppLogger.error(
+        'Waiting for token refresh failed',
+        error: e,
+        stackTrace: s,
+      );
+      return false;
     }
   }
 
@@ -105,12 +130,6 @@ class AuthInterceptor extends Interceptor {
       queryParameters: req.queryParameters,
       options: options,
     );
-  }
-
-  Future<void> _processQueue() async {
-    // Drain queued requests â€” in practice they will be re-fired by their
-    // original callers once the refresh unblocks them. We just clear the list.
-    _queue.clear();
   }
 
   Future<void> _logout() async {

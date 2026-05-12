@@ -7,7 +7,6 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
-import '../../../../core/config/env.dart';
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/errors/app_exception.dart';
 import '../../../../shared/widgets/primary_button.dart';
@@ -395,7 +394,6 @@ class _RouteSearchScreenState extends ConsumerState<RouteSearchScreen> {
   @override
   Widget build(BuildContext context) {
     final RouteSearchState searchState = ref.watch(routeSearchProvider);
-    final bool mapsConfigured = Env.googleMapsApiKey.trim().isNotEmpty;
     final List<SearchResultDto> results = searchState.results;
 
     return Scaffold(
@@ -420,7 +418,6 @@ class _RouteSearchScreenState extends ConsumerState<RouteSearchScreen> {
                     _MapSelectionCard(
                       markers: _buildMarkers(),
                       currentLocation: _currentLocation,
-                      mapsConfigured: mapsConfigured,
                       loadingCurrentLocation: _loadingCurrentLocation,
                       mapTargetField: _mapTargetField,
                       onMapCreated: (GoogleMapController controller) {
@@ -734,7 +731,6 @@ class _MapSelectionCard extends StatelessWidget {
   const _MapSelectionCard({
     required this.markers,
     required this.currentLocation,
-    required this.mapsConfigured,
     required this.loadingCurrentLocation,
     required this.mapTargetField,
     required this.onMapCreated,
@@ -745,7 +741,6 @@ class _MapSelectionCard extends StatelessWidget {
 
   final Set<Marker> markers;
   final LocationSearchResult? currentLocation;
-  final bool mapsConfigured;
   final bool loadingCurrentLocation;
   final String mapTargetField;
   final ValueChanged<GoogleMapController> onMapCreated;
@@ -773,29 +768,18 @@ class _MapSelectionCard extends StatelessWidget {
               borderRadius: const BorderRadius.vertical(
                 top: Radius.circular(AppConstants.radiusLg),
               ),
-              child: mapsConfigured
-                  ? GoogleMap(
-                      initialCameraPosition: CameraPosition(
-                        target: center,
-                        zoom: currentLocation != null ? 12 : 5.5,
-                      ),
-                      markers: markers,
-                      myLocationEnabled: currentLocation != null,
-                      myLocationButtonEnabled: false,
-                      zoomControlsEnabled: false,
-                      onMapCreated: onMapCreated,
-                      onTap: onTapMap,
-                    )
-                  : Container(
-                      color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                      padding: const EdgeInsets.all(AppConstants.spaceLg),
-                      child: const Center(
-                        child: Text(
-                          'Google Maps is not configured for this build yet.',
-                          textAlign: TextAlign.center,
-                        ),
-                      ),
-                    ),
+              child: GoogleMap(
+                initialCameraPosition: CameraPosition(
+                  target: center,
+                  zoom: currentLocation != null ? 12 : 5.5,
+                ),
+                markers: markers,
+                myLocationEnabled: currentLocation != null,
+                myLocationButtonEnabled: false,
+                zoomControlsEnabled: false,
+                onMapCreated: onMapCreated,
+                onTap: onTapMap,
+              ),
             ),
           ),
           Padding(
