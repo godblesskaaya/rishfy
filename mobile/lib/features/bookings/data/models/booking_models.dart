@@ -19,6 +19,10 @@ class BookingDto {
     this.vehiclePlate,
     this.paymentId,
     this.suggestedPickupName,
+    this.pickupLat,
+    this.pickupLng,
+    this.destinationLat,
+    this.destinationLng,
   });
 
   final String bookingId;
@@ -38,6 +42,10 @@ class BookingDto {
   final String? vehiclePlate;
   final String? paymentId;
   final String? suggestedPickupName;
+  final double? pickupLat;
+  final double? pickupLng;
+  final double? destinationLat;
+  final double? destinationLng;
 
   factory BookingDto.fromJson(Map<String, dynamic> j) => BookingDto(
         bookingId: _readRequiredString(j, <String>['booking_id', 'id']),
@@ -60,6 +68,10 @@ class BookingDto {
         vehiclePlate: _readString(j, <String>['vehicle_plate']),
         paymentId: _readString(j, <String>['payment_id']),
         suggestedPickupName: _readString(j, <String>['suggested_pickup_name']),
+        pickupLat: _toDouble(j['pickup_point_lat'] ?? j['pickupPointLat'] ?? j['pickup_lat'] ?? j['pickupLat']),
+        pickupLng: _toDouble(j['pickup_point_lng'] ?? j['pickupPointLng'] ?? j['pickup_lng'] ?? j['pickupLng']),
+        destinationLat: _toDouble(j['dropoff_point_lat'] ?? j['dropoffPointLat'] ?? j['dropoff_lat'] ?? j['dropoffLat'] ?? j['destination_lat']),
+        destinationLng: _toDouble(j['dropoff_point_lng'] ?? j['dropoffPointLng'] ?? j['dropoff_lng'] ?? j['dropoffLng'] ?? j['destination_lng']),
       );
 
   BookingEntity toDomain() => BookingEntity(
@@ -80,6 +92,10 @@ class BookingDto {
         vehiclePlate: vehiclePlate,
         paymentId: paymentId,
         suggestedPickupName: suggestedPickupName,
+        pickupLat: pickupLat,
+        pickupLng: pickupLng,
+        destinationLat: destinationLat,
+        destinationLng: destinationLng,
       );
 }
 
@@ -195,6 +211,14 @@ class InitiatePaymentResponse {
           <String>['provider_reference', 'providerReference'],
         ),
       );
+}
+
+double? _toDouble(dynamic value) {
+  if (value == null) return null;
+  if (value is double) return value;
+  if (value is num) return value.toDouble();
+  if (value is String) return double.tryParse(value);
+  return null;
 }
 
 int _toInt(dynamic value, {int fallback = 0}) {

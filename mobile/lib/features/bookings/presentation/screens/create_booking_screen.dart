@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:intl_phone_field/intl_phone_field.dart';
 import 'package:intl_phone_field/phone_number.dart';
@@ -226,6 +227,20 @@ class _CreateBookingScreenState extends ConsumerState<CreateBookingScreen> {
               ),
             ),
           ),
+          if (widget.suggestedPickupLat != null &&
+              widget.suggestedPickupLng != null) ...<Widget>[
+            const SizedBox(height: 16),
+            _PickupMapCard(
+              lat: widget.suggestedPickupLat!,
+              lng: widget.suggestedPickupLng!,
+              label: widget.suggestedPickupName ?? 'Pickup point',
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Walk to this point to meet your driver',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
           const SizedBox(height: 20),
           Text('Seats', style: Theme.of(context).textTheme.titleSmall),
           Row(
@@ -345,6 +360,55 @@ class _CreateBookingScreenState extends ConsumerState<CreateBookingScreen> {
     );
   }
 }
+
+// ─── Pickup point map ─────────────────────────────────────────────────────────
+
+class _PickupMapCard extends StatelessWidget {
+  const _PickupMapCard({
+    required this.lat,
+    required this.lng,
+    required this.label,
+  });
+
+  final double lat;
+  final double lng;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(AppConstants.radiusLg),
+      child: SizedBox(
+        height: 180,
+        child: GoogleMap(
+          initialCameraPosition: CameraPosition(
+            target: LatLng(lat, lng),
+            zoom: 16,
+          ),
+          liteModeEnabled: true,
+          markers: <Marker>{
+            Marker(
+              markerId: const MarkerId('pickup'),
+              position: LatLng(lat, lng),
+              icon: BitmapDescriptor.defaultMarkerWithHue(
+                BitmapDescriptor.hueGreen,
+              ),
+              infoWindow: InfoWindow(title: label),
+            ),
+          },
+          zoomControlsEnabled: false,
+          scrollGesturesEnabled: false,
+          rotateGesturesEnabled: false,
+          tiltGesturesEnabled: false,
+          zoomGesturesEnabled: false,
+          myLocationButtonEnabled: false,
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Payment await sheet ──────────────────────────────────────────────────────
 
 class _PaymentAwaitSheet extends ConsumerStatefulWidget {
   const _PaymentAwaitSheet({
