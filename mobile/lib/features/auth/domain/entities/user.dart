@@ -132,9 +132,9 @@ class PendingRegistration extends Equatable {
   final String? email;
   final DateTime? expiresAt;
 
-  String get contactLabel => phoneNumber?.isNotEmpty == true
-      ? phoneNumber!
-      : (email?.isNotEmpty == true ? email! : 'your account');
+  String get contactLabel => email?.isNotEmpty == true
+      ? email!
+      : (phoneNumber?.isNotEmpty == true ? phoneNumber! : 'your account');
 
   @override
   List<Object?> get props => <Object?>[userId, phoneNumber, email, expiresAt];

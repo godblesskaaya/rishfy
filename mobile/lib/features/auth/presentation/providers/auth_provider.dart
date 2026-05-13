@@ -115,16 +115,16 @@ class AuthController extends AsyncNotifier<AuthState> {
   }
 
   Future<PendingRegistration> register({
-    required String phoneNumber,
+    required String email,
     required String password,
     String? fullName,
-    String? email,
+    String? phoneNumber,
   }) {
     return _repo.register(
-      phoneNumber: phoneNumber,
+      email: email,
       password: password,
       fullName: fullName,
-      email: email,
+      phoneNumber: phoneNumber,
     );
   }
 

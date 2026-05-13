@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:intl_phone_field/intl_phone_field.dart';
-import 'package:intl_phone_field/phone_number.dart';
 
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/errors/app_exception.dart';
@@ -19,16 +17,16 @@ class LoginScreen extends ConsumerStatefulWidget {
 
 class _LoginScreenState extends ConsumerState<LoginScreen> {
   final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
+  final TextEditingController _emailCtrl = TextEditingController();
   final TextEditingController _passwordCtrl = TextEditingController();
 
-  String _phoneNumber = '';
-  String _countryCode = '+255';
   bool _submitting = false;
   bool _obscurePassword = true;
   String? _error;
 
   @override
   void dispose() {
+    _emailCtrl.dispose();
     _passwordCtrl.dispose();
     super.dispose();
   }
@@ -42,9 +40,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     });
 
     try {
-      final String fullPhone = '$_countryCode$_phoneNumber';
       await ref.read(authControllerProvider.notifier).login(
-            identifier: fullPhone,
+            identifier: _emailCtrl.text.trim(),
             password: _passwordCtrl.text,
           );
       if (!mounted) return;
@@ -56,9 +53,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       if (!mounted) return;
       setState(() => _error = 'Something went wrong. Please try again.');
     } finally {
-      if (mounted) {
-        setState(() => _submitting = false);
-      }
+      if (mounted) setState(() => _submitting = false);
     }
   }
 
@@ -83,27 +78,27 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Log in with your phone number and password',
+                  'Log in with your email and password',
                   style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
                 ),
                 const SizedBox(height: 48),
-                IntlPhoneField(
-                  initialCountryCode: 'TZ',
-                  decoration: InputDecoration(
-                    labelText: l.t('phone_number'),
-                    hintText: '712 345 678',
+                TextFormField(
+                  controller: _emailCtrl,
+                  keyboardType: TextInputType.emailAddress,
+                  autocorrect: false,
+                  decoration: const InputDecoration(
+                    labelText: 'Email',
+                    hintText: 'you@example.com',
                   ),
-                  onChanged: (PhoneNumber phone) {
-                    _phoneNumber = phone.number;
-                    _countryCode = phone.countryCode;
-                  },
-                  validator: (PhoneNumber? phone) {
-                    final String number = phone?.number ?? '';
-                    if (number.isEmpty) return 'Phone number is required';
-                    if (number.length < 9) return 'Phone number is too short';
-                    return null;
+                  validator: (String? value) {
+                    if (value == null || value.trim().isEmpty) {
+                      return 'Email is required';
+                    }
+                    final bool ok = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+                        .hasMatch(value.trim());
+                    return ok ? null : 'Invalid email address';
                   },
                 ),
                 const SizedBox(height: 16),

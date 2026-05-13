@@ -9,12 +9,12 @@ abstract class AuthRepository {
     required String password,
   });
 
-  /// Create an account and trigger OTP delivery.
+  /// Create an account and trigger OTP delivery to email.
   Future<PendingRegistration> register({
-    required String phoneNumber,
+    required String email,
     required String password,
     String? fullName,
-    String? email,
+    String? phoneNumber,
   });
 
   /// Complete registration by verifying the OTP code.

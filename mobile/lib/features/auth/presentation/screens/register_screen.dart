@@ -54,21 +54,21 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
     });
 
     try {
-      final String fullPhone = '$_countryCode$_phoneNumber';
       final String firstName = _firstNameCtrl.text.trim();
       final String lastName = _lastNameCtrl.text.trim();
       final String fullName = <String>[firstName, lastName]
           .where((String part) => part.isNotEmpty)
           .join(' ');
 
+      final String? phone =
+          _phoneNumber.isNotEmpty ? '$_countryCode$_phoneNumber' : null;
+
       final PendingRegistration pending =
           await ref.read(authControllerProvider.notifier).register(
-                phoneNumber: fullPhone,
+                email: _emailCtrl.text.trim(),
                 password: _passwordCtrl.text,
                 fullName: fullName,
-                email: _emailCtrl.text.trim().isEmpty
-                    ? null
-                    : _emailCtrl.text.trim(),
+                phoneNumber: phone,
               );
 
       if (!mounted) return;
@@ -110,7 +110,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Set up your account, then verify the OTP we send you',
+                  'Enter your email — we\'ll send you a verification code',
                   style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
@@ -148,10 +148,27 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                   ],
                 ),
                 const SizedBox(height: 16),
+                TextFormField(
+                  controller: _emailCtrl,
+                  keyboardType: TextInputType.emailAddress,
+                  autocorrect: false,
+                  decoration: const InputDecoration(
+                    labelText: 'Email',
+                  ),
+                  validator: (String? value) {
+                    if (value == null || value.trim().isEmpty) {
+                      return 'Email is required';
+                    }
+                    final bool ok = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+                        .hasMatch(value.trim());
+                    return ok ? null : 'Invalid email address';
+                  },
+                ),
+                const SizedBox(height: 16),
                 IntlPhoneField(
                   initialCountryCode: 'TZ',
                   decoration: const InputDecoration(
-                    labelText: 'Phone number',
+                    labelText: 'Phone number (optional)',
                   ),
                   onChanged: (PhoneNumber phone) {
                     _phoneNumber = phone.number;
@@ -159,23 +176,9 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                   },
                   validator: (PhoneNumber? phone) {
                     final String number = phone?.number ?? '';
-                    if (number.isEmpty) return 'Phone number is required';
+                    if (number.isEmpty) return null;
                     if (number.length < 9) return 'Phone number is too short';
                     return null;
-                  },
-                ),
-                const SizedBox(height: 16),
-                TextFormField(
-                  controller: _emailCtrl,
-                  keyboardType: TextInputType.emailAddress,
-                  decoration: const InputDecoration(
-                    labelText: 'Email (optional)',
-                  ),
-                  validator: (String? value) {
-                    if (value == null || value.trim().isEmpty) return null;
-                    final bool ok = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
-                        .hasMatch(value.trim());
-                    return ok ? null : 'Invalid email';
                   },
                 ),
                 const SizedBox(height: 16),

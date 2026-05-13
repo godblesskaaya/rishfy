@@ -4,8 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:intl_phone_field/intl_phone_field.dart';
-import 'package:intl_phone_field/phone_number.dart';
 
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/errors/app_exception.dart';
@@ -22,18 +20,16 @@ class ForgotPasswordScreen extends ConsumerStatefulWidget {
       _ForgotPasswordScreenState();
 }
 
-class _ForgotPasswordScreenState
-    extends ConsumerState<ForgotPasswordScreen> {
+class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
   final GlobalKey<FormState> _requestFormKey = GlobalKey<FormState>();
   final GlobalKey<FormState> _confirmFormKey = GlobalKey<FormState>();
+  final TextEditingController _emailCtrl = TextEditingController();
   final TextEditingController _otpCtrl = TextEditingController();
   final TextEditingController _passwordCtrl = TextEditingController();
   final TextEditingController _confirmCtrl = TextEditingController();
 
   _Step _step = _Step.request;
   String _identifier = '';
-  String _phoneCountryCode = '+255';
-  String _phoneNumber = '';
   bool _submitting = false;
   bool _obscurePwd = true;
   String? _error;
@@ -41,6 +37,7 @@ class _ForgotPasswordScreenState
 
   @override
   void dispose() {
+    _emailCtrl.dispose();
     _otpCtrl.dispose();
     _passwordCtrl.dispose();
     _confirmCtrl.dispose();
@@ -49,7 +46,7 @@ class _ForgotPasswordScreenState
 
   Future<void> _requestReset() async {
     if (!(_requestFormKey.currentState?.validate() ?? false)) return;
-    final String id = '$_phoneCountryCode$_phoneNumber';
+    final String email = _emailCtrl.text.trim();
     setState(() {
       _submitting = true;
       _error = null;
@@ -58,12 +55,12 @@ class _ForgotPasswordScreenState
     try {
       await ref
           .read(authControllerProvider.notifier)
-          .requestPasswordReset(identifier: id);
+          .requestPasswordReset(identifier: email);
       if (!mounted) return;
       setState(() {
-        _identifier = id;
+        _identifier = email;
         _step = _Step.confirm;
-        _info = 'If an account matches that number, we sent a 6-digit code.';
+        _info = 'If an account matches that email, we sent a 6-digit code.';
       });
     } on AppException catch (e) {
       if (!mounted) return;
@@ -135,25 +132,26 @@ class _ForgotPasswordScreenState
           ),
           const SizedBox(height: 8),
           Text(
-            'Enter the phone number on your account. We will send a 6-digit '
+            'Enter the email address on your account. We will send a 6-digit '
             'code to verify it is you.',
             style: Theme.of(context).textTheme.bodyMedium,
           ),
           const SizedBox(height: 24),
-          IntlPhoneField(
-            initialCountryCode: 'TZ',
+          TextFormField(
+            controller: _emailCtrl,
+            keyboardType: TextInputType.emailAddress,
+            autocorrect: false,
             decoration: const InputDecoration(
-              labelText: 'Phone number',
-              hintText: '712 345 678',
+              labelText: 'Email address',
+              hintText: 'you@example.com',
             ),
-            onChanged: (PhoneNumber p) {
-              _phoneCountryCode = p.countryCode;
-              _phoneNumber = p.number;
-            },
-            validator: (PhoneNumber? phone) {
-              final String number = phone?.number ?? '';
-              if (number.length < 9) return 'Enter a valid phone number';
-              return null;
+            validator: (String? value) {
+              if (value == null || value.trim().isEmpty) {
+                return 'Email is required';
+              }
+              final bool ok = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+                  .hasMatch(value.trim());
+              return ok ? null : 'Invalid email address';
             },
           ),
           if (_error != null) ...<Widget>[
@@ -220,8 +218,7 @@ class _ForgotPasswordScreenState
               labelText: 'New password',
               helperText: 'Use at least 8 characters',
               suffixIcon: IconButton(
-                onPressed: () =>
-                    setState(() => _obscurePwd = !_obscurePwd),
+                onPressed: () => setState(() => _obscurePwd = !_obscurePwd),
                 icon: Icon(
                   _obscurePwd ? Icons.visibility_off : Icons.visibility,
                 ),
@@ -260,7 +257,7 @@ class _ForgotPasswordScreenState
             onPressed: _submitting
                 ? null
                 : () => setState(() => _step = _Step.request),
-            child: const Text('Use a different number'),
+            child: const Text('Use a different email'),
           ),
         ],
       ),

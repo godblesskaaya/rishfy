@@ -30,20 +30,20 @@ class AuthRemoteDataSource {
   }
 
   Future<RegistrationResponseDto> register({
-    required String phoneNumber,
+    required String email,
     required String password,
     String? fullName,
-    String? email,
+    String? phoneNumber,
   }) {
     return _send<Map<String, dynamic>, RegistrationResponseDto>(
       operation: 'register',
       request: () => _dio.post<Map<String, dynamic>>(
         '$_basePath/register',
         data: <String, dynamic>{
-          'phoneNumber': phoneNumber,
+          'email': email,
           'password': password,
           if (fullName != null && fullName.isNotEmpty) 'fullName': fullName,
-          if (email != null && email.isNotEmpty) 'email': email,
+          if (phoneNumber != null && phoneNumber.isNotEmpty) 'phoneNumber': phoneNumber,
         },
       ),
       parse: RegistrationResponseDto.fromJson,
