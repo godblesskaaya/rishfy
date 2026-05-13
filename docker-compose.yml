@@ -154,6 +154,11 @@ services:
       OTP_LENGTH: 6
       LOG_LEVEL: debug
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+      SMTP_HOST: ${SMTP_HOST:-relay.dnsexit.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-info@rishfy.com}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-info@rishfy.com}
     volumes:
       - ./services/auth:/app
       - /app/node_modules

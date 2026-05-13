@@ -230,11 +230,10 @@ export class AuthService {
   }
 
   private async dispatchOtp(user: AuthUser, code: string, purpose: string): Promise<void> {
-    const destination = user.phoneNumber ?? user.email;
+    const destination = user.email ?? user.phoneNumber;
     if (!destination) {
-      throw new AuthError(400, 'MISSING_DESTINATION', 'User requires email or phone number');
+      throw new AuthError(400, 'MISSING_DESTINATION', 'User has no email or phone number');
     }
-
     await this.deps.otpSender?.({ destination, code, purpose });
   }
 
