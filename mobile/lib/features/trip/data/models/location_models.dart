@@ -18,20 +18,42 @@ class DriverLocationUpdate {
   factory DriverLocationUpdate.fromJson(Map<String, dynamic> j) =>
       DriverLocationUpdate(
         driverUserId: j['driver_user_id'] as String? ?? '',
-        lat: (j['lat'] as num).toDouble(),
-        lng: (j['lng'] as num).toDouble(),
-        heading: (j['heading'] as num?)?.toDouble() ?? 0,
-        speedKmh: (j['speed_kmh'] as num?)?.toDouble() ?? 0,
+        lat: _toDouble(j['lat']),
+        lng: _toDouble(j['lng']),
+        heading: _toNullableDouble(j['heading']) ?? 0,
+        speedKmh: _toNullableDouble(j['speed_kmh']) ?? 0,
         timestamp: j['timestamp'] != null
-            ? DateTime.parse(j['timestamp'] as String)
+            ? _parseDateTime(j['timestamp'])
             : DateTime.now(),
       );
+
+  static double _toDouble(dynamic value, {double fallback = 0.0}) {
+    if (value == null) return fallback;
+    if (value is num) return value.toDouble();
+    if (value is String) return double.tryParse(value) ?? fallback;
+    return fallback;
+  }
+
+  static double? _toNullableDouble(dynamic value) {
+    if (value == null) return null;
+    if (value is num) return value.toDouble();
+    if (value is String) return double.tryParse(value);
+    return null;
+  }
+
+  static DateTime _parseDateTime(dynamic value) {
+    try {
+      return DateTime.parse(value.toString());
+    } catch (_) {
+      return DateTime.now();
+    }
+  }
 
   Map<String, dynamic> toJson() => <String, dynamic>{
         'lat': lat,
         'lng': lng,
-        'heading': heading,
-        'speed_kmh': speedKmh,
+        'bearing': heading,
+        'speedKmh': speedKmh,
         'timestamp': timestamp.toIso8601String(),
       };
 }

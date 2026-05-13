@@ -32,7 +32,7 @@ class RoutePreviewDto {
   final int durationSeconds;
 
   factory RoutePreviewDto.fromJson(Map<String, dynamic> j) => RoutePreviewDto(
-        polyline: j['polyline'] as String,
+        polyline: _readRequiredString(j, <String>['polyline']),
         distanceMeters: _toInt(j['distance_meters']),
         durationSeconds: _toInt(j['duration_seconds']),
       );
@@ -102,25 +102,23 @@ class SearchResultDto {
     final Map<String, dynamic>? pickupPt =
         j['suggested_pickup_point'] as Map<String, dynamic>?;
     return SearchResultDto(
-      routeId: j['route_id'] as String,
-      driverId: j['driver_id'] as String,
-      driverName: j['driver_name'] as String?,
+      routeId: _readRequiredString(j, <String>['route_id', 'id']),
+      driverId: _readRequiredString(j, <String>['driver_id']),
+      driverName: _readString(j, <String>['driver_name']),
       driverRating: _toNullableDouble(j['driver_rating']),
-      vehicleMake: j['vehicle_make'] as String?,
-      vehicleModel: j['vehicle_model'] as String?,
-      vehicleColor: j['vehicle_color'] as String?,
-      vehiclePlate: j['vehicle_plate'] as String?,
+      vehicleMake: _readString(j, <String>['vehicle_make']),
+      vehicleModel: _readString(j, <String>['vehicle_model']),
+      vehicleColor: _readString(j, <String>['vehicle_color']),
+      vehiclePlate: _readString(j, <String>['vehicle_plate']),
       walkingDistanceToPickup: _toInt(j['walking_distance_to_pickup']),
       walkingTimeToPickup: _toInt(j['walking_time_to_pickup']),
       suggestedPickupLat: _toNullableDouble(pickupPt?['lat']) ?? 0.0,
       suggestedPickupLng: _toNullableDouble(pickupPt?['lng']) ?? 0.0,
-      suggestedPickupName: pickupPt?['name'] as String?,
+      suggestedPickupName: _readString(j, <String>['suggested_pickup_name']),
       walkingDistanceFromDropoff: _toInt(j['walking_distance_from_dropoff']),
       walkingTimeFromDropoff: _toInt(j['walking_time_from_dropoff']),
-      driverDepartureTime:
-          DateTime.parse(j['driver_departure_time'] as String),
-      estimatedPickupTime:
-          DateTime.parse(j['estimated_pickup_time'] as String),
+      driverDepartureTime: _parseDateTime(j['driver_departure_time']),
+      estimatedPickupTime: _parseDateTime(j['estimated_pickup_time']),
       availableSeats: _toInt(j['available_seats']),
       pricePerSeat: _toInt(j['price_per_seat']),
     );
@@ -204,30 +202,30 @@ class RouteDto {
     );
 
     return RouteDto(
-      routeId: (j['route_id'] ?? j['id']) as String,
-      driverUserId: (j['driver_user_id'] ?? j['driver_id']) as String,
-      driverName: j['driver_name'] as String? ?? '',
-      originName: (j['origin_name'] as String?) ?? 'Origin',
-      destinationName: (j['destination_name'] as String?) ?? 'Destination',
+      routeId: _readRequiredString(j, <String>['route_id', 'id']),
+      driverUserId: _readRequiredString(j, <String>['driver_user_id', 'driver_id']),
+      driverName: _readString(j, <String>['driver_name']) ?? '',
+      originName: _readString(j, <String>['origin_name']) ?? 'Origin',
+      destinationName: _readString(j, <String>['destination_name']) ?? 'Destination',
       originLat: _toDouble(j['origin_lat']),
       originLng: _toDouble(j['origin_lng']),
       destinationLat: _toDouble(j['destination_lat'] ?? j['dest_lat']),
       destinationLng: _toDouble(j['destination_lng'] ?? j['dest_lng']),
-      departureDatetime: DateTime.parse(
-        (j['departure_datetime'] ?? j['departure_time']) as String,
+      departureDatetime: _parseDateTime(
+        j['departure_datetime'] ?? j['departure_time'],
       ),
       pricePerSeatTzs: _toInt(
         j['price_per_seat_tzs'] ?? j['price_per_seat'],
       ),
       totalSeats: totalSeats,
       availableSeats: availableSeats,
-      vehicleModel: j['vehicle_model'] as String? ?? '',
-      vehiclePlate: j['vehicle_plate'] as String? ?? '',
-      status: j['status'] as String? ?? 'active',
-      encodedPolyline: (j['encoded_polyline'] ?? j['polyline']) as String?,
+      vehicleModel: _readString(j, <String>['vehicle_model']) ?? '',
+      vehiclePlate: _readString(j, <String>['vehicle_plate']) ?? '',
+      status: _readString(j, <String>['status']) ?? 'active',
+      encodedPolyline: _readString(j, <String>['encoded_polyline', 'polyline']),
       driverRating: _toNullableDouble(j['driver_rating']),
       estimatedArrivalDatetime: j['estimated_arrival_datetime'] != null
-          ? DateTime.parse(j['estimated_arrival_datetime'] as String)
+          ? _parseDateTime(j['estimated_arrival_datetime'])
           : null,
       waypoints: (j['waypoints'] as List<dynamic>? ?? <dynamic>[])
           .map((dynamic e) =>
@@ -274,7 +272,7 @@ class RouteWaypointDto {
   final int order;
 
   factory RouteWaypointDto.fromJson(Map<String, dynamic> j) => RouteWaypointDto(
-        name: j['name'] as String,
+        name: _readString(j, <String>['name']) ?? '',
         lat: _toDouble(j['lat']),
         lng: _toDouble(j['lng']),
         order: _toInt(j['order']),
@@ -388,17 +386,45 @@ class DriverVehicleOption {
   }
 }
 
-double _toDouble(dynamic value) {
+String _readRequiredString(Map<String, dynamic> json, List<String> keys) {
+  final String? value = _readString(json, keys);
+  if (value == null || value.isEmpty) {
+    throw FormatException('Missing required field: $keys');
+  }
+  return value;
+}
+
+String? _readString(Map<String, dynamic> json, List<String> keys) {
+  for (final String key in keys) {
+    final dynamic value = json[key];
+    if (value == null) continue;
+    if (value is String) return value;
+    return value.toString();
+  }
+  return null;
+}
+
+DateTime _parseDateTime(dynamic value, {DateTime? fallback}) {
+  if (value == null) return fallback ?? DateTime.now();
+  try {
+    return DateTime.parse(value.toString());
+  } catch (_) {
+    return fallback ?? DateTime.now();
+  }
+}
+
+double _toDouble(dynamic value, {double fallback = 0.0}) {
+  if (value == null) return fallback;
   if (value is num) return value.toDouble();
-  if (value is String) return double.parse(value);
-  throw FormatException('Invalid numeric value: $value');
+  if (value is String) return double.tryParse(value) ?? fallback;
+  return fallback;
 }
 
 int _toInt(dynamic value, {int fallback = 0}) {
   if (value == null) return fallback;
   if (value is int) return value;
   if (value is num) return value.toInt();
-  if (value is String) return double.parse(value).round();
+  if (value is String) return double.tryParse(value)?.round() ?? fallback;
   return fallback;
 }
 
