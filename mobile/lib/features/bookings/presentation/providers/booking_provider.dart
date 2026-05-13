@@ -224,3 +224,70 @@ class DeclineBookingNotifier extends StateNotifier<DeclineBookingState> {
 
   void reset() => state = const DeclineBookingState();
 }
+
+// ---- Trip lifecycle (driver only) ----
+
+enum TripActionStatus { idle, loading, success, failed }
+
+class TripActionState {
+  const TripActionState({
+    this.status = TripActionStatus.idle,
+    this.error,
+  });
+
+  final TripActionStatus status;
+  final String? error;
+
+  TripActionState copyWith({TripActionStatus? status, String? error}) =>
+      TripActionState(
+        status: status ?? this.status,
+        error: error,
+      );
+}
+
+final startTripProvider =
+    StateNotifierProvider.autoDispose<TripActionNotifier, TripActionState>(
+  (Ref ref) => TripActionNotifier(ref.read(bookingDataSourceProvider), ref),
+);
+
+final completeTripProvider =
+    StateNotifierProvider.autoDispose<TripActionNotifier, TripActionState>(
+  (Ref ref) => TripActionNotifier(ref.read(bookingDataSourceProvider), ref),
+);
+
+class TripActionNotifier extends StateNotifier<TripActionState> {
+  TripActionNotifier(this._ds, this._ref) : super(const TripActionState());
+
+  final BookingRemoteDataSource _ds;
+  final Ref _ref;
+
+  Future<void> start(String bookingId) async {
+    state = state.copyWith(status: TripActionStatus.loading, error: null);
+    try {
+      await _ds.startTrip(bookingId);
+      _ref.invalidate(bookingDetailProvider(bookingId));
+      _ref.invalidate(myDriverBookingsProvider);
+      state = state.copyWith(status: TripActionStatus.success);
+    } catch (e) {
+      state = state.copyWith(
+        status: TripActionStatus.failed,
+        error: _errorMessage(e, 'Could not start trip.'),
+      );
+    }
+  }
+
+  Future<void> complete(String bookingId) async {
+    state = state.copyWith(status: TripActionStatus.loading, error: null);
+    try {
+      await _ds.completeTrip(bookingId);
+      _ref.invalidate(bookingDetailProvider(bookingId));
+      _ref.invalidate(myDriverBookingsProvider);
+      state = state.copyWith(status: TripActionStatus.success);
+    } catch (e) {
+      state = state.copyWith(
+        status: TripActionStatus.failed,
+        error: _errorMessage(e, 'Could not complete trip.'),
+      );
+    }
+  }
+}

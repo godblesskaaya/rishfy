@@ -51,17 +51,54 @@ class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
   }
 
   Future<void> _startTrip(BookingEntity booking) async {
-    await ref
-        .read(driverBroadcastProvider.notifier)
-        .startStreaming(booking.bookingId);
-    final DriverBroadcastState s = ref.read(driverBroadcastProvider);
-    if (!mounted) return;
-    if (s.isStreaming) {
-      context.push('/trip/${booking.bookingId}');
-    } else if (s.error != null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not start trip: ${s.error}')),
-      );
+    setState(() => _busy = true);
+    try {
+      await ref.read(startTripProvider.notifier).start(booking.bookingId);
+      if (!mounted) return;
+      final TripActionState s = ref.read(startTripProvider);
+      if (s.status == TripActionStatus.failed) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(s.error ?? 'Could not start trip')),
+        );
+        return;
+      }
+      await ref
+          .read(driverBroadcastProvider.notifier)
+          .startStreaming(booking.bookingId);
+      if (!mounted) return;
+      final DriverBroadcastState bs = ref.read(driverBroadcastProvider);
+      if (bs.isStreaming) {
+        context.push('/trip/${booking.bookingId}');
+      } else if (bs.error != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not broadcast location: ${bs.error}')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _completeTrip(BookingEntity booking) async {
+    setState(() => _busy = true);
+    try {
+      await ref.read(completeTripProvider.notifier).complete(booking.bookingId);
+      if (!mounted) return;
+      final TripActionState s = ref.read(completeTripProvider);
+      if (s.status == TripActionStatus.failed) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(s.error ?? 'Could not complete trip')),
+        );
+        return;
+      }
+      await ref.read(driverBroadcastProvider.notifier).stopStreaming();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Trip completed!')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
   }
 
@@ -302,8 +339,13 @@ class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
           final bool isTrackable = booking.status == 'confirmed' ||
               booking.status == 'in_progress';
           final bool canStartTrip = isDriver && booking.status == 'confirmed';
+          final bool canCompleteTrip =
+              isDriver && booking.status == 'in_progress';
           final DriverBroadcastState broadcastState =
               ref.watch(driverBroadcastProvider);
+          final TripActionState startState = ref.watch(startTripProvider);
+          final TripActionState completeState =
+              ref.watch(completeTripProvider);
 
           // Start countdown when booking data is first available
           if (declineWindowOpen && _countdownTimer == null) {
@@ -366,6 +408,8 @@ class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
                   ),
                 ),
                 const SizedBox(height: 16),
+                _BookingStatusTimeline(status: booking.status),
+                const SizedBox(height: 16),
                 // ── Decline section (drivers only) ─────────────────────
                 if (declineWindowOpen) ...<Widget>[
                   Container(
@@ -423,11 +467,15 @@ class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
                 // ── Driver: start trip (begins location broadcast) ─────
                 if (canStartTrip) ...<Widget>[
                   PrimaryButton(
-                    label: broadcastState.isStreaming
-                        ? 'Trip in progress…'
+                    label: (broadcastState.isStreaming ||
+                            startState.status == TripActionStatus.loading)
+                        ? 'Starting…'
                         : 'Start trip',
                     icon: Icons.play_arrow,
-                    onPressed: broadcastState.isStreaming
+                    loading: startState.status == TripActionStatus.loading,
+                    onPressed: (_busy ||
+                            broadcastState.isStreaming ||
+                            startState.status == TripActionStatus.loading)
                         ? null
                         : () => _startTrip(booking),
                   ),
@@ -435,6 +483,32 @@ class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
                     const SizedBox(height: 6),
                     Text(
                       broadcastState.error!,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 12),
+                ],
+                // ── Driver: complete trip ───────────────────────────────
+                if (canCompleteTrip) ...<Widget>[
+                  PrimaryButton(
+                    label: completeState.status == TripActionStatus.loading
+                        ? 'Completing…'
+                        : 'Complete trip',
+                    icon: Icons.check_circle_outline,
+                    loading:
+                        completeState.status == TripActionStatus.loading,
+                    onPressed: (_busy ||
+                            completeState.status == TripActionStatus.loading)
+                        ? null
+                        : () => _completeTrip(booking),
+                  ),
+                  if (completeState.error != null) ...<Widget>[
+                    const SizedBox(height: 6),
+                    Text(
+                      completeState.error!,
                       style: TextStyle(
                         color: Theme.of(context).colorScheme.error,
                         fontSize: 12,
@@ -463,6 +537,87 @@ class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
           );
         },
       ),
+    );
+  }
+}
+
+class _BookingStatusTimeline extends StatelessWidget {
+  const _BookingStatusTimeline({required this.status});
+
+  final String status;
+
+  static const List<({String key, String label})> _steps = <({String key, String label})>[
+    (key: 'pending', label: 'Pending'),
+    (key: 'confirmed', label: 'Confirmed'),
+    (key: 'in_progress', label: 'In Transit'),
+    (key: 'completed', label: 'Completed'),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+    final bool isCancelled = status == 'cancelled' || status == 'declined';
+    final int activeIndex =
+        _steps.indexWhere((s) => s.key == status);
+
+    return Row(
+      children: List<Widget>.generate(_steps.length * 2 - 1, (int i) {
+        if (i.isOdd) {
+          final int stepIndex = i ~/ 2;
+          final bool passed = !isCancelled && stepIndex < activeIndex;
+          return Expanded(
+            child: Container(
+              height: 2,
+              color: passed ? scheme.primary : scheme.outlineVariant,
+            ),
+          );
+        }
+        final int stepIndex = i ~/ 2;
+        final bool isActive = !isCancelled && stepIndex == activeIndex;
+        final bool passed = !isCancelled && stepIndex < activeIndex;
+        final bool isCancelledHere =
+            isCancelled && stepIndex == activeIndex.clamp(0, _steps.length - 1);
+
+        final Color circleColor = isCancelledHere
+            ? scheme.error
+            : (isActive || passed)
+                ? scheme.primary
+                : scheme.outlineVariant;
+        final Color textColor = (isActive || passed || isCancelledHere)
+            ? scheme.onSurface
+            : scheme.onSurfaceVariant;
+
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Container(
+              width: 24,
+              height: 24,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: (isActive || passed) && !isCancelledHere
+                    ? circleColor
+                    : Colors.transparent,
+                border: Border.all(color: circleColor, width: 2),
+              ),
+              child: Center(
+                child: isCancelledHere
+                    ? Icon(Icons.close, size: 12, color: scheme.error)
+                    : passed
+                        ? Icon(Icons.check, size: 12, color: scheme.onPrimary)
+                        : null,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              _steps[stepIndex].label,
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: textColor,
+                  ),
+            ),
+          ],
+        );
+      }),
     );
   }
 }
