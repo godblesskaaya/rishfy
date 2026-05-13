@@ -63,8 +63,9 @@ export function createEmailSender(cfg: Pick<Config, 'SMTP_HOST' | 'SMTP_PORT' | 
       });
       logger.info({ to: payload.destination, purpose: payload.purpose }, 'OTP email sent');
     } catch (err) {
+      // Log but do not rethrow — OTP is persisted in DB; user can resend.
+      // Throwing here would fail the entire registration/reset request.
       logger.error({ err, to: payload.destination }, 'Failed to send OTP email');
-      throw err;
     }
   };
 }
