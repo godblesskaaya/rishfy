@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../../../core/constants/app_constants.dart';
+import '../../../../core/errors/app_exception.dart';
 import '../../../../shared/providers/active_role_provider.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import '../../../bookings/presentation/providers/booking_provider.dart';
@@ -319,6 +320,11 @@ class _PostedRoutesSection extends StatelessWidget {
 
   final AsyncValue<List<RouteEntity>> routesAsync;
 
+  String _messageFromError(Object error) {
+    if (error is AppException) return error.message;
+    return error.toString();
+  }
+
   @override
   Widget build(BuildContext context) {
     final ColorScheme scheme = Theme.of(context).colorScheme;
@@ -353,8 +359,10 @@ class _PostedRoutesSection extends StatelessWidget {
         padding: EdgeInsets.symmetric(vertical: 24),
         child: Center(child: CircularProgressIndicator()),
       ),
-      error: (_, __) =>
-          emptyBox('Could not load your routes', 'Pull down or tap refresh.'),
+      error: (Object error, __) => emptyBox(
+        'Could not load your routes',
+        _messageFromError(error),
+      ),
       data: (List<RouteEntity> routes) {
         if (routes.isEmpty) {
           return emptyBox(

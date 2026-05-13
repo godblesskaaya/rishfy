@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../../../core/constants/app_constants.dart';
+import '../../../../core/errors/app_exception.dart';
 import '../../../../shared/providers/active_role_provider.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import '../../../bookings/domain/entities/booking_entity.dart';
@@ -184,6 +185,11 @@ class _UpcomingTripsCard extends StatelessWidget {
     return true;
   }
 
+  String _messageFromError(Object error) {
+    if (error is AppException) return error.message;
+    return error.toString();
+  }
+
   @override
   Widget build(BuildContext context) {
     final ColorScheme scheme = Theme.of(context).colorScheme;
@@ -219,9 +225,9 @@ class _UpcomingTripsCard extends StatelessWidget {
         padding: EdgeInsets.symmetric(vertical: 24),
         child: Center(child: CircularProgressIndicator()),
       ),
-      error: (_, __) => emptyBox(
+      error: (Object error, __) => emptyBox(
         'Could not load your trips',
-        'Pull to refresh from the Bookings tab.',
+        _messageFromError(error),
       ),
       data: (List<BookingEntity> bookings) {
         final List<BookingEntity> upcoming = bookings.where(_isUpcoming).toList()

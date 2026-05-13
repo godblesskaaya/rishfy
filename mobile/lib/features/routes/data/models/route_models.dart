@@ -112,8 +112,8 @@ class SearchResultDto {
       vehiclePlate: j['vehicle_plate'] as String?,
       walkingDistanceToPickup: _toInt(j['walking_distance_to_pickup']),
       walkingTimeToPickup: _toInt(j['walking_time_to_pickup']),
-      suggestedPickupLat: (pickupPt?['lat'] as num?)?.toDouble() ?? 0.0,
-      suggestedPickupLng: (pickupPt?['lng'] as num?)?.toDouble() ?? 0.0,
+      suggestedPickupLat: _toNullableDouble(pickupPt?['lat']) ?? 0.0,
+      suggestedPickupLng: _toNullableDouble(pickupPt?['lng']) ?? 0.0,
       suggestedPickupName: pickupPt?['name'] as String?,
       walkingDistanceFromDropoff: _toInt(j['walking_distance_from_dropoff']),
       walkingTimeFromDropoff: _toInt(j['walking_time_from_dropoff']),
@@ -225,7 +225,7 @@ class RouteDto {
       vehiclePlate: j['vehicle_plate'] as String? ?? '',
       status: j['status'] as String? ?? 'active',
       encodedPolyline: (j['encoded_polyline'] ?? j['polyline']) as String?,
-      driverRating: (j['driver_rating'] as num?)?.toDouble(),
+      driverRating: _toNullableDouble(j['driver_rating']),
       estimatedArrivalDatetime: j['estimated_arrival_datetime'] != null
           ? DateTime.parse(j['estimated_arrival_datetime'] as String)
           : null,
@@ -275,9 +275,9 @@ class RouteWaypointDto {
 
   factory RouteWaypointDto.fromJson(Map<String, dynamic> j) => RouteWaypointDto(
         name: j['name'] as String,
-        lat: (j['lat'] as num).toDouble(),
-        lng: (j['lng'] as num).toDouble(),
-        order: j['order'] as int? ?? 0,
+        lat: _toDouble(j['lat']),
+        lng: _toDouble(j['lng']),
+        order: _toInt(j['order']),
       );
 
   RouteWaypoint toDomain() => RouteWaypoint(
