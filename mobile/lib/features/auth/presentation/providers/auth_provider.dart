@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/constants/app_logger.dart';
 import '../../../../core/network/dio_client.dart';
 import '../../../../core/storage/secure_storage.dart';
+import '../../../notifications/presentation/providers/device_token_provider.dart';
 import '../../../profile/data/datasources/profile_remote_datasource.dart';
 import '../../data/datasources/auth_remote_datasource.dart';
 import '../../data/repositories/auth_repository_impl.dart';
@@ -105,6 +106,7 @@ class AuthController extends AsyncNotifier<AuthState> {
         'AuthController.login success for ${hydrated.user.userId}',
       );
       state = AsyncValue<AuthState>.data(AuthState.authenticated(hydrated));
+      unawaited(ref.read(registerDeviceTokenProvider.future).catchError((_) {}));
     } catch (e, s) {
       AppLogger.warn('AuthController.login failed', error: e, stackTrace: s);
       state = AsyncValue<AuthState>.data(previousState);
@@ -167,6 +169,7 @@ class AuthController extends AsyncNotifier<AuthState> {
         'AuthController.verifyOtp success for ${hydrated.user.userId}',
       );
       state = AsyncValue<AuthState>.data(AuthState.authenticated(hydrated));
+      unawaited(ref.read(registerDeviceTokenProvider.future).catchError((_) {}));
     } catch (e, s) {
       AppLogger.warn('AuthController.verifyOtp failed', error: e, stackTrace: s);
       state = AsyncValue<AuthState>.data(previousState);
