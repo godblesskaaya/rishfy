@@ -215,3 +215,51 @@ class CreateRouteNotifier extends StateNotifier<CreateRouteState> {
 
   void reset() => state = const CreateRouteState();
 }
+
+// ---- Cancel route (driver only) ----
+
+enum CancelRouteStatus { idle, loading, success, failed }
+
+class CancelRouteState {
+  const CancelRouteState({
+    this.status = CancelRouteStatus.idle,
+    this.error,
+  });
+
+  final CancelRouteStatus status;
+  final String? error;
+
+  CancelRouteState copyWith({CancelRouteStatus? status, String? error}) =>
+      CancelRouteState(
+        status: status ?? this.status,
+        error: error,
+      );
+}
+
+final cancelRouteProvider =
+    StateNotifierProvider.autoDispose<CancelRouteNotifier, CancelRouteState>(
+  (Ref ref) => CancelRouteNotifier(ref.read(routeDataSourceProvider), ref),
+);
+
+class CancelRouteNotifier extends StateNotifier<CancelRouteState> {
+  CancelRouteNotifier(this._ds, this._ref) : super(const CancelRouteState());
+
+  final RouteRemoteDataSource _ds;
+  final Ref _ref;
+
+  Future<void> cancel(String routeId) async {
+    state = state.copyWith(status: CancelRouteStatus.loading, error: null);
+    try {
+      await _ds.cancelRoute(routeId);
+      _ref.invalidate(myRoutesProvider);
+      state = state.copyWith(status: CancelRouteStatus.success);
+    } catch (e) {
+      state = state.copyWith(
+        status: CancelRouteStatus.failed,
+        error: _errorMessage(e, 'Could not cancel the route.'),
+      );
+    }
+  }
+
+  void reset() => state = const CancelRouteState();
+}

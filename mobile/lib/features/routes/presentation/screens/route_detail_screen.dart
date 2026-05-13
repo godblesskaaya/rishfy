@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -7,6 +9,7 @@ import 'package:intl/intl.dart';
 
 import '../../../../core/constants/app_constants.dart';
 import '../../../../shared/widgets/primary_button.dart';
+import '../../../auth/presentation/providers/auth_provider.dart';
 import '../../domain/entities/route_entity.dart';
 import '../providers/route_provider.dart';
 
@@ -33,7 +36,7 @@ class RouteDetailScreen extends ConsumerWidget {
   }
 }
 
-class _RouteDetailBody extends StatelessWidget {
+class _RouteDetailBody extends ConsumerWidget {
   const _RouteDetailBody({required this.route});
 
   final RouteEntity route;
@@ -102,8 +105,44 @@ class _RouteDetailBody extends StatelessWidget {
     );
   }
 
+  Future<void> _confirmCancel(BuildContext context, WidgetRef ref) async {
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext ctx) => AlertDialog(
+        title: const Text('Cancel route?'),
+        content: const Text(
+          'Passengers with existing bookings will be notified.',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Keep'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Cancel route'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    if (!context.mounted) return;
+    await ref.read(cancelRouteProvider.notifier).cancel(route.routeId);
+    final CancelRouteState result = ref.read(cancelRouteProvider);
+    if (!context.mounted) return;
+    if (result.status == CancelRouteStatus.failed) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(result.error ?? 'Could not cancel route.')),
+      );
+    } else {
+      context.pop();
+    }
+  }
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final String? currentUserId = ref.watch(currentUserProvider)?.userId;
+    final bool isOwnRoute = currentUserId != null && route.driverUserId == currentUserId;
     final String price =
         'TZS ${NumberFormat('#,###').format(route.pricePerSeatTzs)}';
     final String depTime =
@@ -198,15 +237,27 @@ class _RouteDetailBody extends StatelessWidget {
       bottomNavigationBar: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(AppConstants.spaceLg),
-          child: PrimaryButton(
-            label: 'Book this route — $price',
-            onPressed: route.availableSeats > 0
-                ? () => context.push(
-                      '/bookings/create',
-                      extra: <String, dynamic>{'routeId': routeId},
-                    )
-                : null,
-          ),
+          child: isOwnRoute
+              ? OutlinedButton(
+                  onPressed: () => unawaited(_confirmCancel(context, ref)),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Theme.of(context).colorScheme.error,
+                    side: BorderSide(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                    minimumSize: const Size.fromHeight(48),
+                  ),
+                  child: const Text('Cancel Route'),
+                )
+              : PrimaryButton(
+                  label: 'Book this route — $price',
+                  onPressed: route.availableSeats > 0
+                      ? () => context.push(
+                            '/bookings/create',
+                            extra: <String, dynamic>{'routeId': routeId},
+                          )
+                      : null,
+                ),
         ),
       ),
     );
