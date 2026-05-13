@@ -17,6 +17,12 @@ const configSchema = z.object({
   JWT_PUBLIC_KEY_PATH: z.string().optional(),
 
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().url().optional(),
+
+  SMTP_HOST: z.string().optional(),
+  SMTP_PORT: z.coerce.number().int().default(587),
+  SMTP_USER: z.string().optional(),
+  SMTP_PASS: z.string().optional(),
+  SMTP_FROM: z.string().optional(),
 });
 
 export type Config = z.infer<typeof configSchema>;

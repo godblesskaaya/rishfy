@@ -383,13 +383,44 @@ class _PostedRoutesSection extends StatelessWidget {
   }
 }
 
-class _PostedRouteCard extends StatelessWidget {
+class _PostedRouteCard extends ConsumerWidget {
   const _PostedRouteCard({required this.route});
 
   final RouteEntity route;
 
+  Future<void> _confirmCancel(BuildContext context, WidgetRef ref) async {
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext ctx) => AlertDialog(
+        title: const Text('Cancel route?'),
+        content: const Text(
+          'Passengers with existing bookings will be notified.',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Keep'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Cancel route'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    if (!context.mounted) return;
+    await ref.read(cancelRouteProvider.notifier).cancel(route.routeId);
+    final CancelRouteState result = ref.read(cancelRouteProvider);
+    if (result.status == CancelRouteStatus.failed && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(result.error ?? 'Could not cancel route.')),
+      );
+    }
+  }
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final ColorScheme scheme = Theme.of(context).colorScheme;
     return InkWell(
       borderRadius: BorderRadius.circular(AppConstants.radiusLg),
@@ -400,31 +431,58 @@ class _PostedRouteCard extends StatelessWidget {
           border: Border.all(color: scheme.outlineVariant),
           borderRadius: BorderRadius.circular(AppConstants.radiusLg),
         ),
-        child: Column(
+        child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            Text(
-              '${route.originName} → ${route.destinationName}',
-              style: Theme.of(context).textTheme.titleSmall,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    '${route.originName} → ${route.destinationName}',
+                    style: Theme.of(context).textTheme.titleSmall,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: <Widget>[
+                      Icon(Icons.schedule, size: 14, color: scheme.onSurfaceVariant),
+                      const SizedBox(width: 4),
+                      Text(
+                        DateFormat('EEE d MMM, HH:mm')
+                            .format(route.departureDatetime.toLocal()),
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                      const SizedBox(width: 12),
+                      Icon(Icons.event_seat, size: 14, color: scheme.onSurfaceVariant),
+                      const SizedBox(width: 4),
+                      Text(
+                        '${route.availableSeats}/${route.totalSeats}',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
-            const SizedBox(height: 4),
-            Row(
-              children: <Widget>[
-                Icon(Icons.schedule, size: 14, color: scheme.onSurfaceVariant),
-                const SizedBox(width: 4),
-                Text(
-                  DateFormat('EEE d MMM, HH:mm')
-                      .format(route.departureDatetime.toLocal()),
-                  style: Theme.of(context).textTheme.bodySmall,
+            PopupMenuButton<String>(
+              icon: Icon(Icons.more_vert, size: 20, color: scheme.onSurfaceVariant),
+              onSelected: (String value) {
+                if (value == 'view') {
+                  context.push('/routes/${route.routeId}');
+                } else if (value == 'cancel') {
+                  unawaited(_confirmCancel(context, ref));
+                }
+              },
+              itemBuilder: (_) => const <PopupMenuEntry<String>>[
+                PopupMenuItem<String>(
+                  value: 'view',
+                  child: Text('View details'),
                 ),
-                const SizedBox(width: 12),
-                Icon(Icons.event_seat, size: 14, color: scheme.onSurfaceVariant),
-                const SizedBox(width: 4),
-                Text(
-                  '${route.availableSeats}/${route.totalSeats}',
-                  style: Theme.of(context).textTheme.bodySmall,
+                PopupMenuItem<String>(
+                  value: 'cancel',
+                  child: Text('Cancel route'),
                 ),
               ],
             ),

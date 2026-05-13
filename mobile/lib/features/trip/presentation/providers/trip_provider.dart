@@ -56,18 +56,24 @@ class DriverTrackingNotifier extends StateNotifier<DriverTrackingState> {
   WebSocketChannel? _channel;
   StreamSubscription<dynamic>? _sub;
 
-  Future<void> connect() async {
+  Future<void> connect(String driverId) async {
     if (state.isConnected) return;
 
     final String? token = await _storage.readAccessToken();
     final Uri uri = Uri.parse(
-      '${Env.wsBaseUrl}/passenger?booking_id=$_bookingId'
+      '${Env.wsBaseUrl}/location?booking_id=$_bookingId'
       '${token != null ? '&token=$token' : ''}',
     );
 
     try {
       _channel = WebSocketChannel.connect(uri);
       state = state.copyWith(isConnected: true, error: null);
+
+      // Tell the server which driver to subscribe to.
+      _channel!.sink.add(jsonEncode(<String, dynamic>{
+        'type': 'subscribe',
+        'driverId': driverId,
+      }));
 
       _sub = _channel!.stream.listen(
         (dynamic raw) {
@@ -76,9 +82,7 @@ class DriverTrackingNotifier extends StateNotifier<DriverTrackingState> {
                 jsonDecode(raw as String) as Map<String, dynamic>;
             if (json['type'] == 'location_update') {
               final DriverLocationUpdate update =
-                  DriverLocationUpdate.fromJson(
-                json['payload'] as Map<String, dynamic>,
-              );
+                  DriverLocationUpdate.fromJson(json);
               final List<DriverLocationUpdate> history =
                   <DriverLocationUpdate>[...state.history, update];
               // keep last 100 points for polyline trail
@@ -181,17 +185,13 @@ class DriverBroadcastNotifier extends StateNotifier<DriverBroadcastState> {
             isStreaming: true,
             lastPosition: pos,
           );
-          final Map<String, dynamic> payload = DriverLocationUpdate(
-            driverUserId: _driverUserId,
-            lat: pos.latitude,
-            lng: pos.longitude,
-            heading: pos.heading,
-            speedKmh: pos.speed * 3.6,
-            timestamp: DateTime.now(),
-          ).toJson();
           _channel?.sink.add(jsonEncode(<String, dynamic>{
-            'type': 'location_update',
-            'payload': payload,
+            'type': 'location',
+            'driverUserId': _driverUserId,
+            'lat': pos.latitude,
+            'lng': pos.longitude,
+            'bearing': pos.heading,
+            'speedKmh': pos.speed * 3.6,
           }));
         },
         onError: (Object e) {

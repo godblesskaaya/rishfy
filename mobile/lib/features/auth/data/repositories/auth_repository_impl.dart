@@ -38,24 +38,22 @@ class AuthRepositoryImpl implements AuthRepository {
 
   @override
   Future<PendingRegistration> register({
-    required String phoneNumber,
+    required String email,
     required String password,
     String? fullName,
-    String? email,
+    String? phoneNumber,
   }) async {
     final RegistrationResponseDto response = await _remote.register(
-      phoneNumber: phoneNumber,
+      email: email,
       password: password,
       fullName: fullName,
-      email: email,
+      phoneNumber: phoneNumber,
     );
 
     return PendingRegistration(
       userId: response.user.userId,
-      phoneNumber: response.user.phoneNumber.isEmpty
-          ? phoneNumber
-          : response.user.phoneNumber,
       email: response.user.email ?? email,
+      phoneNumber: response.user.phoneNumber.isEmpty ? phoneNumber : response.user.phoneNumber,
       expiresAt: response.otpExpiresAt,
     );
   }

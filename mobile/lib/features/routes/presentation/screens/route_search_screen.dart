@@ -970,31 +970,33 @@ class _SearchResultCard extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 6),
-              // Walking distance
-              Row(
+              Wrap(
+                spacing: 6,
+                runSpacing: 4,
                 children: <Widget>[
-                  const Icon(Icons.directions_walk, size: 14),
-                  const SizedBox(width: 4),
-                  Text(
-                    result.walkingDistanceLabel,
-                    style: Theme.of(context).textTheme.bodySmall,
+                  Chip(
+                    avatar: const Icon(Icons.directions_walk, size: 14),
+                    label: Text(result.walkingDistanceLabel),
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    labelStyle: Theme.of(context).textTheme.bodySmall,
                   ),
-                  const SizedBox(width: 16),
-                  const Icon(Icons.event_seat, size: 14),
-                  const SizedBox(width: 4),
-                  Text(
-                    '${result.availableSeats} seats',
-                    style: Theme.of(context).textTheme.bodySmall,
+                  Chip(
+                    avatar: const Icon(Icons.event_seat, size: 14),
+                    label: Text('${result.availableSeats} seats'),
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    labelStyle: Theme.of(context).textTheme.bodySmall,
                   ),
-                  if (result.driverRating != null) ...<Widget>[
-                    const SizedBox(width: 16),
-                    const Icon(Icons.star, size: 14, color: Colors.amber),
-                    const SizedBox(width: 2),
-                    Text(
-                      result.driverRating!.toStringAsFixed(1),
-                      style: Theme.of(context).textTheme.bodySmall,
+                  if (result.driverRating != null)
+                    Chip(
+                      avatar: const Icon(Icons.star, size: 14,
+                          color: Colors.amber),
+                      label: Text(result.driverRating!.toStringAsFixed(1)),
+                      visualDensity: VisualDensity.compact,
+                      padding: EdgeInsets.zero,
+                      labelStyle: Theme.of(context).textTheme.bodySmall,
                     ),
-                  ],
                 ],
               ),
               const SizedBox(height: 4),
@@ -1032,6 +1034,31 @@ class _SearchResultCard extends StatelessWidget {
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
               ],
+              const SizedBox(height: 4),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: () => GoRouter.of(context).push(
+                    '/bookings/create',
+                    extra: <String, dynamic>{
+                      'routeId': result.routeId,
+                      'driverId': result.driverId,
+                      'pricePerSeat': result.pricePerSeat,
+                      'suggestedPickupName': result.suggestedPickupName,
+                      'suggestedPickupLat': result.suggestedPickupLat,
+                      'suggestedPickupLng': result.suggestedPickupLng,
+                      'estimatedPickupTime':
+                          result.estimatedPickupTime.toIso8601String(),
+                      'walkingDistanceToPickup':
+                          result.walkingDistanceToPickup,
+                      'walkingTimeToPickup': result.walkingTimeToPickup,
+                      'walkingDistanceFromDropoff':
+                          result.walkingDistanceFromDropoff,
+                    },
+                  ),
+                  child: const Text('Book'),
+                ),
+              ),
             ],
           ),
         ),

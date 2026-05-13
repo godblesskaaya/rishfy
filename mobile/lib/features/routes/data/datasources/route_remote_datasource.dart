@@ -7,11 +7,10 @@ class RouteRemoteDataSource {
 
   final Dio _dio;
 
-  /// Returns the calling driver's posted routes. Returns an empty list if the
-  /// backend endpoint isn't available yet (no driver routes API surfaced).
   Future<List<RouteDto>> listMyRoutes() async {
     try {
-      final Response<dynamic> res = await _loadMyRoutesResponse();
+      final Response<dynamic> res =
+          await _dio.get<dynamic>('/api/v1/routes/me');
       return _parseRouteList(res.data);
     } on DioException catch (error) {
       if (error.response?.statusCode == 404) {
@@ -21,16 +20,8 @@ class RouteRemoteDataSource {
     }
   }
 
-  Future<Response<dynamic>> _loadMyRoutesResponse() async {
-    try {
-      return await _dio.get<dynamic>('/api/v1/routes/me');
-    } on DioException catch (error) {
-      if (error.response?.statusCode != 404) {
-        rethrow;
-      }
-    }
-
-    return _dio.get<dynamic>('/api/v1/routes/mine');
+  Future<void> cancelRoute(String routeId) async {
+    await _dio.delete<void>('/api/v1/routes/$routeId');
   }
 
   List<RouteDto> _parseRouteList(dynamic payload) {

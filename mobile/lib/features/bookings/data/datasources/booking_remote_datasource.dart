@@ -90,4 +90,22 @@ class BookingRemoteDataSource {
       },
     );
   }
+
+  Future<BookingDto> startTrip(String bookingId) async {
+    final Response<Map<String, dynamic>> res =
+        await _dio.post<Map<String, dynamic>>(
+      '/api/v1/bookings/$bookingId/start-trip',
+    );
+    return BookingDto.fromJson(
+        res.data?['booking'] as Map<String, dynamic>? ?? res.data!);
+  }
+
+  Future<BookingDto> completeTrip(String bookingId) async {
+    final Response<Map<String, dynamic>> res =
+        await _dio.post<Map<String, dynamic>>(
+      '/api/v1/bookings/$bookingId/complete-trip',
+    );
+    return BookingDto.fromJson(
+        res.data?['booking'] as Map<String, dynamic>? ?? res.data!);
+  }
 }

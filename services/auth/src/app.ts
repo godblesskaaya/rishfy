@@ -13,6 +13,7 @@ import { logger } from './logger.js';
 import { InMemoryAuthRepository } from './repositories/auth.repository.js';
 import { PgAuthRepository } from './repositories/pg-auth.repository.js';
 import { AuthService } from './services/auth.service.js';
+import { createEmailSender } from './utils/email.sender.js';
 
 export interface BuildAppOptions {
   authService?: AuthService;
@@ -31,11 +32,10 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   const repository = isTest ? new InMemoryAuthRepository() : new PgAuthRepository();
 
   const eventProducer = options.authEventsProducer ?? null;
+  const emailSender = createEmailSender(config);
   const authService = options.authService ?? new AuthService({
     repository,
-    otpSender: async ({ destination, code, purpose }) => {
-      app.log.info({ destination, code, purpose }, 'Mock OTP dispatched');
-    },
+    otpSender: emailSender,
     userRegisteredPublisher: eventProducer
       ? (event) => publishUserRegistered(eventProducer, event)
       : undefined,

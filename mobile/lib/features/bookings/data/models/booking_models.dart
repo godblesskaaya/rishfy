@@ -48,17 +48,13 @@ class BookingDto {
         totalPriceTzs: _toInt(j['total_price'] ?? j['total_price_tzs']),
         status: _readRequiredString(j, <String>['status']),
         paymentStatus: _readString(j, <String>['payment_status']) ?? 'pending',
-        createdAt: DateTime.parse(
-          _readRequiredString(j, <String>['created_at']),
-        ),
+        createdAt: _parseDateTime(j['created_at']),
         driverId: _readString(j, <String>['driver_id']),
         confirmationCode: _readString(j, <String>['confirmation_code']),
         originName: _readString(j, <String>['origin_name']),
         destinationName: _readString(j, <String>['destination_name']),
         departureDatetime: _readString(j, <String>['departure_datetime']) != null
-            ? DateTime.parse(
-                _readRequiredString(j, <String>['departure_datetime']),
-              )
+            ? _parseDateTime(j['departure_datetime'])
             : null,
         driverName: _readString(j, <String>['driver_name']),
         vehiclePlate: _readString(j, <String>['vehicle_plate']),
@@ -201,11 +197,21 @@ class InitiatePaymentResponse {
       );
 }
 
-int _toInt(dynamic value) {
+int _toInt(dynamic value, {int fallback = 0}) {
+  if (value == null) return fallback;
   if (value is int) return value;
   if (value is num) return value.toInt();
-  if (value is String) return double.parse(value).round();
-  throw FormatException('Invalid integer value: $value');
+  if (value is String) return double.tryParse(value)?.round() ?? fallback;
+  return fallback;
+}
+
+DateTime _parseDateTime(dynamic value, {DateTime? fallback}) {
+  if (value == null) return fallback ?? DateTime.now();
+  try {
+    return DateTime.parse(value.toString());
+  } catch (_) {
+    return fallback ?? DateTime.now();
+  }
 }
 
 String _readRequiredString(Map<String, dynamic> json, List<String> keys) {

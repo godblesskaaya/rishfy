@@ -5,6 +5,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:intl/intl.dart';
 
 import '../../../../core/constants/app_constants.dart';
+import '../../../../shared/providers/active_role_provider.dart';
 import '../../../../shared/widgets/primary_button.dart';
 import '../../../bookings/domain/entities/booking_entity.dart';
 import '../../../bookings/presentation/providers/booking_provider.dart';
@@ -28,7 +29,13 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      ref.read(driverTrackingProvider(widget.bookingId).notifier).connect();
+      final AsyncValue<BookingEntity> booking =
+          ref.read(bookingDetailProvider(widget.bookingId));
+      final String driverId =
+          booking.valueOrNull?.driverId ?? '';
+      ref
+          .read(driverTrackingProvider(widget.bookingId).notifier)
+          .connect(driverId);
     });
   }
 
@@ -73,10 +80,22 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final String role = ref.watch(activeRoleProvider);
     final AsyncValue<BookingEntity> asyncBooking =
         ref.watch(bookingDetailProvider(widget.bookingId));
     final DriverTrackingState tracking =
         ref.watch(driverTrackingProvider(widget.bookingId));
+
+    if (role == 'driver') {
+      return asyncBooking.when(
+        loading: () => const Scaffold(body: Center(child: CircularProgressIndicator())),
+        error: (Object e, _) => Scaffold(
+          appBar: AppBar(title: const Text('Active trip')),
+          body: Center(child: Text('Error: $e')),
+        ),
+        data: (BookingEntity booking) => _buildDriverView(context, booking),
+      );
+    }
 
     if (tracking.latest != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _panToDriver(tracking.latest!));
@@ -102,6 +121,112 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (Object e, _) => Center(child: Text('Error: $e')),
         data: (BookingEntity booking) => _buildBody(context, booking, tracking),
+      ),
+    );
+  }
+
+  Widget _buildDriverView(BuildContext context, BookingEntity booking) {
+    final TripActionState completeState = ref.watch(completeTripProvider);
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+    final bool isCompleting = completeState.status == TripActionStatus.loading;
+
+    ref.listen(completeTripProvider, (TripActionState? _, TripActionState next) {
+      if (next.status == TripActionStatus.success) {
+        ref.read(driverBroadcastProvider.notifier).stopStreaming();
+        if (mounted) context.go('/bookings');
+      } else if (next.status == TripActionStatus.failed && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(next.error ?? 'Could not complete trip.')),
+        );
+      }
+    });
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Active trip'),
+        actions: <Widget>[
+          IconButton(
+            icon: const Icon(Icons.emergency, color: Colors.red),
+            tooltip: 'Emergency',
+            onPressed: () => _triggerEmergency(context),
+          ),
+        ],
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(AppConstants.spaceLg),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(AppConstants.spaceMd),
+              decoration: BoxDecoration(
+                color: scheme.primaryContainer,
+                borderRadius: BorderRadius.circular(AppConstants.radiusLg),
+              ),
+              child: Row(
+                children: <Widget>[
+                  Icon(Icons.directions_car, color: scheme.onPrimaryContainer),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'Trip in progress',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            color: scheme.onPrimaryContainer,
+                            fontWeight: FontWeight.bold,
+                          ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: AppConstants.spaceLg),
+            if (booking.originName != null) ...<Widget>[
+              Text('Pickup', style: Theme.of(context).textTheme.labelMedium),
+              Text(booking.originName!),
+              const SizedBox(height: AppConstants.spaceMd),
+            ],
+            if (booking.destinationName != null) ...<Widget>[
+              Text('Drop-off', style: Theme.of(context).textTheme.labelMedium),
+              Text(booking.destinationName!),
+              const SizedBox(height: AppConstants.spaceMd),
+            ],
+            const Spacer(),
+            if (completeState.status == TripActionStatus.failed)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(
+                  completeState.error ?? 'Could not complete trip.',
+                  style: TextStyle(color: scheme.error),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            SizedBox(
+              width: double.infinity,
+              height: 52,
+              child: ElevatedButton(
+                onPressed: isCompleting
+                    ? null
+                    : () => ref
+                        .read(completeTripProvider.notifier)
+                        .complete(widget.bookingId),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: scheme.error,
+                  foregroundColor: scheme.onError,
+                ),
+                child: isCompleting
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('Complete Trip',
+                        style: TextStyle(
+                            fontSize: 16, fontWeight: FontWeight.bold)),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
