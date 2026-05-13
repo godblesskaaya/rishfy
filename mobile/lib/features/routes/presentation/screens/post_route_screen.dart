@@ -1,6 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:google_polyline_algorithm/google_polyline_algorithm.dart';
 import 'package:intl/intl.dart';
 
 import '../../../../core/constants/app_constants.dart';
@@ -33,6 +37,7 @@ class _PostRouteScreenState extends ConsumerState<PostRouteScreen> {
   int _flexibilityMinutes = 15;
   bool _manualVehicleEntry = false;
   String? _selectedVehicleId;
+  GoogleMapController? _previewMapController;
 
   LocationSearchResult? _originSelection;
   LocationSearchResult? _destinationSelection;
@@ -57,7 +62,39 @@ class _PostRouteScreenState extends ConsumerState<PostRouteScreen> {
     _destinationCtrl.dispose();
     _priceCtrl.dispose();
     _manualVehicleIdCtrl.dispose();
+    _previewMapController?.dispose();
     super.dispose();
+  }
+
+  void _fitPreviewBounds(RoutePreviewDto preview) {
+    if (_previewMapController == null ||
+        _originSelection == null ||
+        _destinationSelection == null) return;
+    final double minLat = <double>[
+      _originSelection!.latitude,
+      _destinationSelection!.latitude,
+    ].reduce((double a, double b) => a < b ? a : b);
+    final double maxLat = <double>[
+      _originSelection!.latitude,
+      _destinationSelection!.latitude,
+    ].reduce((double a, double b) => a > b ? a : b);
+    final double minLng = <double>[
+      _originSelection!.longitude,
+      _destinationSelection!.longitude,
+    ].reduce((double a, double b) => a < b ? a : b);
+    final double maxLng = <double>[
+      _originSelection!.longitude,
+      _destinationSelection!.longitude,
+    ].reduce((double a, double b) => a > b ? a : b);
+    _previewMapController!.animateCamera(
+      CameraUpdate.newLatLngBounds(
+        LatLngBounds(
+          southwest: LatLng(minLat - 0.01, minLng - 0.01),
+          northeast: LatLng(maxLat + 0.01, maxLng + 0.01),
+        ),
+        40,
+      ),
+    );
   }
 
   Future<void> _pickDepartureDate() async {
@@ -151,9 +188,15 @@ class _PostRouteScreenState extends ConsumerState<PostRouteScreen> {
         _destinationCtrl.text = result.label;
         _destinationSuggestions = const <LocationSearchResult>[];
       }
+      _previewMapController = null;
     });
-    // Reset preview when either endpoint changes
     ref.read(previewRouteProvider.notifier).reset();
+    // Auto-trigger preview once both endpoints are known
+    if (_originSelection != null && _destinationSelection != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) unawaited(_preview());
+      });
+    }
   }
 
   Future<void> _preview() async {
@@ -523,7 +566,20 @@ class _PostRouteScreenState extends ConsumerState<PostRouteScreen> {
                 _ErrorCard(message: previewState.error!),
                 const SizedBox(height: 12),
               ],
-              if (hasPreview) ...<Widget>[
+              if (hasPreview && _originSelection != null && _destinationSelection != null) ...<Widget>[
+                _RoutePreviewMapCard(
+                  origin: LatLng(_originSelection!.latitude, _originSelection!.longitude),
+                  destination: LatLng(_destinationSelection!.latitude, _destinationSelection!.longitude),
+                  preview: previewState.preview!,
+                  onMapCreated: (GoogleMapController c) {
+                    _previewMapController = c;
+                    Future<void>.delayed(
+                      const Duration(milliseconds: 300),
+                      () => _fitPreviewBounds(previewState.preview!),
+                    );
+                  },
+                ),
+                const SizedBox(height: 12),
                 _PreviewCard(preview: previewState.preview!),
                 const SizedBox(height: 16),
               ],
@@ -640,6 +696,70 @@ class _PreviewCard extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _RoutePreviewMapCard extends StatelessWidget {
+  const _RoutePreviewMapCard({
+    required this.origin,
+    required this.destination,
+    required this.preview,
+    required this.onMapCreated,
+  });
+
+  final LatLng origin;
+  final LatLng destination;
+  final RoutePreviewDto preview;
+  final ValueChanged<GoogleMapController> onMapCreated;
+
+  Set<Marker> get _markers => <Marker>{
+        Marker(
+          markerId: const MarkerId('origin'),
+          position: origin,
+          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
+        ),
+        Marker(
+          markerId: const MarkerId('destination'),
+          position: destination,
+          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+        ),
+      };
+
+  Set<Polyline> get _polylines {
+    if (preview.polyline.isEmpty) return <Polyline>{};
+    final List<List<num>> coords = decodePolyline(preview.polyline);
+    if (coords.length < 2) return <Polyline>{};
+    return <Polyline>{
+      Polyline(
+        polylineId: const PolylineId('preview'),
+        points: coords
+            .map((List<num> p) => LatLng(p[0].toDouble(), p[1].toDouble()))
+            .toList(),
+        color: Colors.blue,
+        width: 4,
+      ),
+    };
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(AppConstants.radiusLg),
+      child: SizedBox(
+        height: 200,
+        child: GoogleMap(
+          initialCameraPosition: CameraPosition(target: origin, zoom: 10),
+          onMapCreated: onMapCreated,
+          markers: _markers,
+          polylines: _polylines,
+          zoomControlsEnabled: false,
+          scrollGesturesEnabled: false,
+          rotateGesturesEnabled: false,
+          tiltGesturesEnabled: false,
+          myLocationButtonEnabled: false,
+        ),
       ),
     );
   }

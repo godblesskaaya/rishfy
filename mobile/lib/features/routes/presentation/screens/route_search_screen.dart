@@ -28,6 +28,8 @@ class _RouteSearchScreenState extends ConsumerState<RouteSearchScreen> {
   final TextEditingController _destCtrl = TextEditingController();
   final FocusNode _originFocusNode = FocusNode();
   final FocusNode _destFocusNode = FocusNode();
+  final DraggableScrollableController _sheetController =
+      DraggableScrollableController();
 
   GoogleMapController? _mapController;
   Timer? _originDebounce;
@@ -72,6 +74,7 @@ class _RouteSearchScreenState extends ConsumerState<RouteSearchScreen> {
     _originFocusNode.dispose();
     _destFocusNode.dispose();
     _mapController?.dispose();
+    _sheetController.dispose();
     super.dispose();
   }
 
@@ -292,6 +295,7 @@ class _RouteSearchScreenState extends ConsumerState<RouteSearchScreen> {
   }
 
   Future<void> _search() async {
+    FocusScope.of(context).unfocus();
     if (_originSelection == null || _destinationSelection == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -315,6 +319,16 @@ class _RouteSearchScreenState extends ConsumerState<RouteSearchScreen> {
             dropoffLabel: _destinationSelection!.label,
           ),
         );
+
+    if (!mounted) return;
+    final RouteSearchState state = ref.read(routeSearchProvider);
+    if (state.results.isNotEmpty && _sheetController.isAttached) {
+      unawaited(_sheetController.animateTo(
+        0.60,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      ));
+    }
   }
 
   Set<Marker> _buildMarkers() {
@@ -372,22 +386,14 @@ class _RouteSearchScreenState extends ConsumerState<RouteSearchScreen> {
   }
 
   List<LocationSearchResult> get _activeSuggestions {
-    if (_originFocusNode.hasFocus) {
-      return _originSuggestions;
-    }
-    if (_destFocusNode.hasFocus) {
-      return _destinationSuggestions;
-    }
+    if (_originFocusNode.hasFocus) return _originSuggestions;
+    if (_destFocusNode.hasFocus) return _destinationSuggestions;
     return const <LocationSearchResult>[];
   }
 
   bool get _activeSuggestionsLoading {
-    if (_originFocusNode.hasFocus) {
-      return _loadingOriginSuggestions;
-    }
-    if (_destFocusNode.hasFocus) {
-      return _loadingDestinationSuggestions;
-    }
+    if (_originFocusNode.hasFocus) return _loadingOriginSuggestions;
+    if (_destFocusNode.hasFocus) return _loadingDestinationSuggestions;
     return false;
   }
 
@@ -397,427 +403,570 @@ class _RouteSearchScreenState extends ConsumerState<RouteSearchScreen> {
     final List<SearchResultDto> results = searchState.results;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Search routes')),
-      body: SafeArea(
-        child: LayoutBuilder(
-          builder: (BuildContext context, BoxConstraints constraints) {
-            final double bottomInset =
-                MediaQuery.of(context).padding.bottom + 96;
-            return SingleChildScrollView(
-              padding: EdgeInsets.fromLTRB(
-                AppConstants.spaceLg,
-                AppConstants.spaceLg,
-                AppConstants.spaceLg,
-                AppConstants.spaceLg + bottomInset,
-              ),
-              child: ConstrainedBox(
-                constraints: BoxConstraints(minHeight: constraints.maxHeight),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: <Widget>[
-                    _MapSelectionCard(
-                      markers: _buildMarkers(),
-                      currentLocation: _currentLocation,
-                      loadingCurrentLocation: _loadingCurrentLocation,
-                      mapTargetField: _mapTargetField,
-                      onMapCreated: (GoogleMapController controller) {
-                        _mapController = controller;
-                      },
-                      onTapMap: _applyMapSelection,
-                      onSelectField: (String field) {
-                        setState(() => _mapTargetField = field);
-                      },
-                      onUseCurrentLocation: _useCurrentLocation,
-                    ),
-                    const SizedBox(height: AppConstants.spaceMd),
-                    if (_locationHint != null) ...<Widget>[
-                      _InfoBanner(message: _locationHint!),
-                      const SizedBox(height: AppConstants.spaceMd),
-                    ],
-                    Container(
-                      padding: const EdgeInsets.all(AppConstants.spaceMd),
-                      decoration: BoxDecoration(
-                        color: Theme.of(context)
-                            .colorScheme
-                            .surfaceContainerHighest,
-                        borderRadius:
-                            BorderRadius.circular(AppConstants.radiusLg),
-                      ),
-                      child: Column(
-                        children: <Widget>[
-                          TextField(
-                            controller: _originCtrl,
-                            focusNode: _originFocusNode,
-                            textInputAction: TextInputAction.next,
-                            onTap: () => setState(() => _mapTargetField = 'origin'),
-                            onChanged: _onOriginChanged,
-                            decoration: InputDecoration(
-                              labelText: 'From',
-                              hintText: 'Pick on map or search address',
-                              prefixIcon: const Icon(Icons.trip_origin),
-                              suffixIcon: _originSelection != null
-                                  ? const Icon(Icons.check_circle_outline)
-                                  : null,
-                              border: InputBorder.none,
-                            ),
-                          ),
-                          const Divider(height: 1),
-                          TextField(
-                            controller: _destCtrl,
-                            focusNode: _destFocusNode,
-                            textInputAction: TextInputAction.done,
-                            onTap:
-                                () => setState(() => _mapTargetField = 'destination'),
-                            onChanged: _onDestinationChanged,
-                            onSubmitted: (_) => _search(),
-                            decoration: InputDecoration(
-                              labelText: 'To',
-                              hintText: 'Pick on map or search address',
-                              prefixIcon: const Icon(Icons.location_on_outlined),
-                              suffixIcon: _destinationSelection != null
-                                  ? const Icon(Icons.check_circle_outline)
-                                  : null,
-                              border: InputBorder.none,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    if (_activeSuggestionsLoading ||
-                        _activeSuggestions.isNotEmpty) ...<Widget>[
-                      const SizedBox(height: AppConstants.spaceSm),
-                      _SuggestionPanel(
+      resizeToAvoidBottomInset: false,
+      body: Stack(
+        children: <Widget>[
+          // ── Fullscreen map ─────────────────────────────────────────────
+          GoogleMap(
+            initialCameraPosition: CameraPosition(
+              target: _currentLocation != null
+                  ? LatLng(
+                      _currentLocation!.latitude,
+                      _currentLocation!.longitude,
+                    )
+                  : _tanzaniaCenter,
+              zoom: _currentLocation != null ? 12 : 5.5,
+            ),
+            markers: _buildMarkers(),
+            myLocationEnabled: _currentLocation != null,
+            myLocationButtonEnabled: false,
+            zoomControlsEnabled: false,
+            onMapCreated: (GoogleMapController controller) {
+              _mapController = controller;
+            },
+            onTap: (LatLng point) {
+              FocusScope.of(context).unfocus();
+              unawaited(_applyMapSelection(point));
+            },
+          ),
+
+          // ── Floating input card + suggestions ──────────────────────────
+          SafeArea(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+                  child: _FloatingInputCard(
+                    originCtrl: _originCtrl,
+                    destCtrl: _destCtrl,
+                    originFocusNode: _originFocusNode,
+                    destFocusNode: _destFocusNode,
+                    originSelection: _originSelection,
+                    destinationSelection: _destinationSelection,
+                    mapTargetField: _mapTargetField,
+                    loadingCurrentLocation: _loadingCurrentLocation,
+                    onOriginChanged: _onOriginChanged,
+                    onDestinationChanged: _onDestinationChanged,
+                    onOriginTap: () =>
+                        setState(() => _mapTargetField = 'origin'),
+                    onDestinationTap: () =>
+                        setState(() => _mapTargetField = 'destination'),
+                    onUseCurrentLocation: _useCurrentLocation,
+                    onSelectField: (String field) =>
+                        setState(() => _mapTargetField = field),
+                    onSearch: _search,
+                  ),
+                ),
+                if (_locationHint != null)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+                    child: _InfoBanner(message: _locationHint!),
+                  ),
+                if (_activeSuggestionsLoading || _activeSuggestions.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxHeight: 230),
+                      child: _SuggestionPanel(
                         loading: _activeSuggestionsLoading,
                         suggestions: _activeSuggestions,
                         onSelect: (LocationSearchResult result) {
                           _applySelection(
-                            _originFocusNode.hasFocus ? 'origin' : 'destination',
+                            _originFocusNode.hasFocus
+                                ? 'origin'
+                                : 'destination',
                             result,
                           );
                         },
                       ),
-                    ],
-                    const SizedBox(height: AppConstants.spaceMd),
-                    // ── Date + time row ──────────────────────────────────
-                    Row(
-                      children: <Widget>[
-                        Expanded(
-                          child: InkWell(
-                            borderRadius:
-                                BorderRadius.circular(AppConstants.radiusLg),
-                            onTap: () async {
-                              final DateTime? picked = await showDatePicker(
-                                context: context,
-                                initialDate: _departureDate,
-                                firstDate: DateTime.now(),
-                                lastDate: DateTime.now()
-                                    .add(const Duration(days: 60)),
-                              );
-                              if (picked != null) {
-                                setState(() => _departureDate = picked);
-                              }
-                            },
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: AppConstants.spaceMd,
-                                vertical: AppConstants.spaceSm + 4,
-                              ),
-                              decoration: BoxDecoration(
-                                border: Border.all(
-                                  color: Theme.of(context)
-                                      .colorScheme
-                                      .outlineVariant,
-                                ),
-                                borderRadius: BorderRadius.circular(
-                                    AppConstants.radiusLg),
-                              ),
-                              child: Row(
-                                children: <Widget>[
-                                  Icon(
-                                    Icons.calendar_today,
-                                    color:
-                                        Theme.of(context).colorScheme.primary,
-                                    size: 18,
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Text(
-                                      DateFormat('d MMM').format(_departureDate),
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: InkWell(
-                            borderRadius:
-                                BorderRadius.circular(AppConstants.radiusLg),
-                            onTap: _pickDepartureTime,
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: AppConstants.spaceMd,
-                                vertical: AppConstants.spaceSm + 4,
-                              ),
-                              decoration: BoxDecoration(
-                                border: Border.all(
-                                  color: Theme.of(context)
-                                      .colorScheme
-                                      .outlineVariant,
-                                ),
-                                borderRadius: BorderRadius.circular(
-                                    AppConstants.radiusLg),
-                              ),
-                              child: Row(
-                                children: <Widget>[
-                                  Icon(
-                                    Icons.schedule,
-                                    color:
-                                        Theme.of(context).colorScheme.primary,
-                                    size: 18,
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Text(_departureTime.format(context)),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
                     ),
-                    const SizedBox(height: AppConstants.spaceMd),
-                    // ── Seats row ────────────────────────────────────────
-                    Row(
-                      children: <Widget>[
-                        const Text('Seats'),
-                        const Spacer(),
-                        IconButton(
-                          onPressed: _seatCount > 1
-                              ? () => setState(() => _seatCount--)
-                              : null,
-                          icon: const Icon(Icons.remove_circle_outline),
-                        ),
-                        Text(
-                          '$_seatCount',
-                          style: Theme.of(context).textTheme.titleMedium,
-                        ),
-                        IconButton(
-                          onPressed: _seatCount < AppConstants.maxSeatsPerBooking
-                              ? () => setState(() => _seatCount++)
-                              : null,
-                          icon: const Icon(Icons.add_circle_outline),
-                        ),
-                      ],
-                    ),
-                    // ── Advanced options ─────────────────────────────────
-                    InkWell(
-                      onTap: () =>
-                          setState(() => _showAdvanced = !_showAdvanced),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                            vertical: AppConstants.spaceSm),
-                        child: Row(
-                          children: <Widget>[
-                            Text(
-                              'Advanced options',
-                              style: TextStyle(
-                                color: Theme.of(context).colorScheme.primary,
-                                fontSize: 13,
-                              ),
-                            ),
-                            Icon(
-                              _showAdvanced
-                                  ? Icons.expand_less
-                                  : Icons.expand_more,
-                              color: Theme.of(context).colorScheme.primary,
-                              size: 18,
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    if (_showAdvanced) ...<Widget>[
-                      Text(
-                        'Time flexibility',
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                      const SizedBox(height: 6),
-                      Wrap(
-                        spacing: 6,
-                        children: <int>[15, 30, 60].map((int m) {
-                          return ChoiceChip(
-                            label: Text('±$m min'),
-                            selected: _timeFlexibilityMinutes == m,
-                            onSelected: (_) => setState(
-                                () => _timeFlexibilityMinutes = m),
-                          );
-                        }).toList(),
-                      ),
-                      const SizedBox(height: 12),
-                      Text(
-                        'Max walking distance to pickup',
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                      const SizedBox(height: 6),
-                      Wrap(
-                        spacing: 6,
-                        children: <int>[500, 1000, 1500, 2000].map((int m) {
-                          return ChoiceChip(
-                            label: Text(
-                              m < 1000 ? '${m}m' : '${m ~/ 1000} km',
-                            ),
-                            selected: _maxWalkingDistanceMeters == m,
-                            onSelected: (_) => setState(
-                                () => _maxWalkingDistanceMeters = m),
-                          );
-                        }).toList(),
-                      ),
-                      const SizedBox(height: 8),
-                    ],
-                    const SizedBox(height: AppConstants.spaceMd),
-                    PrimaryButton(
-                      label: 'Search',
-                      icon: Icons.search,
-                      loading: searchState.isLoading,
-                      onPressed: searchState.isLoading ? null : _search,
-                    ),
-                    if (searchState.error != null) ...<Widget>[
-                      const SizedBox(height: AppConstants.spaceMd),
-                      _ErrorBanner(message: searchState.error!),
-                    ],
-                    const SizedBox(height: AppConstants.spaceLg),
-                    if (results.isNotEmpty)
-                      ...results.map(
-                        (SearchResultDto r) => Padding(
-                          padding: const EdgeInsets.only(
-                            bottom: AppConstants.spaceSm,
-                          ),
-                          child: _SearchResultCard(result: r),
-                        ),
-                      )
-                    else if (!searchState.isLoading &&
-                        searchState.params != null &&
-                        results.isEmpty)
-                      Container(
-                        padding: const EdgeInsets.all(AppConstants.spaceLg),
+                  ),
+              ],
+            ),
+          ),
+
+          // ── Draggable bottom sheet ─────────────────────────────────────
+          DraggableScrollableSheet(
+            controller: _sheetController,
+            initialChildSize: 0.32,
+            minChildSize: 0.10,
+            maxChildSize: 0.92,
+            snap: true,
+            snapSizes: const <double>[0.10, 0.32, 0.60, 0.92],
+            builder:
+                (BuildContext ctx, ScrollController scrollController) {
+              return Material(
+                elevation: 8,
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(AppConstants.radiusXl),
+                ),
+                child: Column(
+                  children: <Widget>[
+                    // Drag handle
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      child: Container(
+                        width: 40,
+                        height: 4,
                         decoration: BoxDecoration(
                           color: Theme.of(context)
                               .colorScheme
-                              .surfaceContainerHighest,
-                          borderRadius:
-                              BorderRadius.circular(AppConstants.radiusLg),
-                        ),
-                        child: const Text(
-                          'No routes found. Try adjusting the time, '
-                          'walking distance, or flexibility window.',
-                          textAlign: TextAlign.center,
+                              .outlineVariant,
+                          borderRadius: BorderRadius.circular(2),
                         ),
                       ),
+                    ),
+                    Expanded(
+                      child: ListView(
+                        controller: scrollController,
+                        padding: const EdgeInsets.fromLTRB(
+                          AppConstants.spaceLg,
+                          0,
+                          AppConstants.spaceLg,
+                          AppConstants.spaceLg,
+                        ),
+                        children: <Widget>[
+                          // ── Date + time row ──────────────────────────
+                          Row(
+                            children: <Widget>[
+                              Expanded(
+                                child: InkWell(
+                                  borderRadius: BorderRadius.circular(
+                                      AppConstants.radiusLg),
+                                  onTap: () async {
+                                    final DateTime? picked =
+                                        await showDatePicker(
+                                      context: context,
+                                      initialDate: _departureDate,
+                                      firstDate: DateTime.now(),
+                                      lastDate: DateTime.now()
+                                          .add(const Duration(days: 60)),
+                                    );
+                                    if (picked != null) {
+                                      setState(
+                                          () => _departureDate = picked);
+                                    }
+                                  },
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: AppConstants.spaceMd,
+                                      vertical: AppConstants.spaceSm + 4,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      border: Border.all(
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .outlineVariant,
+                                      ),
+                                      borderRadius: BorderRadius.circular(
+                                          AppConstants.radiusLg),
+                                    ),
+                                    child: Row(
+                                      children: <Widget>[
+                                        Icon(
+                                          Icons.calendar_today,
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .primary,
+                                          size: 18,
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Expanded(
+                                          child: Text(
+                                            DateFormat('d MMM')
+                                                .format(_departureDate),
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: InkWell(
+                                  borderRadius: BorderRadius.circular(
+                                      AppConstants.radiusLg),
+                                  onTap: _pickDepartureTime,
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: AppConstants.spaceMd,
+                                      vertical: AppConstants.spaceSm + 4,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      border: Border.all(
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .outlineVariant,
+                                      ),
+                                      borderRadius: BorderRadius.circular(
+                                          AppConstants.radiusLg),
+                                    ),
+                                    child: Row(
+                                      children: <Widget>[
+                                        Icon(
+                                          Icons.schedule,
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .primary,
+                                          size: 18,
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Text(
+                                            _departureTime.format(context)),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: AppConstants.spaceMd),
+
+                          // ── Seats row ─────────────────────────────────
+                          Row(
+                            children: <Widget>[
+                              const Text('Seats'),
+                              const Spacer(),
+                              IconButton(
+                                onPressed: _seatCount > 1
+                                    ? () => setState(() => _seatCount--)
+                                    : null,
+                                icon: const Icon(
+                                    Icons.remove_circle_outline),
+                              ),
+                              Text(
+                                '$_seatCount',
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .titleMedium,
+                              ),
+                              IconButton(
+                                onPressed: _seatCount <
+                                        AppConstants.maxSeatsPerBooking
+                                    ? () => setState(() => _seatCount++)
+                                    : null,
+                                icon: const Icon(
+                                    Icons.add_circle_outline),
+                              ),
+                            ],
+                          ),
+
+                          // ── Advanced options ──────────────────────────
+                          InkWell(
+                            onTap: () => setState(
+                                () => _showAdvanced = !_showAdvanced),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                  vertical: AppConstants.spaceSm),
+                              child: Row(
+                                children: <Widget>[
+                                  Text(
+                                    'Advanced options',
+                                    style: TextStyle(
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .primary,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                  Icon(
+                                    _showAdvanced
+                                        ? Icons.expand_less
+                                        : Icons.expand_more,
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .primary,
+                                    size: 18,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          if (_showAdvanced) ...<Widget>[
+                            Text(
+                              'Time flexibility',
+                              style:
+                                  Theme.of(context).textTheme.bodySmall,
+                            ),
+                            const SizedBox(height: 6),
+                            Wrap(
+                              spacing: 6,
+                              children:
+                                  <int>[15, 30, 60].map((int m) {
+                                return ChoiceChip(
+                                  label: Text('±$m min'),
+                                  selected:
+                                      _timeFlexibilityMinutes == m,
+                                  onSelected: (_) => setState(
+                                      () =>
+                                          _timeFlexibilityMinutes = m),
+                                );
+                              }).toList(),
+                            ),
+                            const SizedBox(height: 12),
+                            Text(
+                              'Max walking distance to pickup',
+                              style:
+                                  Theme.of(context).textTheme.bodySmall,
+                            ),
+                            const SizedBox(height: 6),
+                            Wrap(
+                              spacing: 6,
+                              children: <int>[500, 1000, 1500, 2000]
+                                  .map((int m) {
+                                return ChoiceChip(
+                                  label: Text(
+                                    m < 1000
+                                        ? '${m}m'
+                                        : '${m ~/ 1000} km',
+                                  ),
+                                  selected:
+                                      _maxWalkingDistanceMeters == m,
+                                  onSelected: (_) => setState(() =>
+                                      _maxWalkingDistanceMeters = m),
+                                );
+                              }).toList(),
+                            ),
+                            const SizedBox(height: 8),
+                          ],
+                          const SizedBox(height: AppConstants.spaceMd),
+
+                          PrimaryButton(
+                            label: 'Search',
+                            icon: Icons.search,
+                            loading: searchState.isLoading,
+                            onPressed:
+                                searchState.isLoading ? null : _search,
+                          ),
+                          if (searchState.error != null) ...<Widget>[
+                            const SizedBox(
+                                height: AppConstants.spaceMd),
+                            _ErrorBanner(message: searchState.error!),
+                          ],
+                          const SizedBox(height: AppConstants.spaceLg),
+
+                          // ── Results ───────────────────────────────────
+                          if (results.isNotEmpty)
+                            ...results.map(
+                              (SearchResultDto r) => Padding(
+                                padding: const EdgeInsets.only(
+                                  bottom: AppConstants.spaceSm,
+                                ),
+                                child: _SearchResultCard(result: r),
+                              ),
+                            )
+                          else if (!searchState.isLoading &&
+                              searchState.params != null &&
+                              results.isEmpty)
+                            Container(
+                              padding: const EdgeInsets.all(
+                                  AppConstants.spaceLg),
+                              decoration: BoxDecoration(
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .surfaceContainerHighest,
+                                borderRadius: BorderRadius.circular(
+                                    AppConstants.radiusLg),
+                              ),
+                              child: const Text(
+                                'No routes found. Try adjusting the time, '
+                                'walking distance, or flexibility window.',
+                                textAlign: TextAlign.center,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
                   ],
                 ),
-              ),
-            );
-          },
-        ),
-      ),
-    );
-  }
-}
-
-class _MapSelectionCard extends StatelessWidget {
-  const _MapSelectionCard({
-    required this.markers,
-    required this.currentLocation,
-    required this.loadingCurrentLocation,
-    required this.mapTargetField,
-    required this.onMapCreated,
-    required this.onTapMap,
-    required this.onSelectField,
-    required this.onUseCurrentLocation,
-  });
-
-  final Set<Marker> markers;
-  final LocationSearchResult? currentLocation;
-  final bool loadingCurrentLocation;
-  final String mapTargetField;
-  final ValueChanged<GoogleMapController> onMapCreated;
-  final ValueChanged<LatLng> onTapMap;
-  final ValueChanged<String> onSelectField;
-  final VoidCallback onUseCurrentLocation;
-
-  @override
-  Widget build(BuildContext context) {
-    final LatLng center = currentLocation != null
-        ? LatLng(currentLocation!.latitude, currentLocation!.longitude)
-        : _RouteSearchScreenState._tanzaniaCenter;
-
-    return Container(
-      decoration: BoxDecoration(
-        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
-        borderRadius: BorderRadius.circular(AppConstants.radiusLg),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          SizedBox(
-            height: 220,
-            child: ClipRRect(
-              borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(AppConstants.radiusLg),
-              ),
-              child: GoogleMap(
-                initialCameraPosition: CameraPosition(
-                  target: center,
-                  zoom: currentLocation != null ? 12 : 5.5,
-                ),
-                markers: markers,
-                myLocationEnabled: currentLocation != null,
-                myLocationButtonEnabled: false,
-                zoomControlsEnabled: false,
-                onMapCreated: onMapCreated,
-                onTap: onTapMap,
-              ),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(AppConstants.spaceMd),
-            child: Wrap(
-              spacing: AppConstants.spaceSm,
-              runSpacing: AppConstants.spaceSm,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: <Widget>[
-                ChoiceChip(
-                  label: const Text('Pick origin'),
-                  selected: mapTargetField == 'origin',
-                  onSelected: (_) => onSelectField('origin'),
-                ),
-                ChoiceChip(
-                  label: const Text('Pick destination'),
-                  selected: mapTargetField == 'destination',
-                  onSelected: (_) => onSelectField('destination'),
-                ),
-                TextButton.icon(
-                  onPressed: loadingCurrentLocation ? null : onUseCurrentLocation,
-                  icon: loadingCurrentLocation
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.my_location),
-                  label: const Text('Use current location'),
-                ),
-              ],
-            ),
+              );
+            },
           ),
         ],
       ),
     );
   }
 }
+
+// ─── Floating input card ──────────────────────────────────────────────────────
+
+class _FloatingInputCard extends StatelessWidget {
+  const _FloatingInputCard({
+    required this.originCtrl,
+    required this.destCtrl,
+    required this.originFocusNode,
+    required this.destFocusNode,
+    required this.originSelection,
+    required this.destinationSelection,
+    required this.mapTargetField,
+    required this.loadingCurrentLocation,
+    required this.onOriginChanged,
+    required this.onDestinationChanged,
+    required this.onOriginTap,
+    required this.onDestinationTap,
+    required this.onUseCurrentLocation,
+    required this.onSelectField,
+    required this.onSearch,
+  });
+
+  final TextEditingController originCtrl;
+  final TextEditingController destCtrl;
+  final FocusNode originFocusNode;
+  final FocusNode destFocusNode;
+  final LocationSearchResult? originSelection;
+  final LocationSearchResult? destinationSelection;
+  final String mapTargetField;
+  final bool loadingCurrentLocation;
+  final ValueChanged<String> onOriginChanged;
+  final ValueChanged<String> onDestinationChanged;
+  final VoidCallback onOriginTap;
+  final VoidCallback onDestinationTap;
+  final VoidCallback onUseCurrentLocation;
+  final ValueChanged<String> onSelectField;
+  final VoidCallback onSearch;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+    return Material(
+      elevation: 4,
+      borderRadius: BorderRadius.circular(AppConstants.radiusLg),
+      color: scheme.surface,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppConstants.spaceMd,
+          vertical: AppConstants.spaceSm,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            // Header row with back button
+            Row(
+              children: <Widget>[
+                IconButton(
+                  icon: const Icon(Icons.arrow_back),
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  onPressed: () => Navigator.of(context).maybePop(),
+                ),
+                Text(
+                  'Search routes',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            // From field
+            TextField(
+              controller: originCtrl,
+              focusNode: originFocusNode,
+              textInputAction: TextInputAction.next,
+              onTap: onOriginTap,
+              onChanged: onOriginChanged,
+              decoration: InputDecoration(
+                labelText: 'From',
+                hintText: 'Search or tap map',
+                prefixIcon: Icon(
+                  Icons.trip_origin,
+                  color: mapTargetField == 'origin' ? Colors.green : null,
+                  size: 20,
+                ),
+                suffixIcon: originSelection != null
+                    ? const Icon(Icons.check_circle_outline,
+                        color: Colors.green, size: 20)
+                    : null,
+                border: InputBorder.none,
+                isDense: true,
+              ),
+            ),
+            const Divider(height: 1),
+            // To field
+            TextField(
+              controller: destCtrl,
+              focusNode: destFocusNode,
+              textInputAction: TextInputAction.done,
+              onTap: onDestinationTap,
+              onChanged: onDestinationChanged,
+              onSubmitted: (_) => onSearch(),
+              decoration: InputDecoration(
+                labelText: 'To',
+                hintText: 'Search or tap map',
+                prefixIcon: Icon(
+                  Icons.location_on_outlined,
+                  color:
+                      mapTargetField == 'destination' ? Colors.red : null,
+                  size: 20,
+                ),
+                suffixIcon: destinationSelection != null
+                    ? const Icon(Icons.check_circle_outline,
+                        color: Colors.green, size: 20)
+                    : null,
+                border: InputBorder.none,
+                isDense: true,
+              ),
+            ),
+            const Divider(height: 1),
+            // Map target chips + current location button
+            Row(
+              children: <Widget>[
+                Flexible(
+                  child: Wrap(
+                    spacing: 4,
+                    children: <Widget>[
+                      ChoiceChip(
+                        label: const Text('Origin'),
+                        selected: mapTargetField == 'origin',
+                        visualDensity: VisualDensity.compact,
+                        labelStyle:
+                            const TextStyle(fontSize: 11),
+                        onSelected: (_) => onSelectField('origin'),
+                      ),
+                      ChoiceChip(
+                        label: const Text('Dest.'),
+                        selected: mapTargetField == 'destination',
+                        visualDensity: VisualDensity.compact,
+                        labelStyle:
+                            const TextStyle(fontSize: 11),
+                        onSelected: (_) =>
+                            onSelectField('destination'),
+                      ),
+                    ],
+                  ),
+                ),
+                TextButton.icon(
+                  onPressed:
+                      loadingCurrentLocation ? null : onUseCurrentLocation,
+                  icon: loadingCurrentLocation
+                      ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.my_location, size: 16),
+                  label: const Text(
+                    'My location',
+                    style: TextStyle(fontSize: 12),
+                  ),
+                  style: TextButton.styleFrom(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Suggestion panel ─────────────────────────────────────────────────────────
 
 class _SuggestionPanel extends StatelessWidget {
   const _SuggestionPanel({
@@ -832,42 +981,48 @@ class _SuggestionPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+    return Material(
+      elevation: 4,
+      borderRadius: BorderRadius.circular(AppConstants.radiusLg),
+      color: Theme.of(context).colorScheme.surface,
+      child: ClipRRect(
         borderRadius: BorderRadius.circular(AppConstants.radiusLg),
-      ),
-      child: loading
-          ? const Padding(
-              padding: EdgeInsets.all(AppConstants.spaceMd),
-              child: Row(
-                children: <Widget>[
-                  SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                  SizedBox(width: AppConstants.spaceSm),
-                  Text('Finding matching places...'),
-                ],
-              ),
-            )
-          : Column(
-              children: suggestions
-                  .map(
-                    (LocationSearchResult result) => ListTile(
-                      leading: const Icon(Icons.place_outlined),
-                      title: Text(result.label),
-                      subtitle: Text(result.asLatLng),
-                      onTap: () => onSelect(result),
+        child: loading
+            ? const Padding(
+                padding: EdgeInsets.all(AppConstants.spaceMd),
+                child: Row(
+                  children: <Widget>[
+                    SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
                     ),
-                  )
-                  .toList(),
-            ),
+                    SizedBox(width: AppConstants.spaceSm),
+                    Text('Finding matching places...'),
+                  ],
+                ),
+              )
+            : SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: suggestions
+                      .map(
+                        (LocationSearchResult result) => ListTile(
+                          leading: const Icon(Icons.place_outlined),
+                          title: Text(result.label),
+                          subtitle: Text(result.asLatLng),
+                          onTap: () => onSelect(result),
+                        ),
+                      )
+                      .toList(),
+                ),
+              ),
+      ),
     );
   }
 }
+
+// ─── Info / error banners ─────────────────────────────────────────────────────
 
 class _InfoBanner extends StatelessWidget {
   const _InfoBanner({required this.message});
@@ -876,16 +1031,17 @@ class _InfoBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(AppConstants.spaceMd),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.primaryContainer,
-        borderRadius: BorderRadius.circular(AppConstants.radiusMd),
-      ),
-      child: Text(
-        message,
-        style: TextStyle(
-          color: Theme.of(context).colorScheme.onPrimaryContainer,
+    return Material(
+      elevation: 2,
+      borderRadius: BorderRadius.circular(AppConstants.radiusMd),
+      color: Theme.of(context).colorScheme.primaryContainer,
+      child: Padding(
+        padding: const EdgeInsets.all(AppConstants.spaceMd),
+        child: Text(
+          message,
+          style: TextStyle(
+            color: Theme.of(context).colorScheme.onPrimaryContainer,
+          ),
         ),
       ),
     );
@@ -914,6 +1070,8 @@ class _ErrorBanner extends StatelessWidget {
     );
   }
 }
+
+// ─── Search result card ───────────────────────────────────────────────────────
 
 class _SearchResultCard extends StatelessWidget {
   const _SearchResultCard({required this.result});
@@ -990,8 +1148,8 @@ class _SearchResultCard extends StatelessWidget {
                   ),
                   if (result.driverRating != null)
                     Chip(
-                      avatar: const Icon(Icons.star, size: 14,
-                          color: Colors.amber),
+                      avatar: const Icon(Icons.star,
+                          size: 14, color: Colors.amber),
                       label: Text(result.driverRating!.toStringAsFixed(1)),
                       visualDensity: VisualDensity.compact,
                       padding: EdgeInsets.zero,
@@ -1000,7 +1158,6 @@ class _SearchResultCard extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 4),
-              // Pickup time info
               Row(
                 children: <Widget>[
                   const Icon(Icons.access_time, size: 14),
@@ -1015,7 +1172,7 @@ class _SearchResultCard extends StatelessWidget {
                 const SizedBox(height: 4),
                 Row(
                   children: <Widget>[
-                    const Icon(Icons.place_outlined, size: 14),
+                    const Icon(Icons.directions_walk, size: 14),
                     const SizedBox(width: 4),
                     Expanded(
                       child: Text(
@@ -1027,38 +1184,6 @@ class _SearchResultCard extends StatelessWidget {
                   ],
                 ),
               ],
-              if (result.vehicleLabel.isNotEmpty) ...<Widget>[
-                const SizedBox(height: 4),
-                Text(
-                  result.vehicleLabel,
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-              ],
-              const SizedBox(height: 4),
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton(
-                  onPressed: () => GoRouter.of(context).push(
-                    '/bookings/create',
-                    extra: <String, dynamic>{
-                      'routeId': result.routeId,
-                      'driverId': result.driverId,
-                      'pricePerSeat': result.pricePerSeat,
-                      'suggestedPickupName': result.suggestedPickupName,
-                      'suggestedPickupLat': result.suggestedPickupLat,
-                      'suggestedPickupLng': result.suggestedPickupLng,
-                      'estimatedPickupTime':
-                          result.estimatedPickupTime.toIso8601String(),
-                      'walkingDistanceToPickup':
-                          result.walkingDistanceToPickup,
-                      'walkingTimeToPickup': result.walkingTimeToPickup,
-                      'walkingDistanceFromDropoff':
-                          result.walkingDistanceFromDropoff,
-                    },
-                  ),
-                  child: const Text('Book'),
-                ),
-              ),
             ],
           ),
         ),

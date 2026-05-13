@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:google_polyline_algorithm/google_polyline_algorithm.dart';
@@ -36,10 +37,38 @@ class RouteDetailScreen extends ConsumerWidget {
   }
 }
 
-class _RouteDetailBody extends ConsumerWidget {
+class _RouteDetailBody extends ConsumerStatefulWidget {
   const _RouteDetailBody({required this.route});
 
   final RouteEntity route;
+
+  @override
+  ConsumerState<_RouteDetailBody> createState() => _RouteDetailBodyState();
+}
+
+class _RouteDetailBodyState extends ConsumerState<_RouteDetailBody> {
+  RouteEntity get route => widget.route;
+  Position? _myPosition;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_fetchMyPosition());
+  }
+
+  Future<void> _fetchMyPosition() async {
+    try {
+      final LocationPermission perm = await Geolocator.checkPermission();
+      if (perm == LocationPermission.denied ||
+          perm == LocationPermission.deniedForever) return;
+      final Position pos = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.low,
+      );
+      if (mounted) setState(() => _myPosition = pos);
+    } catch (_) {
+      // Location unavailable — no marker shown
+    }
+  }
 
   Set<Polyline> _buildPolylines() {
     if (route.encodedPolyline == null || route.encodedPolyline!.isEmpty) {
@@ -83,29 +112,36 @@ class _RouteDetailBody extends ConsumerWidget {
               BitmapDescriptor.hueOrange),
         ),
       ),
+      if (_myPosition != null)
+        Marker(
+          markerId: const MarkerId('me'),
+          position: LatLng(_myPosition!.latitude, _myPosition!.longitude),
+          infoWindow: const InfoWindow(title: 'You are here'),
+          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+        ),
     };
   }
 
   LatLngBounds _bounds() {
-    final double minLat =
-        <double>[route.originLat, route.destinationLat].reduce(
-            (double a, double b) => a < b ? a : b);
-    final double maxLat =
-        <double>[route.originLat, route.destinationLat].reduce(
-            (double a, double b) => a > b ? a : b);
-    final double minLng =
-        <double>[route.originLng, route.destinationLng].reduce(
-            (double a, double b) => a < b ? a : b);
-    final double maxLng =
-        <double>[route.originLng, route.destinationLng].reduce(
-            (double a, double b) => a > b ? a : b);
+    final List<double> lats = <double>[route.originLat, route.destinationLat];
+    final List<double> lngs = <double>[route.originLng, route.destinationLng];
+    if (_myPosition != null) {
+      lats.add(_myPosition!.latitude);
+      lngs.add(_myPosition!.longitude);
+    }
     return LatLngBounds(
-      southwest: LatLng(minLat - 0.01, minLng - 0.01),
-      northeast: LatLng(maxLat + 0.01, maxLng + 0.01),
+      southwest: LatLng(
+        lats.reduce((double a, double b) => a < b ? a : b) - 0.01,
+        lngs.reduce((double a, double b) => a < b ? a : b) - 0.01,
+      ),
+      northeast: LatLng(
+        lats.reduce((double a, double b) => a > b ? a : b) + 0.01,
+        lngs.reduce((double a, double b) => a > b ? a : b) + 0.01,
+      ),
     );
   }
 
-  Future<void> _confirmCancel(BuildContext context, WidgetRef ref) async {
+  Future<void> _confirmCancel(BuildContext context) async {
     final bool? confirmed = await showDialog<bool>(
       context: context,
       builder: (BuildContext ctx) => AlertDialog(
@@ -140,7 +176,7 @@ class _RouteDetailBody extends ConsumerWidget {
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final String? currentUserId = ref.watch(currentUserProvider)?.userId;
     final bool isOwnRoute = currentUserId != null && route.driverUserId == currentUserId;
     final String price =
@@ -239,7 +275,7 @@ class _RouteDetailBody extends ConsumerWidget {
           padding: const EdgeInsets.all(AppConstants.spaceLg),
           child: isOwnRoute
               ? OutlinedButton(
-                  onPressed: () => unawaited(_confirmCancel(context, ref)),
+                  onPressed: () => unawaited(_confirmCancel(context)),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: Theme.of(context).colorScheme.error,
                     side: BorderSide(
