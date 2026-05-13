@@ -11,30 +11,45 @@ class RouteRemoteDataSource {
   /// backend endpoint isn't available yet (no driver routes API surfaced).
   Future<List<RouteDto>> listMyRoutes() async {
     try {
-      final Response<dynamic> res =
-          await _dio.get<dynamic>('/api/v1/routes/mine');
-      final dynamic payload = res.data;
-      final List<dynamic> raw = payload is List<dynamic>
-          ? payload
-          : (payload is Map<String, dynamic> &&
-                  payload['routes'] is List<dynamic>)
-              ? payload['routes'] as List<dynamic>
-              : <dynamic>[];
-      return raw
-          .map((dynamic item) {
-            if (item is Map<String, dynamic>) return item;
-            if (item is Map) return Map<String, dynamic>.from(item);
-            return null;
-          })
-          .whereType<Map<String, dynamic>>()
-          .map(RouteDto.fromJson)
-          .toList();
+      final Response<dynamic> res = await _loadMyRoutesResponse();
+      return _parseRouteList(res.data);
     } on DioException catch (error) {
       if (error.response?.statusCode == 404) {
         return const <RouteDto>[];
       }
       rethrow;
     }
+  }
+
+  Future<Response<dynamic>> _loadMyRoutesResponse() async {
+    try {
+      return await _dio.get<dynamic>('/api/v1/routes/me');
+    } on DioException catch (error) {
+      if (error.response?.statusCode != 404) {
+        rethrow;
+      }
+    }
+
+    return _dio.get<dynamic>('/api/v1/routes/mine');
+  }
+
+  List<RouteDto> _parseRouteList(dynamic payload) {
+    final List<dynamic> raw = payload is List<dynamic>
+        ? payload
+        : (payload is Map<String, dynamic> &&
+                payload['routes'] is List<dynamic>)
+            ? payload['routes'] as List<dynamic>
+            : <dynamic>[];
+
+    return raw
+        .map((dynamic item) {
+          if (item is Map<String, dynamic>) return item;
+          if (item is Map) return Map<String, dynamic>.from(item);
+          return null;
+        })
+        .whereType<Map<String, dynamic>>()
+        .map(RouteDto.fromJson)
+        .toList();
   }
 
   Future<List<DriverVehicleOption>> listMyVehicles() async {

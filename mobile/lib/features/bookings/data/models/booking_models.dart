@@ -40,26 +40,30 @@ class BookingDto {
   final String? suggestedPickupName;
 
   factory BookingDto.fromJson(Map<String, dynamic> j) => BookingDto(
-        bookingId: (j['booking_id'] ?? j['id']) as String,
-        routeId: j['route_id'] as String,
+        bookingId: _readRequiredString(j, <String>['booking_id', 'id']),
+        routeId: _readRequiredString(j, <String>['route_id']),
         passengerUserId:
-            (j['passenger_user_id'] ?? j['passenger_id']) as String? ?? '',
+            _readString(j, <String>['passenger_user_id', 'passenger_id']) ?? '',
         seatCount: _toInt(j['seat_count'] ?? j['seats_booked']),
         totalPriceTzs: _toInt(j['total_price'] ?? j['total_price_tzs']),
-        status: j['status'] as String,
-        paymentStatus: j['payment_status'] as String? ?? 'pending',
-        createdAt: DateTime.parse(j['created_at'] as String),
-        driverId: j['driver_id'] as String?,
-        confirmationCode: j['confirmation_code'] as String?,
-        originName: j['origin_name'] as String?,
-        destinationName: j['destination_name'] as String?,
-        departureDatetime: j['departure_datetime'] != null
-            ? DateTime.parse(j['departure_datetime'] as String)
+        status: _readRequiredString(j, <String>['status']),
+        paymentStatus: _readString(j, <String>['payment_status']) ?? 'pending',
+        createdAt: DateTime.parse(
+          _readRequiredString(j, <String>['created_at']),
+        ),
+        driverId: _readString(j, <String>['driver_id']),
+        confirmationCode: _readString(j, <String>['confirmation_code']),
+        originName: _readString(j, <String>['origin_name']),
+        destinationName: _readString(j, <String>['destination_name']),
+        departureDatetime: _readString(j, <String>['departure_datetime']) != null
+            ? DateTime.parse(
+                _readRequiredString(j, <String>['departure_datetime']),
+              )
             : null,
-        driverName: j['driver_name'] as String?,
-        vehiclePlate: j['vehicle_plate'] as String?,
-        paymentId: j['payment_id'] as String?,
-        suggestedPickupName: j['suggested_pickup_name'] as String?,
+        driverName: _readString(j, <String>['driver_name']),
+        vehiclePlate: _readString(j, <String>['vehicle_plate']),
+        paymentId: _readString(j, <String>['payment_id']),
+        suggestedPickupName: _readString(j, <String>['suggested_pickup_name']),
       );
 
   BookingEntity toDomain() => BookingEntity(
@@ -186,12 +190,14 @@ class InitiatePaymentResponse {
 
   factory InitiatePaymentResponse.fromJson(Map<String, dynamic> j) =>
       InitiatePaymentResponse(
-        bookingId: (j['booking_id'] ?? j['bookingId']) as String,
-        paymentId: (j['payment_id'] ?? j['paymentId']) as String,
-        status: j['status'] as String,
-        ussdCode: (j['ussd_code'] ?? j['instructions']) as String?,
-        providerReference:
-            (j['provider_reference'] ?? j['providerReference']) as String?,
+        bookingId: _readRequiredString(j, <String>['booking_id', 'bookingId']),
+        paymentId: _readRequiredString(j, <String>['payment_id', 'paymentId']),
+        status: _readRequiredString(j, <String>['status']),
+        ussdCode: _readString(j, <String>['ussd_code', 'instructions']),
+        providerReference: _readString(
+          j,
+          <String>['provider_reference', 'providerReference'],
+        ),
       );
 }
 
@@ -200,4 +206,26 @@ int _toInt(dynamic value) {
   if (value is num) return value.toInt();
   if (value is String) return double.parse(value).round();
   throw FormatException('Invalid integer value: $value');
+}
+
+String _readRequiredString(Map<String, dynamic> json, List<String> keys) {
+  final String? value = _readString(json, keys);
+  if (value == null || value.isEmpty) {
+    throw FormatException('Missing required string for keys: $keys');
+  }
+  return value;
+}
+
+String? _readString(Map<String, dynamic> json, List<String> keys) {
+  for (final String key in keys) {
+    final dynamic value = json[key];
+    if (value == null) {
+      continue;
+    }
+    if (value is String) {
+      return value;
+    }
+    return value.toString();
+  }
+  return null;
 }
