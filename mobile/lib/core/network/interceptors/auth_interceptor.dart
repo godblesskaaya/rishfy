@@ -5,6 +5,8 @@ import '../../../features/auth/presentation/providers/auth_provider.dart';
 import '../../constants/app_logger.dart';
 import '../../storage/secure_storage.dart';
 
+const String kSkipAuthRefreshExtraKey = 'skipAuthRefresh';
+
 /// Attaches the JWT access token to every request.
 ///
 /// On 401 responses, attempts a single refresh using the stored refresh token,
@@ -44,6 +46,7 @@ class AuthInterceptor extends Interceptor {
     ErrorInterceptorHandler handler,
   ) async {
     if (err.response?.statusCode != 401 ||
+        err.requestOptions.extra[kSkipAuthRefreshExtraKey] == true ||
         _isPublicEndpoint(err.requestOptions.path)) {
       return handler.next(err);
     }

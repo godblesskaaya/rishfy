@@ -53,7 +53,10 @@ class RouteRemoteDataSource {
         : (payload is Map<String, dynamic> &&
                 payload['vehicles'] is List<dynamic>)
             ? payload['vehicles'] as List<dynamic>
-            : <dynamic>[];
+            : (payload is Map<String, dynamic> &&
+                    payload['data'] is List<dynamic>)
+                ? payload['data'] as List<dynamic>
+                : <dynamic>[];
 
     return raw
         .map((dynamic item) {
@@ -85,8 +88,7 @@ class RouteRemoteDataSource {
     final List<dynamic> data =
         res.data?['routes'] as List<dynamic>? ?? <dynamic>[];
     return data
-        .map((dynamic e) =>
-            SearchResultDto.fromJson(e as Map<String, dynamic>))
+        .map((dynamic e) => SearchResultDto.fromJson(e as Map<String, dynamic>))
         .toList();
   }
 
@@ -130,60 +132,16 @@ class RouteRemoteDataSource {
         'flexibility_minutes': req.flexibilityMinutes,
         if (req.waypoints.isNotEmpty) 'waypoints': req.waypoints,
         'recurrence': req.recurrence,
-        if (req.recurrenceDays.isNotEmpty) 'recurrence_days': req.recurrenceDays,
+        if (req.recurrenceDays.isNotEmpty)
+          'recurrence_days': req.recurrenceDays,
         if (req.recurrenceEndDate != null)
           'recurrence_end_date':
               '${req.recurrenceEndDate!.year.toString().padLeft(4, '0')}-'
-              '${req.recurrenceEndDate!.month.toString().padLeft(2, '0')}-'
-              '${req.recurrenceEndDate!.day.toString().padLeft(2, '0')}',
+                  '${req.recurrenceEndDate!.month.toString().padLeft(2, '0')}-'
+                  '${req.recurrenceEndDate!.day.toString().padLeft(2, '0')}',
       },
     );
     final dynamic payload = res.data?['route'] ?? res.data;
     return RouteDto.fromJson(payload as Map<String, dynamic>);
   }
-}
-
-class _LatLng {
-  const _LatLng(this.lat, this.lng);
-
-  final double lat;
-  final double lng;
-}
-
-final Map<String, _LatLng> _knownLocations = <String, _LatLng>{
-  'dar es salaam': _LatLng(-6.7924, 39.2083),
-  'dodoma': _LatLng(-6.1630, 35.7516),
-  'arusha': _LatLng(-3.3869, 36.6830),
-  'moshi': _LatLng(-3.3349, 37.3404),
-  'mwanza': _LatLng(-2.5164, 32.9175),
-  'mbeya': _LatLng(-8.9094, 33.4607),
-  'morogoro': _LatLng(-6.8235, 37.6611),
-  'tanga': _LatLng(-5.0696, 39.0988),
-  'zanzibar': _LatLng(-6.1659, 39.2026),
-  'iringa': _LatLng(-7.7669, 35.6970),
-  'tabora': _LatLng(-5.0200, 32.8000),
-  'kigoma': _LatLng(-4.8762, 29.6267),
-  'singida': _LatLng(-4.8163, 34.7436),
-  'songea': _LatLng(-10.6833, 35.6500),
-  'mtwara': _LatLng(-10.2667, 40.1833),
-};
-
-_LatLng _resolveLocation(String input) {
-  final String normalized = input.trim().toLowerCase();
-
-  final List<String> csvParts = normalized.split(',');
-  if (csvParts.length == 2) {
-    final double? lat = double.tryParse(csvParts[0].trim());
-    final double? lng = double.tryParse(csvParts[1].trim());
-    if (lat != null && lng != null) {
-      return _LatLng(lat, lng);
-    }
-  }
-
-  final _LatLng? mapped = _knownLocations[normalized];
-  if (mapped != null) return mapped;
-
-  throw const FormatException(
-    'Location not recognized. Use "lat,lng" or a common city name in Tanzania.',
-  );
 }

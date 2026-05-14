@@ -37,12 +37,16 @@ class _PostRouteScreenState extends ConsumerState<PostRouteScreen> {
   int _flexibilityMinutes = 15;
   bool _manualVehicleEntry = false;
   String? _selectedVehicleId;
-  GoogleMapController? _previewMapController;
+  String _mapTargetField = 'origin';
+  bool _reverseGeocodingMapPoint = false;
+  GoogleMapController? _planningMapController;
 
   LocationSearchResult? _originSelection;
   LocationSearchResult? _destinationSelection;
+  List<LocationSearchResult> _waypoints = const <LocationSearchResult>[];
 
-  List<LocationSearchResult> _originSuggestions = const <LocationSearchResult>[];
+  List<LocationSearchResult> _originSuggestions =
+      const <LocationSearchResult>[];
   List<LocationSearchResult> _destinationSuggestions =
       const <LocationSearchResult>[];
   bool _loadingOriginSuggestions = false;
@@ -62,39 +66,87 @@ class _PostRouteScreenState extends ConsumerState<PostRouteScreen> {
     _destinationCtrl.dispose();
     _priceCtrl.dispose();
     _manualVehicleIdCtrl.dispose();
-    _previewMapController?.dispose();
+    _planningMapController?.dispose();
     super.dispose();
   }
 
-  void _fitPreviewBounds(RoutePreviewDto preview) {
-    if (_previewMapController == null ||
+  void _resetPreview() {
+    ref.read(previewRouteProvider.notifier).reset();
+  }
+
+  List<Map<String, double>> get _waypointPayload => _waypoints
+      .map(
+        (LocationSearchResult point) => <String, double>{
+          'lat': point.latitude,
+          'lng': point.longitude,
+        },
+      )
+      .toList();
+
+  void _fitPlanningBounds() {
+    if (_planningMapController == null ||
         _originSelection == null ||
-        _destinationSelection == null) return;
+        _destinationSelection == null) {
+      return;
+    }
+    final List<LatLng> points = <LatLng>[
+      LatLng(_originSelection!.latitude, _originSelection!.longitude),
+      LatLng(
+        _destinationSelection!.latitude,
+        _destinationSelection!.longitude,
+      ),
+      ..._waypoints.map(
+        (LocationSearchResult p) => LatLng(p.latitude, p.longitude),
+      ),
+    ];
     final double minLat = <double>[
-      _originSelection!.latitude,
-      _destinationSelection!.latitude,
+      ...points.map((LatLng p) => p.latitude),
     ].reduce((double a, double b) => a < b ? a : b);
     final double maxLat = <double>[
-      _originSelection!.latitude,
-      _destinationSelection!.latitude,
+      ...points.map((LatLng p) => p.latitude),
     ].reduce((double a, double b) => a > b ? a : b);
     final double minLng = <double>[
-      _originSelection!.longitude,
-      _destinationSelection!.longitude,
+      ...points.map((LatLng p) => p.longitude),
     ].reduce((double a, double b) => a < b ? a : b);
     final double maxLng = <double>[
-      _originSelection!.longitude,
-      _destinationSelection!.longitude,
+      ...points.map((LatLng p) => p.longitude),
     ].reduce((double a, double b) => a > b ? a : b);
-    _previewMapController!.animateCamera(
-      CameraUpdate.newLatLngBounds(
-        LatLngBounds(
-          southwest: LatLng(minLat - 0.01, minLng - 0.01),
-          northeast: LatLng(maxLat + 0.01, maxLng + 0.01),
+    unawaited(
+      _planningMapController!.animateCamera(
+        CameraUpdate.newLatLngBounds(
+          LatLngBounds(
+            southwest: LatLng(minLat - 0.01, minLng - 0.01),
+            northeast: LatLng(maxLat + 0.01, maxLng + 0.01),
+          ),
+          40,
         ),
-        40,
       ),
     );
+  }
+
+  Future<void> _selectMapPoint(LatLng point) async {
+    await _selectMapPointForField(_mapTargetField, point);
+  }
+
+  Future<void> _selectMapPointForField(String field, LatLng point) async {
+    setState(() => _reverseGeocodingMapPoint = true);
+    final LocationSearchResult fallback = LocationSearchResult(
+      label:
+          '${point.latitude.toStringAsFixed(6)}, ${point.longitude.toStringAsFixed(6)}',
+      latitude: point.latitude,
+      longitude: point.longitude,
+    );
+    try {
+      final LocationSearchResult? resolved = await ref
+          .read(locationSearchDataSourceProvider)
+          .reverseGeocode(point.latitude, point.longitude);
+      if (!mounted) return;
+      _applySelection(field, resolved ?? fallback);
+    } finally {
+      if (mounted) {
+        setState(() => _reverseGeocodingMapPoint = false);
+      }
+    }
   }
 
   Future<void> _pickDepartureDate() async {
@@ -150,9 +202,13 @@ class _PostRouteScreenState extends ConsumerState<PostRouteScreen> {
       }
     });
     try {
-      final List<LocationSearchResult> results = await ref
-          .read(locationSearchDataSourceProvider)
-          .geocodeAddress(trimmed);
+      final List<LocationSearchResult> results =
+          await ref.read(locationSearchDataSourceProvider).geocodeAddress(
+                trimmed,
+                proximity: field == 'destination'
+                    ? _originSelection
+                    : _destinationSelection,
+              );
       if (!mounted) return;
       setState(() {
         if (field == 'origin') {
@@ -183,20 +239,44 @@ class _PostRouteScreenState extends ConsumerState<PostRouteScreen> {
         _originSelection = result;
         _originCtrl.text = result.label;
         _originSuggestions = const <LocationSearchResult>[];
-      } else {
+        _mapTargetField = _destinationSelection == null ? 'destination' : field;
+      } else if (field == 'destination') {
         _destinationSelection = result;
         _destinationCtrl.text = result.label;
         _destinationSuggestions = const <LocationSearchResult>[];
+        _mapTargetField = _originSelection == null ? 'origin' : field;
+      } else if (_waypoints.length < 5) {
+        _waypoints = <LocationSearchResult>[..._waypoints, result];
       }
-      _previewMapController = null;
     });
-    ref.read(previewRouteProvider.notifier).reset();
+    _resetPreview();
+    final GoogleMapController? controller = _planningMapController;
+    if (controller != null) {
+      unawaited(
+        controller.animateCamera(
+          CameraUpdate.newLatLngZoom(
+            LatLng(result.latitude, result.longitude),
+            14,
+          ),
+        ),
+      );
+    }
     // Auto-trigger preview once both endpoints are known
     if (_originSelection != null && _destinationSelection != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) unawaited(_preview());
       });
     }
+  }
+
+  void _removeWaypoint(int index) {
+    setState(() {
+      _waypoints = <LocationSearchResult>[
+        ..._waypoints.take(index),
+        ..._waypoints.skip(index + 1),
+      ];
+    });
+    _resetPreview();
   }
 
   Future<void> _preview() async {
@@ -219,8 +299,15 @@ class _PostRouteScreenState extends ConsumerState<PostRouteScreen> {
             destinationLat: _destinationSelection!.latitude,
             destinationLng: _destinationSelection!.longitude,
             flexibilityMinutes: _flexibilityMinutes,
+            waypoints: _waypointPayload,
           ),
         );
+
+    if (mounted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _fitPlanningBounds();
+      });
+    }
   }
 
   Future<void> _submit(List<DriverVehicleOption> vehicleOptions) async {
@@ -268,6 +355,7 @@ class _PostRouteScreenState extends ConsumerState<PostRouteScreen> {
             pricePerSeat: price,
             departureTime: departure,
             flexibilityMinutes: _flexibilityMinutes,
+            waypoints: _waypointPayload,
           ),
         );
 
@@ -296,6 +384,20 @@ class _PostRouteScreenState extends ConsumerState<PostRouteScreen> {
     final bool isSubmitting = createState.status == CreateRouteStatus.loading;
     final bool isPreviewing = previewState.status == PreviewRouteStatus.loading;
     final bool hasPreview = previewState.status == PreviewRouteStatus.success;
+    DriverVehicleOption? selectedVehicle;
+    if (vehicleOptions.isNotEmpty) {
+      final String selectedVehicleId =
+          _selectedVehicleId ?? vehicleOptions.first.id;
+      for (final DriverVehicleOption vehicle in vehicleOptions) {
+        if (vehicle.id == selectedVehicleId) {
+          selectedVehicle = vehicle;
+          break;
+        }
+      }
+    }
+    final int maxSeats = selectedVehicle?.capacity == null
+        ? 4
+        : selectedVehicle!.capacity!.clamp(1, 4).toInt();
 
     return Scaffold(
       appBar: AppBar(title: const Text('Post a route')),
@@ -306,6 +408,37 @@ class _PostRouteScreenState extends ConsumerState<PostRouteScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
+              _RoutePlanningMapCard(
+                origin: _originSelection,
+                destination: _destinationSelection,
+                waypoints: _waypoints,
+                preview: previewState.preview,
+                targetField: _mapTargetField,
+                reverseGeocoding: _reverseGeocodingMapPoint,
+                onMapCreated: (GoogleMapController controller) {
+                  _planningMapController = controller;
+                  unawaited(
+                    Future<void>.delayed(
+                      const Duration(milliseconds: 300),
+                      _fitPlanningBounds,
+                    ),
+                  );
+                },
+                onTargetChanged: (String field) {
+                  setState(() => _mapTargetField = field);
+                },
+                onPickPoint: _selectMapPoint,
+                onPickFieldPoint: _selectMapPointForField,
+              ),
+              const SizedBox(height: 16),
+
+              if (_waypoints.isNotEmpty) ...<Widget>[
+                _WaypointList(
+                  waypoints: _waypoints,
+                  onRemove: _removeWaypoint,
+                ),
+                const SizedBox(height: 16),
+              ],
               // ── Origin ──────────────────────────────────────────────────
               TextFormField(
                 controller: _originCtrl,
@@ -322,9 +455,9 @@ class _PostRouteScreenState extends ConsumerState<PostRouteScreen> {
                 onChanged: (String v) {
                   if (_originSelection?.label != v.trim()) {
                     setState(() => _originSelection = null);
-                    ref.read(previewRouteProvider.notifier).reset();
+                    _resetPreview();
                   }
-                  _fetchSuggestions('origin', v);
+                  unawaited(_fetchSuggestions('origin', v));
                 },
                 validator: (String? value) {
                   if (value == null || value.trim().isEmpty) {
@@ -363,9 +496,9 @@ class _PostRouteScreenState extends ConsumerState<PostRouteScreen> {
                 onChanged: (String v) {
                   if (_destinationSelection?.label != v.trim()) {
                     setState(() => _destinationSelection = null);
-                    ref.read(previewRouteProvider.notifier).reset();
+                    _resetPreview();
                   }
-                  _fetchSuggestions('destination', v);
+                  unawaited(_fetchSuggestions('destination', v));
                 },
                 validator: (String? value) {
                   if (value == null || value.trim().isEmpty) {
@@ -435,7 +568,7 @@ class _PostRouteScreenState extends ConsumerState<PostRouteScreen> {
                         selected: _flexibilityMinutes == m,
                         onSelected: (_) {
                           setState(() => _flexibilityMinutes = m);
-                          ref.read(previewRouteProvider.notifier).reset();
+                          _resetPreview();
                         },
                       );
                     }).toList(),
@@ -458,7 +591,7 @@ class _PostRouteScreenState extends ConsumerState<PostRouteScreen> {
                   ),
                   Text('$_availableSeats'),
                   IconButton(
-                    onPressed: _availableSeats < 20
+                    onPressed: _availableSeats < maxSeats
                         ? () => setState(() => _availableSeats++)
                         : null,
                     icon: const Icon(Icons.add_circle_outline),
@@ -517,7 +650,7 @@ class _PostRouteScreenState extends ConsumerState<PostRouteScreen> {
                 )
               else
                 DropdownButtonFormField<String>(
-                  value: _selectedVehicleId,
+                  initialValue: _selectedVehicleId,
                   items: vehicleOptions
                       .map((DriverVehicleOption vehicle) =>
                           DropdownMenuItem<String>(
@@ -534,17 +667,34 @@ class _PostRouteScreenState extends ConsumerState<PostRouteScreen> {
                     border: OutlineInputBorder(),
                   ),
                   onChanged: (String? value) {
-                    setState(() => _selectedVehicleId = value);
+                    DriverVehicleOption? nextVehicle;
+                    for (final DriverVehicleOption vehicle in vehicleOptions) {
+                      if (vehicle.id == value) {
+                        nextVehicle = vehicle;
+                        break;
+                      }
+                    }
+                    final int nextMaxSeats = nextVehicle?.capacity == null
+                        ? 4
+                        : nextVehicle!.capacity!.clamp(1, 4).toInt();
+                    setState(() {
+                      _selectedVehicleId = value;
+                      if (_availableSeats > nextMaxSeats) {
+                        _availableSeats = nextMaxSeats;
+                      }
+                    });
                   },
                 ),
-              if (vehiclesAsync.isLoading && vehicleOptions.isEmpty) ...<Widget>[
+              if (vehiclesAsync.isLoading &&
+                  vehicleOptions.isEmpty) ...<Widget>[
                 const SizedBox(height: 8),
                 Text(
                   'Loading your vehicles. You can continue with manual UUID entry.',
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
               ],
-              if (vehicleOptions.isEmpty && !vehiclesAsync.isLoading) ...<Widget>[
+              if (vehicleOptions.isEmpty &&
+                  !vehiclesAsync.isLoading) ...<Widget>[
                 const SizedBox(height: 8),
                 Text(
                   'No vehicles found on your driver profile yet.',
@@ -555,8 +705,7 @@ class _PostRouteScreenState extends ConsumerState<PostRouteScreen> {
                 const SizedBox(height: 8),
                 Text(
                   'Vehicle list unavailable. Enter vehicle UUID manually.',
-                  style: TextStyle(
-                      color: Theme.of(context).colorScheme.error),
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
                 ),
               ],
               const SizedBox(height: 24),
@@ -566,20 +715,9 @@ class _PostRouteScreenState extends ConsumerState<PostRouteScreen> {
                 _ErrorCard(message: previewState.error!),
                 const SizedBox(height: 12),
               ],
-              if (hasPreview && _originSelection != null && _destinationSelection != null) ...<Widget>[
-                _RoutePreviewMapCard(
-                  origin: LatLng(_originSelection!.latitude, _originSelection!.longitude),
-                  destination: LatLng(_destinationSelection!.latitude, _destinationSelection!.longitude),
-                  preview: previewState.preview!,
-                  onMapCreated: (GoogleMapController c) {
-                    _previewMapController = c;
-                    Future<void>.delayed(
-                      const Duration(milliseconds: 300),
-                      () => _fitPreviewBounds(previewState.preview!),
-                    );
-                  },
-                ),
-                const SizedBox(height: 12),
+              if (hasPreview &&
+                  _originSelection != null &&
+                  _destinationSelection != null) ...<Widget>[
                 _PreviewCard(preview: previewState.preview!),
                 const SizedBox(height: 16),
               ],
@@ -604,7 +742,7 @@ class _PostRouteScreenState extends ConsumerState<PostRouteScreen> {
                   children: <Widget>[
                     OutlinedButton.icon(
                       onPressed: () {
-                        ref.read(previewRouteProvider.notifier).reset();
+                        _resetPreview();
                       },
                       icon: const Icon(Icons.edit_outlined),
                       label: const Text('Adjust route'),
@@ -639,21 +777,24 @@ class _SuggestionList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
+      constraints: const BoxConstraints(maxHeight: 280),
       decoration: BoxDecoration(
         border: Border.all(
           color: Theme.of(context).colorScheme.outlineVariant,
         ),
         borderRadius: BorderRadius.circular(AppConstants.radiusMd),
       ),
-      child: Column(
+      child: ListView(
+        shrinkWrap: true,
+        padding: EdgeInsets.zero,
         children: suggestions
-            .take(4)
             .map(
               (LocationSearchResult r) => ListTile(
                 dense: true,
                 leading: const Icon(Icons.place_outlined, size: 18),
-                title: Text(r.label,
-                    style: Theme.of(context).textTheme.bodySmall),
+                title:
+                    Text(r.label, style: Theme.of(context).textTheme.bodySmall),
+                subtitle: Text(r.asLatLng),
                 onTap: () => onSelect(r),
               ),
             )
@@ -701,35 +842,77 @@ class _PreviewCard extends StatelessWidget {
   }
 }
 
-class _RoutePreviewMapCard extends StatelessWidget {
-  const _RoutePreviewMapCard({
+class _RoutePlanningMapCard extends StatelessWidget {
+  const _RoutePlanningMapCard({
     required this.origin,
     required this.destination,
+    required this.waypoints,
     required this.preview,
+    required this.targetField,
+    required this.reverseGeocoding,
     required this.onMapCreated,
+    required this.onTargetChanged,
+    required this.onPickPoint,
+    required this.onPickFieldPoint,
   });
 
-  final LatLng origin;
-  final LatLng destination;
-  final RoutePreviewDto preview;
+  final LocationSearchResult? origin;
+  final LocationSearchResult? destination;
+  final List<LocationSearchResult> waypoints;
+  final RoutePreviewDto? preview;
+  final String targetField;
+  final bool reverseGeocoding;
   final ValueChanged<GoogleMapController> onMapCreated;
+  final ValueChanged<String> onTargetChanged;
+  final ValueChanged<LatLng> onPickPoint;
+  final void Function(String field, LatLng point) onPickFieldPoint;
 
-  Set<Marker> get _markers => <Marker>{
+  Set<Marker> get _markers {
+    final Set<Marker> markers = <Marker>{};
+    if (origin != null) {
+      markers.add(
         Marker(
           markerId: const MarkerId('origin'),
-          position: origin,
-          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
+          position: LatLng(origin!.latitude, origin!.longitude),
+          icon:
+              BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
+          infoWindow: InfoWindow(title: origin!.label),
+          draggable: true,
+          onDragEnd: (LatLng point) => onPickFieldPoint('origin', point),
         ),
+      );
+    }
+    if (destination != null) {
+      markers.add(
         Marker(
           markerId: const MarkerId('destination'),
-          position: destination,
+          position: LatLng(destination!.latitude, destination!.longitude),
           icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+          infoWindow: InfoWindow(title: destination!.label),
+          draggable: true,
+          onDragEnd: (LatLng point) => onPickFieldPoint('destination', point),
         ),
-      };
+      );
+    }
+    for (int i = 0; i < waypoints.length; i++) {
+      final LocationSearchResult waypoint = waypoints[i];
+      markers.add(
+        Marker(
+          markerId: MarkerId('waypoint_$i'),
+          position: LatLng(waypoint.latitude, waypoint.longitude),
+          icon:
+              BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+          infoWindow: InfoWindow(title: waypoint.label),
+        ),
+      );
+    }
+    return markers;
+  }
 
   Set<Polyline> get _polylines {
-    if (preview.polyline.isEmpty) return <Polyline>{};
-    final List<List<num>> coords = decodePolyline(preview.polyline);
+    final String encoded = preview?.polyline ?? '';
+    if (encoded.isEmpty) return <Polyline>{};
+    final List<List<num>> coords = decodePolyline(encoded);
     if (coords.length < 2) return <Polyline>{};
     return <Polyline>{
       Polyline(
@@ -738,29 +921,164 @@ class _RoutePreviewMapCard extends StatelessWidget {
             .map((List<num> p) => LatLng(p[0].toDouble(), p[1].toDouble()))
             .toList(),
         color: Colors.blue,
-        width: 4,
+        width: 5,
       ),
     };
   }
 
   @override
   Widget build(BuildContext context) {
-    return ClipRRect(
+    final LatLng initialTarget = origin == null
+        ? const LatLng(-6.7924, 39.2083)
+        : LatLng(origin!.latitude, origin!.longitude);
+
+    return Material(
+      elevation: 2,
       borderRadius: BorderRadius.circular(AppConstants.radiusLg),
-      child: SizedBox(
-        height: 200,
-        child: GoogleMap(
-          initialCameraPosition: CameraPosition(target: origin, zoom: 10),
-          onMapCreated: onMapCreated,
-          markers: _markers,
-          polylines: _polylines,
-          zoomControlsEnabled: false,
-          scrollGesturesEnabled: false,
-          rotateGesturesEnabled: false,
-          tiltGesturesEnabled: false,
-          myLocationButtonEnabled: false,
-        ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        children: <Widget>[
+          SizedBox(
+            height: 320,
+            child: Stack(
+              children: <Widget>[
+                GoogleMap(
+                  initialCameraPosition: CameraPosition(
+                    target: initialTarget,
+                    zoom: origin == null ? 11 : 13,
+                  ),
+                  onMapCreated: onMapCreated,
+                  onTap: onPickPoint,
+                  markers: _markers,
+                  polylines: _polylines,
+                  zoomControlsEnabled: false,
+                  mapToolbarEnabled: false,
+                  myLocationButtonEnabled: false,
+                ),
+                Positioned(
+                  left: 12,
+                  right: 12,
+                  top: 12,
+                  child: Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: <Widget>[
+                      _TargetChip(
+                        label: 'Origin',
+                        selected: targetField == 'origin',
+                        color: Colors.green,
+                        onSelected: () => onTargetChanged('origin'),
+                      ),
+                      _TargetChip(
+                        label: 'Destination',
+                        selected: targetField == 'destination',
+                        color: Colors.red,
+                        onSelected: () => onTargetChanged('destination'),
+                      ),
+                      _TargetChip(
+                        label: 'Waypoint',
+                        selected: targetField == 'waypoint',
+                        color: Colors.blue,
+                        onSelected: () => onTargetChanged('waypoint'),
+                      ),
+                    ],
+                  ),
+                ),
+                if (reverseGeocoding)
+                  const Positioned(
+                    left: 16,
+                    right: 16,
+                    bottom: 16,
+                    child: LinearProgressIndicator(),
+                  ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(AppConstants.spaceMd),
+            child: Row(
+              children: <Widget>[
+                const Icon(Icons.touch_app_outlined, size: 18),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    targetField == 'waypoint'
+                        ? 'Tap the map to add up to five waypoints.'
+                        : 'Tap or drag markers to set the ${targetField == 'origin' ? 'origin' : 'destination'}.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
+    );
+  }
+}
+
+class _TargetChip extends StatelessWidget {
+  const _TargetChip({
+    required this.label,
+    required this.selected,
+    required this.color,
+    required this.onSelected,
+  });
+
+  final String label;
+  final bool selected;
+  final Color color;
+  final VoidCallback onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return ChoiceChip(
+      label: Text(label),
+      selected: selected,
+      selectedColor: color.withValues(alpha: 0.18),
+      onSelected: (_) => onSelected(),
+    );
+  }
+}
+
+class _WaypointList extends StatelessWidget {
+  const _WaypointList({
+    required this.waypoints,
+    required this.onRemove,
+  });
+
+  final List<LocationSearchResult> waypoints;
+  final ValueChanged<int> onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Text('Waypoints', style: Theme.of(context).textTheme.titleSmall),
+        const SizedBox(height: 8),
+        ...waypoints.indexed.map(
+          ((int, LocationSearchResult) entry) {
+            final int index = entry.$1;
+            final LocationSearchResult waypoint = entry.$2;
+            return Card(
+              margin: const EdgeInsets.only(bottom: 8),
+              child: ListTile(
+                dense: true,
+                leading: CircleAvatar(
+                  child: Text('${index + 1}'),
+                ),
+                title: Text(waypoint.label),
+                subtitle: Text(waypoint.asLatLng),
+                trailing: IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () => onRemove(index),
+                ),
+              ),
+            );
+          },
+        ),
+      ],
     );
   }
 }
@@ -780,8 +1098,7 @@ class _ErrorCard extends StatelessWidget {
       ),
       child: Text(
         message,
-        style:
-            TextStyle(color: Theme.of(context).colorScheme.onErrorContainer),
+        style: TextStyle(color: Theme.of(context).colorScheme.onErrorContainer),
       ),
     );
   }

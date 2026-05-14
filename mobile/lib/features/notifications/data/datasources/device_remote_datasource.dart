@@ -1,5 +1,7 @@
 import 'package:dio/dio.dart';
 
+import '../../../../core/network/interceptors/auth_interceptor.dart';
+
 class DeviceRemoteDataSource {
   DeviceRemoteDataSource(this._dio);
 
@@ -13,6 +15,9 @@ class DeviceRemoteDataSource {
   }) async {
     await _dio.post<void>(
       '/api/v1/devices',
+      options: Options(
+        extra: const <String, dynamic>{kSkipAuthRefreshExtraKey: true},
+      ),
       data: <String, dynamic>{
         'deviceId': deviceId,
         'fcmToken': fcmToken,
@@ -28,6 +33,9 @@ class DeviceRemoteDataSource {
   }) async {
     await _dio.patch<void>(
       '/api/v1/devices/$deviceId/token',
+      options: Options(
+        extra: const <String, dynamic>{kSkipAuthRefreshExtraKey: true},
+      ),
       data: <String, dynamic>{'fcmToken': fcmToken},
     );
   }

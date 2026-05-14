@@ -114,7 +114,11 @@ class SearchResultDto {
       walkingTimeToPickup: _toInt(j['walking_time_to_pickup']),
       suggestedPickupLat: _toNullableDouble(pickupPt?['lat']) ?? 0.0,
       suggestedPickupLng: _toNullableDouble(pickupPt?['lng']) ?? 0.0,
-      suggestedPickupName: _readString(j, <String>['suggested_pickup_name']),
+      suggestedPickupName: _readString(
+            pickupPt ?? <String, dynamic>{},
+            <String>['name'],
+          ) ??
+          _readString(j, <String>['suggested_pickup_name']),
       walkingDistanceFromDropoff: _toInt(j['walking_distance_from_dropoff']),
       walkingTimeFromDropoff: _toInt(j['walking_time_from_dropoff']),
       driverDepartureTime: _parseDateTime(j['driver_departure_time']),
@@ -203,10 +207,12 @@ class RouteDto {
 
     return RouteDto(
       routeId: _readRequiredString(j, <String>['route_id', 'id']),
-      driverUserId: _readRequiredString(j, <String>['driver_user_id', 'driver_id']),
+      driverUserId:
+          _readRequiredString(j, <String>['driver_user_id', 'driver_id']),
       driverName: _readString(j, <String>['driver_name']) ?? '',
       originName: _readString(j, <String>['origin_name']) ?? 'Origin',
-      destinationName: _readString(j, <String>['destination_name']) ?? 'Destination',
+      destinationName:
+          _readString(j, <String>['destination_name']) ?? 'Destination',
       originLat: _toDouble(j['origin_lat']),
       originLng: _toDouble(j['origin_lng']),
       destinationLat: _toDouble(j['destination_lat'] ?? j['dest_lat']),
@@ -355,6 +361,7 @@ class DriverVehicleOption {
     required this.model,
     required this.plateNumber,
     this.year,
+    this.capacity,
     this.isActive = false,
   });
 
@@ -363,12 +370,12 @@ class DriverVehicleOption {
   final String model;
   final String plateNumber;
   final int? year;
+  final int? capacity;
   final bool isActive;
 
   String get label {
     final String base = '$make $model'.trim();
-    final String withYear =
-        year != null && year! > 0 ? '$base ($year)' : base;
+    final String withYear = year != null && year! > 0 ? '$base ($year)' : base;
     final String normalized = withYear.trim().isEmpty ? 'Vehicle' : withYear;
     return '$normalized · $plateNumber';
   }
@@ -378,10 +385,14 @@ class DriverVehicleOption {
       id: (j['id'] ?? j['vehicle_id']) as String,
       make: (j['make'] as String?) ?? '',
       model: (j['model'] as String?) ?? '',
-      plateNumber: (j['plate_number'] ?? j['registration_number'] ?? '')
-          as String,
+      plateNumber:
+          (j['plate_number'] ?? j['registration_number'] ?? '') as String,
       year: _toNullableInt(j['year']),
-      isActive: (j['is_active'] as bool?) ?? false,
+      capacity: _toNullableInt(j['capacity']),
+      isActive: (j['is_active'] as bool?) ??
+          (j['active'] as bool?) ??
+          (j['is_active_vehicle'] as bool?) ??
+          false,
     );
   }
 }
