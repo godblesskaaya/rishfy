@@ -89,7 +89,10 @@ export class AuthService {
     }
 
     if (!user.isVerified) {
-      throw new AuthError(403, 'UNVERIFIED_ACCOUNT', 'Verify OTP before logging in');
+      throw new AuthError(403, 'UNVERIFIED_ACCOUNT', 'Account not verified. Complete OTP verification to continue.', {
+        userId: user.profileId,
+        contact: user.email ?? user.phoneNumber ?? '',
+      });
     }
 
     user.failedLoginAttempts = 0;
