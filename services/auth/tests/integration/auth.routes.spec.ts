@@ -154,6 +154,7 @@ describe('auth routes', () => {
     expect(userRegisteredPublisher).toHaveBeenCalledTimes(1);
     expect(userRegisteredPublisher).toHaveBeenCalledWith({
       user_id: registered.user.id,
+      profile_id: registered.user.id,
       phone_number: '+255700000210',
       full_name: 'Integration Event',
       role: 'passenger',

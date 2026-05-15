@@ -25,6 +25,7 @@ export class InMemoryAuthRepository implements AuthRepository {
   private readonly users = new Map<string, AuthUser>();
   private readonly emailIndex = new Map<string, string>();
   private readonly phoneIndex = new Map<string, string>();
+  private readonly profileIdIndex = new Map<string, string>(); // profileId → internal id
   private readonly otps = new Map<string, OtpCode>();
   private readonly sessions = new Map<string, RefreshSession>();
 
@@ -46,6 +47,7 @@ export class InMemoryAuthRepository implements AuthRepository {
     };
 
     this.users.set(user.id, user);
+    this.profileIdIndex.set(user.profileId, user.id);
     if (user.email) this.emailIndex.set(user.email, user.id);
     if (user.phoneNumber) this.phoneIndex.set(user.phoneNumber, user.id);
     return structuredClone(user);
@@ -61,8 +63,10 @@ export class InMemoryAuthRepository implements AuthRepository {
     return id ? structuredClone(this.users.get(id) ?? null) : null;
   }
 
-  async findUserById(userId: string): Promise<AuthUser | null> {
-    return structuredClone(this.users.get(userId) ?? null);
+  async findUserById(profileId: string): Promise<AuthUser | null> {
+    // profileId is the client-facing UUID (same as pg-auth.repository WHERE profile_id = $1)
+    const internalId = this.profileIdIndex.get(profileId);
+    return internalId ? structuredClone(this.users.get(internalId) ?? null) : null;
   }
 
   async updateUser(user: AuthUser): Promise<AuthUser> {

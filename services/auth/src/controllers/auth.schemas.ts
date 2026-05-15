@@ -3,10 +3,13 @@ import { z } from 'zod';
 const phoneRegex = /^\+?[1-9]\d{7,14}$/;
 
 export const registerSchema = z.object({
-  email: z.string().email(),
+  email: z.string().email().optional(),
   phoneNumber: z.string().regex(phoneRegex).optional(),
   password: z.string().min(8),
   fullName: z.string().min(2).max(120).optional(),
+}).refine((d) => d.email || d.phoneNumber, {
+  message: 'At least one of email or phone number is required',
+  path: ['email'],
 });
 
 export const verifyOtpSchema = z.object({

@@ -20,6 +20,7 @@ describe('AuthService', () => {
     expect(userRegisteredPublisher).toHaveBeenCalledTimes(1);
     expect(userRegisteredPublisher).toHaveBeenCalledWith({
       user_id: registered.user.id,
+      profile_id: registered.user.id,
       phone_number: '+255700000111',
       full_name: 'Event Once',
       role: 'passenger',

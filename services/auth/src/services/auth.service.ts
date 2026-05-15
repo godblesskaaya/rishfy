@@ -244,7 +244,7 @@ export class AuthService {
 
     try {
       await this.deps.userRegisteredPublisher({
-        user_id: user.id,
+        user_id: user.profileId,
         profile_id: user.profileId,
         phone_number: user.phoneNumber ?? '',
         full_name: user.fullName ?? 'Rishfy User',
