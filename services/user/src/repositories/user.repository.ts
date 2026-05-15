@@ -175,12 +175,43 @@ export class UserRepository {
     latra_permit_number?: string;
   }): Promise<DriverProfileRow> {
     const { rows } = await this.pool.query<DriverProfileRow>(
-      `INSERT INTO driver_profiles (user_id, license_number, license_expiry, latra_permit_number)
-       VALUES ($1, $2, $3, $4)
+      `INSERT INTO driver_profiles (user_id, license_number, license_expiry, latra_permit_number, is_verified, verified_at)
+       VALUES ($1, $2, $3, $4, true, now())
        RETURNING *`,
       [data.user_id, data.license_number, data.license_expiry, data.latra_permit_number ?? null],
     );
     return rows[0]!;
+  }
+
+  async verifyDriverProfile(userId: string): Promise<DriverProfileRow | null> {
+    const { rows } = await this.pool.query<DriverProfileRow>(
+      `UPDATE driver_profiles SET is_verified = true, verified_at = now(), updated_at = now()
+       WHERE user_id = $1 RETURNING *`,
+      [userId],
+    );
+    return rows[0] ?? null;
+  }
+
+  async rejectDriverProfile(userId: string): Promise<DriverProfileRow | null> {
+    const { rows } = await this.pool.query<DriverProfileRow>(
+      `UPDATE driver_profiles SET is_verified = false, verified_at = null, updated_at = now()
+       WHERE user_id = $1 RETURNING *`,
+      [userId],
+    );
+    return rows[0] ?? null;
+  }
+
+  async listPendingDrivers(limit: number, offset: number): Promise<Array<DriverProfileRow & { user: UserRow }>> {
+    const { rows } = await this.pool.query<DriverProfileRow & { user: UserRow }>(
+      `SELECT dp.*, row_to_json(u.*) as user
+       FROM driver_profiles dp
+       JOIN users u ON u.id = dp.user_id
+       WHERE dp.is_verified = false
+       ORDER BY dp.created_at ASC
+       LIMIT $1 OFFSET $2`,
+      [limit, offset],
+    );
+    return rows;
   }
 
   // Vehicle -----------------------------------------------------------------

@@ -8,6 +8,7 @@ import { config } from './config.js';
 import { pgPool } from './db.js';
 import { logger } from './logger.js';
 import { userRoutes } from './controllers/user.routes.js';
+import { adminRoutes } from './controllers/admin.routes.js';
 import { UserService } from './services/user.service.js';
 
 interface BuildAppOptions {
@@ -42,6 +43,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
 
   const svc = new UserService(pgPool, options.userEventsProducer ?? null);
   await app.register(userRoutes, { prefix: '/api/v1/users', svc });
+  await app.register(adminRoutes, { prefix: '/api/v1/admin', svc });
 
   return app;
 }

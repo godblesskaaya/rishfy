@@ -143,6 +143,22 @@ export class UserService {
     return { user, driverProfile: profile };
   }
 
+  async listPendingDrivers(limit = 50, offset = 0) {
+    return this.repo.listPendingDrivers(limit, offset);
+  }
+
+  async approveDriverProfile(userId: string) {
+    const profile = await this.repo.verifyDriverProfile(userId);
+    if (!profile) throw new AppError('DRIVER_NOT_FOUND', 404);
+    return profile;
+  }
+
+  async rejectDriverProfile(userId: string) {
+    const profile = await this.repo.rejectDriverProfile(userId);
+    if (!profile) throw new AppError('DRIVER_NOT_FOUND', 404);
+    return profile;
+  }
+
   async getRepository() {
     return this.repo;
   }
