@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/errors/app_exception.dart';
@@ -9,6 +10,10 @@ import '../../domain/entities/route_entity.dart';
 
 String _errorMessage(Object e, String fallback) {
   if (e is AppException) return e.message;
+  // ErrorInterceptor stores the AppException in DioException.error
+  if (e is DioException && e.error is AppException) {
+    return (e.error! as AppException).message;
+  }
   return fallback;
 }
 
