@@ -46,6 +46,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           );
       if (!mounted) return;
       context.go('/home');
+    } on UnverifiedAccountException catch (e) {
+      if (!mounted) return;
+      context.push(
+        '/auth/otp',
+        extra: <String, String>{'userId': e.userId, 'contact': e.contact},
+      );
     } on AppException catch (e) {
       if (!mounted) return;
       setState(() => _error = e.message);

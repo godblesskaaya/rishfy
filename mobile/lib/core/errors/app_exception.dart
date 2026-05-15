@@ -105,6 +105,17 @@ class RateLimitException extends AppException {
       : super(code: 'RATE_LIMITED');
 }
 
+class UnverifiedAccountException extends AppException {
+  const UnverifiedAccountException({
+    required super.message,
+    required this.userId,
+    required this.contact,
+  }) : super(code: 'UNVERIFIED_ACCOUNT');
+
+  final String userId;
+  final String contact;
+}
+
 // ============================================================================
 // Business logic errors
 // ============================================================================

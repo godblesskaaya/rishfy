@@ -50,10 +50,12 @@ class ErrorInterceptor extends Interceptor {
     String message = 'Something went wrong';
     Map<String, dynamic>? metadata;
 
+    Map<String, dynamic>? details;
     if (data is Map<String, dynamic>) {
       code = data['error'] as String?;
       message = data['message'] as String? ?? message;
       metadata = data['metadata'] as Map<String, dynamic>?;
+      details = data['details'] as Map<String, dynamic>?;
     }
 
     switch (status) {
@@ -62,6 +64,13 @@ class ErrorInterceptor extends Interceptor {
       case 401:
         return UnauthorizedException(message: message);
       case 403:
+        if (code == 'UNVERIFIED_ACCOUNT') {
+          return UnverifiedAccountException(
+            message: message,
+            userId: details?['userId'] as String? ?? '',
+            contact: details?['contact'] as String? ?? '',
+          );
+        }
         return ForbiddenException(message: message);
       case 404:
         return NotFoundException(message: message);
