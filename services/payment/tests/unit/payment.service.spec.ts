@@ -24,7 +24,7 @@ vi.mock('../../src/config.js', () => ({
     KAFKA_BROKERS: 'localhost:9092',
     PAYMENT_PROVIDER: 'azampay',
     AZAMPAY_BASE_URL: 'https://sandbox.azampay.co.tz',
-    AZAMPAY_AUTH_URL: 'https://authenticator.sandbox.azampay.co.tz',
+    AZAMPAY_AUTH_URL: 'https://authenticator-sandbox.azampay.co.tz',
     AZAMPAY_APP_NAME: '',
     AZAMPAY_CLIENT_ID: '',
     AZAMPAY_CLIENT_SECRET: '',

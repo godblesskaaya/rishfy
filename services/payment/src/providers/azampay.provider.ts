@@ -1,4 +1,5 @@
 import { createHmac } from 'crypto';
+import { config } from '../config.js';
 import type {
   PaymentProvider,
   InitiatePaymentParams,
@@ -15,29 +16,37 @@ interface AzampayConfig {
   appName: string;
   clientId: string;
   clientSecret: string;
+  apiKey: string;
   callbackSecret: string;
 }
 
 interface AzampayTokenResponse {
-  accessToken: string;
-  expire: string;
+  data?: {
+    accessToken?: string;
+    expire?: string;
+  };
+  accessToken?: string;
+  expire?: string;
 }
 
-interface AzampayMNOPushResponse {
-  transactionId: string;
+interface AzampayMNOCheckoutResponse {
+  transactionId?: string;
+  reference?: string;
   message: string;
-  success: boolean;
+  success?: boolean;
 }
 
 interface AzampayCallback {
-  transactionId: string;
-  msisdn: string;
-  amount: string;
-  message: string;
-  utilityref: string;
-  operator: string;
-  reference: string;
-  success: string;
+  transactionId?: string;
+  msisdn?: string;
+  amount?: string;
+  message?: string;
+  utilityref?: string;
+  operator?: string;
+  reference?: string;
+  success?: string | boolean;
+  transactionstatus?: string;
+  transactionStatus?: string;
 }
 
 const MNO_MAP: Record<string, string> = {
@@ -69,21 +78,31 @@ export class AzampayProvider implements PaymentProvider {
     });
     if (!res.ok) throw new Error(`Azampay auth failed: ${res.status}`);
     const data = (await res.json()) as AzampayTokenResponse;
-    this.token = data.accessToken;
-    this.tokenExpiry = new Date(data.expire);
+    const accessToken = data.data?.accessToken ?? data.accessToken;
+    const expire = data.data?.expire ?? data.expire;
+    if (!accessToken || !expire) {
+      throw new Error(`Azampay auth response missing token fields: ${JSON.stringify(data)}`);
+    }
+    this.token = accessToken;
+    this.tokenExpiry = new Date(expire);
     return this.token;
   }
 
   async initiatePayment(params: InitiatePaymentParams): Promise<InitiatePaymentResult> {
     const token = await this.getToken();
     const operator = MNO_MAP[params.method] ?? 'Mpesa';
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    };
 
-    const res = await fetch(`${this.cfg.baseUrl}/azampay/mno/push`, {
+    if (this.cfg.apiKey) {
+      headers['X-API-Key'] = this.cfg.apiKey;
+    }
+
+    const res = await fetch(`${this.cfg.baseUrl}/azampay/mno/checkout`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
+      headers,
       body: JSON.stringify({
         accountNumber: params.payerPhone.replace(/^\+/, ''),
         amount: String(params.amountTzs),
@@ -102,16 +121,19 @@ export class AzampayProvider implements PaymentProvider {
       throw new Error(`Azampay push failed (${res.status}): ${text}`);
     }
 
-    const data = (await res.json()) as AzampayMNOPushResponse;
+    const data = (await res.json()) as AzampayMNOCheckoutResponse;
 
     return {
-      providerReference: data.transactionId ?? null,
+      providerReference: data.transactionId ?? data.reference ?? null,
       instructions: `Enter your ${operator} PIN to approve payment of TZS ${params.amountTzs.toLocaleString()}.`,
       expiresInSeconds: 120,
     };
   }
 
   verifyCallback(payload: CallbackPayload): boolean {
+    if (!payload.signature) {
+      return config.NODE_ENV !== 'production';
+    }
     const expected = createHmac('sha256', this.cfg.callbackSecret)
       .update(payload.rawBody)
       .digest('hex');
@@ -120,10 +142,11 @@ export class AzampayProvider implements PaymentProvider {
 
   parseCallback(payload: CallbackPayload): CallbackResult {
     const data = JSON.parse(payload.rawBody) as AzampayCallback;
-    const success = data.success === 'true' || data.success === '1';
+    const rawStatus = String(data.transactionStatus ?? data.transactionstatus ?? data.success ?? '').toLowerCase();
+    const success = rawStatus === 'true' || rawStatus === '1' || rawStatus === 'success' || rawStatus === 'successful';
     return {
       internalReference: data.utilityref ?? data.reference,
-      providerReference: data.transactionId,
+      providerReference: data.transactionId ?? data.reference ?? '',
       status: success ? 'completed' : 'failed',
       failureCode: success ? undefined : 'PROVIDER_DECLINED',
       failureMessage: success ? undefined : data.message,
