@@ -24,7 +24,7 @@ export interface BookingRow {
   total_price: string;
   platform_fee: string;
   driver_earnings: string;
-  status: 'pending' | 'confirmed' | 'declined' | 'driver_cancelled' | 'passenger_cancelled' | 'completed' | 'no_show';
+  status: 'pending' | 'confirmed' | 'in_progress' | 'declined' | 'driver_cancelled' | 'passenger_cancelled' | 'completed' | 'no_show';
   declined_reason: string | null;
   payment_status: 'unpaid' | 'paid' | 'refunded' | 'failed';
   payment_reference: string | null;
@@ -212,7 +212,7 @@ export class BookingRepository {
   async completeTrip(id: string): Promise<BookingRow | null> {
     const { rows } = await this.pool.query<BookingRow>(
       `UPDATE bookings SET status='completed', trip_completed_at=now(), completed_at=now(), updated_at=now()
-       WHERE id=$1 AND trip_started_at IS NOT NULL RETURNING *`,
+       WHERE id=$1 AND status='in_progress' RETURNING *`,
       [id],
     );
     return rows[0] ?? null;
