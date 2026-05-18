@@ -201,7 +201,9 @@ export class BookingRepository {
 
   async startTrip(id: string): Promise<BookingRow | null> {
     const { rows } = await this.pool.query<BookingRow>(
-      `UPDATE bookings SET trip_started_at=now(), updated_at=now() WHERE id=$1 AND status='confirmed' RETURNING *`,
+      `UPDATE bookings
+       SET status='in_progress', trip_started_at=now(), updated_at=now()
+       WHERE id=$1 AND status='confirmed' RETURNING *`,
       [id],
     );
     return rows[0] ?? null;
