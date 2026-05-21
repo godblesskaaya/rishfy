@@ -1,13 +1,21 @@
 import { BookingRepository } from '../repositories/booking.repository.js';
 import { reserveSeats, releaseSeats } from '../clients/route.grpc.client.js';
 import { refundPayment } from '../clients/payment.grpc.client.js';
+import {
+  completeTrackedTrip,
+  startTrackedTrip,
+} from '../clients/location.grpc.client.js';
 import { config } from '../config.js';
 import { logger } from '../logger.js';
+import { v4 as uuidv4 } from 'uuid';
 import {
   publishBookingCreated, publishBookingConfirmed, publishBookingCancelled,
   publishBookingCompleted, publishBookingExpired, publishTripStarted,
   publishTripCompleted, publishBookingRated, publishBookingEmergency,
-  publishBookingDeclined,
+  publishBookingDeclined, publishBookingJourneyStarted,
+  publishDriverArrivedPickup, publishPassengerBoarded, publishPassengerDroppedOff,
+  publishPassengerWalkingToDestination, publishBookingJourneyCompleted,
+  publishBookingNoShow,
 } from '../events/booking.events.js';
 import type { BookingRow } from '../repositories/booking.repository.js';
 
@@ -48,6 +56,22 @@ export interface CancelBookingResult {
 
 export class BookingService {
   constructor(private readonly repo: BookingRepository) {}
+
+  private async getBookingForDriverAction(bookingId: string, driverId: string): Promise<BookingRow> {
+    const booking = await this.repo.findById(bookingId);
+    if (!booking) throw Object.assign(new Error('Booking not found'), { code: 'NOT_FOUND' });
+    if (booking.driver_id !== driverId) throw Object.assign(new Error('Forbidden'), { code: 'FORBIDDEN' });
+    return booking;
+  }
+
+  private async getBookingForParticipantAction(bookingId: string, actorId: string): Promise<BookingRow> {
+    const booking = await this.repo.findById(bookingId);
+    if (!booking) throw Object.assign(new Error('Booking not found'), { code: 'NOT_FOUND' });
+    if (booking.driver_id !== actorId && booking.passenger_id !== actorId) {
+      throw Object.assign(new Error('Forbidden'), { code: 'FORBIDDEN' });
+    }
+    return booking;
+  }
 
   async createBooking(params: CreateBookingParams): Promise<BookingRow> {
     const totalPrice = params.pricePerSeat * params.seatsBooked;
@@ -121,6 +145,7 @@ export class BookingService {
   async confirmBooking(bookingId: string, paymentId: string): Promise<BookingRow> {
     const booking = await this.repo.confirm(bookingId, paymentId);
     await this.repo.appendEvent(bookingId, 'booking.confirmed', { paymentId });
+    await this.repo.appendEvent(bookingId, 'booking.journey_started', { paymentId, journeyState: booking.journey_state });
     await publishBookingConfirmed({
       bookingId: booking.id,
       routeId: booking.route_id,
@@ -128,6 +153,16 @@ export class BookingService {
       driverId: booking.driver_id,
       paymentId,
       confirmationCode: booking.confirmation_code ?? '',
+      timestamp: new Date().toISOString(),
+    });
+    await publishBookingJourneyStarted({
+      bookingId: booking.id,
+      routeId: booking.route_id,
+      passengerId: booking.passenger_id,
+      driverId: booking.driver_id,
+      tripId: booking.trip_id ?? '',
+      pickupName: booking.suggested_pickup_name ?? booking.pickup_name ?? '',
+      dropoffName: booking.dropoff_name ?? '',
       timestamp: new Date().toISOString(),
     });
     return booking;
@@ -229,32 +264,195 @@ export class BookingService {
   }
 
   async startTrip(bookingId: string, driverId: string): Promise<BookingRow> {
-    const booking = await this.repo.findById(bookingId);
-    if (!booking) throw Object.assign(new Error('Booking not found'), { code: 'NOT_FOUND' });
-    if (booking.driver_id !== driverId) throw Object.assign(new Error('Forbidden'), { code: 'FORBIDDEN' });
-    const updated = await this.repo.startTrip(bookingId);
-    if (!updated) throw Object.assign(new Error('Cannot start trip in current state'), { code: 'INVALID_STATE' });
-    await this.repo.appendEvent(bookingId, 'trip.started', { driverId });
-    await publishTripStarted({ bookingId, driverId, passengerId: updated.passenger_id, timestamp: new Date().toISOString() });
-    return updated;
+    return this.boardPassenger(bookingId, driverId);
   }
 
   async completeTrip(bookingId: string, driverId: string): Promise<BookingRow> {
-    const booking = await this.repo.findById(bookingId);
-    if (!booking) throw Object.assign(new Error('Booking not found'), { code: 'NOT_FOUND' });
-    if (booking.driver_id !== driverId) throw Object.assign(new Error('Forbidden'), { code: 'FORBIDDEN' });
-    const updated = await this.repo.completeTrip(bookingId);
+    const booking = await this.getBookingForDriverAction(bookingId, driverId);
+    const updated = await this.repo.completeLegacyTrip(bookingId);
     if (!updated) throw Object.assign(new Error('Cannot complete trip in current state'), { code: 'INVALID_STATE' });
-    await this.repo.appendEvent(bookingId, 'trip.completed', { driverId });
+
+    await this.repo.appendEvent(bookingId, 'passenger.dropped_off', { driverId, tripId: updated.trip_id ?? booking.trip_id ?? '' });
+    await this.repo.appendEvent(bookingId, 'passenger.walking_to_destination', { driverId, tripId: updated.trip_id ?? booking.trip_id ?? '' });
+    await this.repo.appendEvent(bookingId, 'booking.journey_completed', { actorId: driverId, completedBy: 'driver' });
+    await this.repo.appendEvent(bookingId, 'trip.completed', { driverId, tripId: updated.trip_id ?? booking.trip_id ?? '' });
+
+    const timestamp = new Date().toISOString();
+    await publishPassengerDroppedOff({
+      bookingId,
+      routeId: updated.route_id,
+      passengerId: updated.passenger_id,
+      driverId,
+      tripId: updated.trip_id ?? booking.trip_id ?? '',
+      timestamp,
+    });
+    await publishPassengerWalkingToDestination({
+      bookingId,
+      routeId: updated.route_id,
+      passengerId: updated.passenger_id,
+      driverId,
+      tripId: updated.trip_id ?? booking.trip_id ?? '',
+      timestamp,
+    });
     await publishTripCompleted({
       bookingId, driverId, passengerId: updated.passenger_id,
       driverEarnings: parseFloat(updated.driver_earnings),
-      timestamp: new Date().toISOString(),
+      timestamp,
+    });
+    await publishBookingJourneyCompleted({
+      bookingId,
+      routeId: updated.route_id,
+      passengerId: updated.passenger_id,
+      driverId,
+      tripId: updated.trip_id ?? booking.trip_id ?? '',
+      timestamp,
     });
     await publishBookingCompleted({
       bookingId, routeId: updated.route_id, passengerId: updated.passenger_id, driverId,
       totalPrice: parseFloat(updated.total_price), driverEarnings: parseFloat(updated.driver_earnings),
-      timestamp: new Date().toISOString(),
+      timestamp,
+    });
+    if (updated.trip_id ?? booking.trip_id) {
+      await completeTrackedTrip({
+        tripId: updated.trip_id ?? booking.trip_id ?? '',
+        endLat: updated.dropoff_lat ?? updated.pickup_lat ?? 0,
+        endLng: updated.dropoff_lng ?? updated.pickup_lng ?? 0,
+      });
+    }
+
+    return updated;
+  }
+
+  async arrivePickup(bookingId: string, driverId: string): Promise<BookingRow> {
+    await this.getBookingForDriverAction(bookingId, driverId);
+    const updated = await this.repo.markDriverArrived(bookingId);
+    if (!updated) throw Object.assign(new Error('Cannot mark arrival in current state'), { code: 'INVALID_STATE' });
+
+    const timestamp = new Date().toISOString();
+    await this.repo.appendEvent(bookingId, 'driver.arrived_pickup', { driverId, tripId: updated.trip_id ?? '', timestamp });
+    await publishDriverArrivedPickup({
+      bookingId,
+      routeId: updated.route_id,
+      passengerId: updated.passenger_id,
+      driverId,
+      tripId: updated.trip_id ?? '',
+      timestamp,
+    });
+    return updated;
+  }
+
+  async boardPassenger(bookingId: string, driverId: string): Promise<BookingRow> {
+    const booking = await this.getBookingForDriverAction(bookingId, driverId);
+    const tripId = booking.trip_id
+      ?? await startTrackedTrip({
+        bookingId,
+        routeId: booking.route_id,
+        driverUserId: driverId,
+        startLat: booking.pickup_lat ?? booking.dropoff_lat ?? 0,
+        startLng: booking.pickup_lng ?? booking.dropoff_lng ?? 0,
+      })
+      ?? uuidv4();
+    const updated = await this.repo.boardPassenger(bookingId, tripId);
+    if (!updated) throw Object.assign(new Error('Cannot board passenger in current state'), { code: 'INVALID_STATE' });
+
+    const timestamp = new Date().toISOString();
+    await this.repo.appendEvent(bookingId, 'passenger.boarded', { driverId, tripId, timestamp });
+    await this.repo.appendEvent(bookingId, 'trip.started', { driverId, tripId, timestamp });
+    await publishPassengerBoarded({
+      bookingId,
+      routeId: updated.route_id,
+      passengerId: updated.passenger_id,
+      driverId,
+      tripId,
+      timestamp,
+    });
+    await publishTripStarted({ bookingId, driverId, passengerId: updated.passenger_id, timestamp });
+    return updated;
+  }
+
+  async dropoffPassenger(bookingId: string, driverId: string): Promise<BookingRow> {
+    const booking = await this.getBookingForDriverAction(bookingId, driverId);
+    const updated = await this.repo.dropoffPassenger(bookingId);
+    if (!updated) throw Object.assign(new Error('Cannot drop off passenger in current state'), { code: 'INVALID_STATE' });
+
+    const tripId = updated.trip_id ?? booking.trip_id ?? '';
+    const timestamp = new Date().toISOString();
+    await this.repo.appendEvent(bookingId, 'passenger.dropped_off', { driverId, tripId, timestamp });
+    await this.repo.appendEvent(bookingId, 'passenger.walking_to_destination', { driverId, tripId, timestamp });
+    await this.repo.appendEvent(bookingId, 'trip.completed', { driverId, tripId, timestamp });
+    await publishPassengerDroppedOff({
+      bookingId,
+      routeId: updated.route_id,
+      passengerId: updated.passenger_id,
+      driverId,
+      tripId,
+      timestamp,
+    });
+    await publishPassengerWalkingToDestination({
+      bookingId,
+      routeId: updated.route_id,
+      passengerId: updated.passenger_id,
+      driverId,
+      tripId,
+      timestamp,
+    });
+    await publishTripCompleted({
+      bookingId, driverId, passengerId: updated.passenger_id,
+      driverEarnings: parseFloat(updated.driver_earnings),
+      timestamp,
+    });
+    if (tripId) {
+      await completeTrackedTrip({
+        tripId,
+        endLat: updated.dropoff_lat ?? updated.pickup_lat ?? 0,
+        endLng: updated.dropoff_lng ?? updated.pickup_lng ?? 0,
+      });
+    }
+    return updated;
+  }
+
+  async markNoShow(bookingId: string, driverId: string, reason: string): Promise<BookingRow> {
+    await this.getBookingForDriverAction(bookingId, driverId);
+    const updated = await this.repo.markNoShow(bookingId, reason);
+    if (!updated) throw Object.assign(new Error('Cannot mark no-show in current state'), { code: 'INVALID_STATE' });
+
+    const timestamp = new Date().toISOString();
+    await this.repo.appendEvent(bookingId, 'booking.no_show', { driverId, reason, timestamp });
+    await publishBookingNoShow({
+      bookingId,
+      routeId: updated.route_id,
+      passengerId: updated.passenger_id,
+      driverId,
+      tripId: updated.trip_id ?? '',
+      reason,
+      timestamp,
+    });
+    return updated;
+  }
+
+  async completeJourney(bookingId: string, actorId: string): Promise<BookingRow> {
+    const booking = await this.getBookingForParticipantAction(bookingId, actorId);
+    const updated = await this.repo.completeJourney(bookingId);
+    if (!updated) throw Object.assign(new Error('Cannot complete journey in current state'), { code: 'INVALID_STATE' });
+
+    const timestamp = new Date().toISOString();
+    await this.repo.appendEvent(bookingId, 'booking.journey_completed', { actorId, timestamp });
+    await publishBookingJourneyCompleted({
+      bookingId,
+      routeId: updated.route_id,
+      passengerId: updated.passenger_id,
+      driverId: updated.driver_id,
+      tripId: updated.trip_id ?? booking.trip_id ?? '',
+      timestamp,
+    });
+    await publishBookingCompleted({
+      bookingId,
+      routeId: updated.route_id,
+      passengerId: updated.passenger_id,
+      driverId: updated.driver_id,
+      totalPrice: parseFloat(updated.total_price),
+      driverEarnings: parseFloat(updated.driver_earnings),
+      timestamp,
     });
     return updated;
   }

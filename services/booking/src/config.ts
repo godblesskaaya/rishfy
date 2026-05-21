@@ -16,6 +16,7 @@ const configSchema = z.object({
 
   ROUTE_SERVICE_GRPC_URL: z.string().default('route-service:50053'),
   PAYMENT_SERVICE_GRPC_URL: z.string().default('payment-service:50055'),
+  LOCATION_SERVICE_GRPC_URL: z.string().default('location-service:50056'),
   BOOKING_EXPIRY_SECONDS: z.coerce.number().int().default(120),
   PLATFORM_FEE_PERCENT: z.coerce.number().default(15),
 });

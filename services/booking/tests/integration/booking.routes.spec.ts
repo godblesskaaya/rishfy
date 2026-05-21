@@ -13,6 +13,11 @@ const {
     declineBooking: vi.fn(),
     startTrip: vi.fn(),
     completeTrip: vi.fn(),
+    arrivePickup: vi.fn(),
+    boardPassenger: vi.fn(),
+    dropoffPassenger: vi.fn(),
+    markNoShow: vi.fn(),
+    completeJourney: vi.fn(),
     submitRating: vi.fn(),
     listMyBookings: vi.fn(),
     getBooking: vi.fn(),
@@ -200,5 +205,71 @@ describe('booking routes integration', () => {
       reason: 'SOS',
     });
     expect(serviceMock.triggerEmergency).toHaveBeenCalledWith('booking-2', 'passenger-2', 'SOS');
+  });
+
+  it('POST /bookings/:id/arrive-pickup returns 200 for the assigned driver', async () => {
+    serviceMock.arrivePickup.mockResolvedValue({ id: 'booking-1', journey_state: 'driver_arrived' });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/bookings/booking-1/arrive-pickup',
+      headers: { 'x-user-id': 'driver-1' },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(serviceMock.arrivePickup).toHaveBeenCalledWith('booking-1', 'driver-1');
+  });
+
+  it('POST /bookings/:id/board-passenger returns 200 and forwards to service', async () => {
+    serviceMock.boardPassenger.mockResolvedValue({ id: 'booking-1', journey_state: 'in_transit', trip_id: 'trip-1' });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/bookings/booking-1/board-passenger',
+      headers: { 'x-user-id': 'driver-1' },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(serviceMock.boardPassenger).toHaveBeenCalledWith('booking-1', 'driver-1');
+  });
+
+  it('POST /bookings/:id/dropoff-passenger returns 200 and forwards to service', async () => {
+    serviceMock.dropoffPassenger.mockResolvedValue({ id: 'booking-1', journey_state: 'walking_to_destination' });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/bookings/booking-1/dropoff-passenger',
+      headers: { 'x-user-id': 'driver-1' },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(serviceMock.dropoffPassenger).toHaveBeenCalledWith('booking-1', 'driver-1');
+  });
+
+  it('POST /bookings/:id/mark-no-show returns 200 with a reason payload', async () => {
+    serviceMock.markNoShow.mockResolvedValue({ id: 'booking-1', status: 'no_show', journey_state: 'no_show' });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/bookings/booking-1/mark-no-show',
+      headers: { 'x-user-id': 'driver-1' },
+      payload: { reason: 'PASSENGER_ABSENT' },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(serviceMock.markNoShow).toHaveBeenCalledWith('booking-1', 'driver-1', 'PASSENGER_ABSENT');
+  });
+
+  it('POST /bookings/:id/complete-journey returns 200 for a participant', async () => {
+    serviceMock.completeJourney.mockResolvedValue({ id: 'booking-1', status: 'completed', journey_state: 'completed' });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/bookings/booking-1/complete-journey',
+      headers: { 'x-user-id': 'passenger-1' },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(serviceMock.completeJourney).toHaveBeenCalledWith('booking-1', 'passenger-1');
   });
 });

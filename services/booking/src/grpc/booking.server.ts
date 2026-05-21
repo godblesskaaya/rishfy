@@ -28,6 +28,71 @@ const svc = new BookingService(repo);
 
 type Handler<Req, Res> = grpc.handleUnaryCall<Req, Res>;
 
+function toTimestamp(date: Date | null): Record<string, unknown> | null {
+  if (!date) return null;
+  return { seconds: String(Math.floor(date.getTime() / 1000)) };
+}
+
+function mapBookingStatus(status: BookingRow['status']): string {
+  switch (status) {
+    case 'pending':
+      return 'BOOKING_STATUS_PENDING';
+    case 'confirmed':
+      return 'BOOKING_STATUS_CONFIRMED';
+    case 'completed':
+      return 'BOOKING_STATUS_COMPLETED';
+    case 'no_show':
+      return 'BOOKING_STATUS_NO_SHOW';
+    default:
+      return 'BOOKING_STATUS_CANCELLED';
+  }
+}
+
+function mapTripStatus(booking: BookingRow): string {
+  switch (booking.journey_state) {
+    case 'boarded':
+      return 'TRIP_STATUS_STARTED';
+    case 'in_transit':
+    case 'dropped_off':
+    case 'walking_to_destination':
+      return 'TRIP_STATUS_IN_PROGRESS';
+    case 'completed':
+      return 'TRIP_STATUS_COMPLETED';
+    case 'cancelled':
+    case 'no_show':
+      return 'TRIP_STATUS_CANCELLED';
+    default:
+      return 'TRIP_STATUS_SCHEDULED';
+  }
+}
+
+function mapJourneyState(journeyState: BookingRow['journey_state']): string {
+  switch (journeyState) {
+    case 'confirmed':
+      return 'JOURNEY_STATE_CONFIRMED';
+    case 'driver_approaching':
+      return 'JOURNEY_STATE_DRIVER_APPROACHING';
+    case 'driver_arrived':
+      return 'JOURNEY_STATE_DRIVER_ARRIVED';
+    case 'boarded':
+      return 'JOURNEY_STATE_BOARDED';
+    case 'in_transit':
+      return 'JOURNEY_STATE_IN_TRANSIT';
+    case 'dropped_off':
+      return 'JOURNEY_STATE_DROPPED_OFF';
+    case 'walking_to_destination':
+      return 'JOURNEY_STATE_WALKING_TO_DESTINATION';
+    case 'completed':
+      return 'JOURNEY_STATE_COMPLETED';
+    case 'cancelled':
+      return 'JOURNEY_STATE_CANCELLED';
+    case 'no_show':
+      return 'JOURNEY_STATE_NO_SHOW';
+    default:
+      return 'JOURNEY_STATE_UNSPECIFIED';
+  }
+}
+
 function rowToProto(b: BookingRow): Record<string, unknown> {
   return {
     bookingId: b.id,
@@ -39,15 +104,25 @@ function rowToProto(b: BookingRow): Record<string, unknown> {
     totalAmount: { amountTzs: String(b.total_price) },
     driverEarnings: { amountTzs: String(b.driver_earnings) },
     platformFee: { amountTzs: String(b.platform_fee) },
-    status: (b.status ?? 'PENDING').toUpperCase(),
+    status: mapBookingStatus(b.status),
+    tripStatus: mapTripStatus(b),
+    journeyState: mapJourneyState(b.journey_state),
     pickupCoordinates: b.pickup_lat ? { latitude: b.pickup_lat, longitude: b.pickup_lng } : null,
     dropoffCoordinates: b.dropoff_lat ? { latitude: b.dropoff_lat, longitude: b.dropoff_lng } : null,
     passengerRating: b.passenger_rating ?? 0,
     driverRating: b.driver_rating ?? 0,
     paymentId: b.payment_id ?? '',
-    createdAt: b.created_at ? { seconds: String(Math.floor(b.created_at.getTime() / 1000)) } : null,
-    tripStartedAt: b.trip_started_at ? { seconds: String(Math.floor(b.trip_started_at.getTime() / 1000)) } : null,
-    tripCompletedAt: b.trip_completed_at ? { seconds: String(Math.floor(b.trip_completed_at.getTime() / 1000)) } : null,
+    tripId: b.trip_id ?? '',
+    createdAt: toTimestamp(b.created_at),
+    confirmedAt: toTimestamp(b.confirmed_at),
+    cancelledAt: toTimestamp(b.cancelled_at),
+    tripStartedAt: toTimestamp(b.trip_started_at),
+    tripCompletedAt: toTimestamp(b.trip_completed_at),
+    arrivedPickupAt: toTimestamp(b.arrived_pickup_at),
+    boardedAt: toTimestamp(b.boarded_at),
+    droppedOffAt: toTimestamp(b.dropped_off_at),
+    journeyCompletedAt: toTimestamp(b.journey_completed_at),
+    noShowAt: toTimestamp(b.no_show_at),
   };
 }
 
@@ -66,6 +141,11 @@ interface CancelReq { bookingId: string; cancellingUserId: string; reason: strin
 interface ConfirmReq { bookingId: string; paymentId: string }
 interface StartTripReq { bookingId: string; driverUserId: string; currentLocation: { latitude: number; longitude: number } }
 interface CompleteTripReq { bookingId: string; driverUserId: string }
+interface ArrivePickupReq { bookingId: string; driverUserId: string }
+interface BoardPassengerReq { bookingId: string; driverUserId: string }
+interface DropoffPassengerReq { bookingId: string; driverUserId: string }
+interface MarkNoShowReq { bookingId: string; driverUserId: string; reason: string }
+interface CompleteJourneyReq { bookingId: string; actorUserId: string }
 interface RatingReq { bookingId: string; raterUserId: string; rating: number; review: string }
 
 const createBooking: Handler<CreateBookingReq, unknown> = async (call, callback) => {
@@ -172,7 +252,7 @@ const startTrip: Handler<StartTripReq, unknown> = async (call, callback) => {
       callback({ code: grpc.status.FAILED_PRECONDITION, message: 'booking not in confirmable state' } as grpc.ServiceError);
       return;
     }
-    callback(null, { booking: rowToProto(booking), tripId: '' });
+    callback(null, { booking: rowToProto(booking), tripId: booking.trip_id ?? '' });
   } catch (err) {
     callback({ code: grpc.status.INTERNAL, message: String(err) } as grpc.ServiceError);
   }
@@ -189,6 +269,51 @@ const completeTrip: Handler<CompleteTripReq, unknown> = async (call, callback) =
       booking: rowToProto(booking),
       settlementAmount: { amountTzs: String(booking.driver_earnings) },
     });
+  } catch (err) {
+    callback({ code: grpc.status.INTERNAL, message: String(err) } as grpc.ServiceError);
+  }
+};
+
+const arrivePickup: Handler<ArrivePickupReq, unknown> = async (call, callback) => {
+  try {
+    const booking = await svc.arrivePickup(call.request.bookingId, call.request.driverUserId);
+    callback(null, { booking: rowToProto(booking) });
+  } catch (err) {
+    callback({ code: grpc.status.INTERNAL, message: String(err) } as grpc.ServiceError);
+  }
+};
+
+const boardPassenger: Handler<BoardPassengerReq, unknown> = async (call, callback) => {
+  try {
+    const booking = await svc.boardPassenger(call.request.bookingId, call.request.driverUserId);
+    callback(null, { booking: rowToProto(booking), tripId: booking.trip_id ?? '' });
+  } catch (err) {
+    callback({ code: grpc.status.INTERNAL, message: String(err) } as grpc.ServiceError);
+  }
+};
+
+const dropoffPassenger: Handler<DropoffPassengerReq, unknown> = async (call, callback) => {
+  try {
+    const booking = await svc.dropoffPassenger(call.request.bookingId, call.request.driverUserId);
+    callback(null, { booking: rowToProto(booking), tripId: booking.trip_id ?? '' });
+  } catch (err) {
+    callback({ code: grpc.status.INTERNAL, message: String(err) } as grpc.ServiceError);
+  }
+};
+
+const markNoShow: Handler<MarkNoShowReq, unknown> = async (call, callback) => {
+  try {
+    const booking = await svc.markNoShow(call.request.bookingId, call.request.driverUserId, call.request.reason);
+    callback(null, { booking: rowToProto(booking) });
+  } catch (err) {
+    callback({ code: grpc.status.INTERNAL, message: String(err) } as grpc.ServiceError);
+  }
+};
+
+const completeJourney: Handler<CompleteJourneyReq, unknown> = async (call, callback) => {
+  try {
+    const booking = await svc.completeJourney(call.request.bookingId, call.request.actorUserId);
+    callback(null, { booking: rowToProto(booking) });
   } catch (err) {
     callback({ code: grpc.status.INTERNAL, message: String(err) } as grpc.ServiceError);
   }
@@ -225,6 +350,11 @@ export function startGrpcServer(): grpc.Server {
     confirmBooking,
     startTrip,
     completeTrip,
+    arrivePickup,
+    boardPassenger,
+    dropoffPassenger,
+    markNoShow,
+    completeJourney,
     submitRating,
     getTripsForLATRAReport,
   });

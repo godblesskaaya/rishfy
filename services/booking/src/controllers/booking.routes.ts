@@ -156,9 +156,9 @@ export async function bookingRoutes(app: FastifyInstance): Promise<void> {
       return reply.send(booking);
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
-      if (code === 'NOT_FOUND') return reply.status(404).send({ error: 'NOT_FOUND' });
-      if (code === 'FORBIDDEN') return reply.status(403).send({ error: 'FORBIDDEN' });
-      return reply.status(409).send({ error: 'INVALID_STATE' });
+      if (code === 'NOT_FOUND') return reply.status(404).send({ error: 'NOT_FOUND', message: 'Booking not found' });
+      if (code === 'FORBIDDEN') return reply.status(403).send({ error: 'FORBIDDEN', message: 'Only the assigned driver can start this trip' });
+      return reply.status(409).send({ error: 'INVALID_STATE', message: 'Cannot start trip in current state' });
     }
   });
 
@@ -172,9 +172,90 @@ export async function bookingRoutes(app: FastifyInstance): Promise<void> {
       return reply.send(booking);
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
-      if (code === 'NOT_FOUND') return reply.status(404).send({ error: 'NOT_FOUND' });
-      if (code === 'FORBIDDEN') return reply.status(403).send({ error: 'FORBIDDEN' });
-      return reply.status(409).send({ error: 'INVALID_STATE' });
+      if (code === 'NOT_FOUND') return reply.status(404).send({ error: 'NOT_FOUND', message: 'Booking not found' });
+      if (code === 'FORBIDDEN') return reply.status(403).send({ error: 'FORBIDDEN', message: 'Only the assigned driver can complete this trip' });
+      return reply.status(409).send({ error: 'INVALID_STATE', message: 'Cannot complete trip in current state' });
+    }
+  });
+
+  // POST /api/v1/bookings/:id/arrive-pickup (driver only)
+  app.post('/api/v1/bookings/:id/arrive-pickup', async (req, reply) => {
+    const userId = req.headers['x-user-id'] as string;
+    if (!userId) return reply.status(401).send({ error: 'UNAUTHORIZED' });
+    const { id } = req.params as { id: string };
+    try {
+      const booking = await service.arrivePickup(id, userId);
+      return reply.send(booking);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === 'NOT_FOUND') return reply.status(404).send({ error: 'NOT_FOUND', message: 'Booking not found' });
+      if (code === 'FORBIDDEN') return reply.status(403).send({ error: 'FORBIDDEN', message: 'Only the assigned driver can mark arrival' });
+      return reply.status(409).send({ error: 'INVALID_STATE', message: 'Cannot mark pickup arrival in current state' });
+    }
+  });
+
+  // POST /api/v1/bookings/:id/board-passenger (driver only)
+  app.post('/api/v1/bookings/:id/board-passenger', async (req, reply) => {
+    const userId = req.headers['x-user-id'] as string;
+    if (!userId) return reply.status(401).send({ error: 'UNAUTHORIZED' });
+    const { id } = req.params as { id: string };
+    try {
+      const booking = await service.boardPassenger(id, userId);
+      return reply.send(booking);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === 'NOT_FOUND') return reply.status(404).send({ error: 'NOT_FOUND', message: 'Booking not found' });
+      if (code === 'FORBIDDEN') return reply.status(403).send({ error: 'FORBIDDEN', message: 'Only the assigned driver can board this passenger' });
+      return reply.status(409).send({ error: 'INVALID_STATE', message: 'Cannot board passenger in current state' });
+    }
+  });
+
+  // POST /api/v1/bookings/:id/dropoff-passenger (driver only)
+  app.post('/api/v1/bookings/:id/dropoff-passenger', async (req, reply) => {
+    const userId = req.headers['x-user-id'] as string;
+    if (!userId) return reply.status(401).send({ error: 'UNAUTHORIZED' });
+    const { id } = req.params as { id: string };
+    try {
+      const booking = await service.dropoffPassenger(id, userId);
+      return reply.send(booking);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === 'NOT_FOUND') return reply.status(404).send({ error: 'NOT_FOUND', message: 'Booking not found' });
+      if (code === 'FORBIDDEN') return reply.status(403).send({ error: 'FORBIDDEN', message: 'Only the assigned driver can drop off this passenger' });
+      return reply.status(409).send({ error: 'INVALID_STATE', message: 'Cannot drop off passenger in current state' });
+    }
+  });
+
+  // POST /api/v1/bookings/:id/mark-no-show (driver only)
+  app.post('/api/v1/bookings/:id/mark-no-show', async (req, reply) => {
+    const userId = req.headers['x-user-id'] as string;
+    if (!userId) return reply.status(401).send({ error: 'UNAUTHORIZED' });
+    const { id } = req.params as { id: string };
+    const { reason = 'NO_SHOW' } = (req.body as { reason?: string }) ?? {};
+    try {
+      const booking = await service.markNoShow(id, userId, reason);
+      return reply.send(booking);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === 'NOT_FOUND') return reply.status(404).send({ error: 'NOT_FOUND', message: 'Booking not found' });
+      if (code === 'FORBIDDEN') return reply.status(403).send({ error: 'FORBIDDEN', message: 'Only the assigned driver can mark a no-show' });
+      return reply.status(409).send({ error: 'INVALID_STATE', message: 'Cannot mark no-show in current state' });
+    }
+  });
+
+  // POST /api/v1/bookings/:id/complete-journey (driver or passenger)
+  app.post('/api/v1/bookings/:id/complete-journey', async (req, reply) => {
+    const userId = req.headers['x-user-id'] as string;
+    if (!userId) return reply.status(401).send({ error: 'UNAUTHORIZED' });
+    const { id } = req.params as { id: string };
+    try {
+      const booking = await service.completeJourney(id, userId);
+      return reply.send(booking);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === 'NOT_FOUND') return reply.status(404).send({ error: 'NOT_FOUND', message: 'Booking not found' });
+      if (code === 'FORBIDDEN') return reply.status(403).send({ error: 'FORBIDDEN', message: 'Only booking participants can complete this journey' });
+      return reply.status(409).send({ error: 'INVALID_STATE', message: 'Cannot complete journey in current state' });
     }
   });
 

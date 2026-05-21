@@ -46,12 +46,41 @@ service BookingService {
   // triggers driver earnings settlement.
   rpc CompleteTrip(CompleteTripRequest) returns (CompleteTripResponse);
 
+  // Driver marks arrival at the booking pickup point.
+  rpc ArrivePickup(ArrivePickupRequest) returns (ArrivePickupResponse);
+
+  // Driver confirms the passenger boarded and begins the in-vehicle leg.
+  rpc BoardPassenger(BoardPassengerRequest) returns (BoardPassengerResponse);
+
+  // Driver confirms the passenger has left the vehicle.
+  rpc DropoffPassenger(DropoffPassengerRequest) returns (DropoffPassengerResponse);
+
+  // Driver marks the booking as a no-show before boarding.
+  rpc MarkNoShow(MarkNoShowRequest) returns (MarkNoShowResponse);
+
+  // Passenger or driver closes the final walking leg after dropoff.
+  rpc CompleteJourney(CompleteJourneyRequest) returns (CompleteJourneyResponse);
+
   // Submit a rating for a completed booking (passenger or driver).
   rpc SubmitRating(SubmitRatingRequest) returns (SubmitRatingResponse);
 
   // LATRA compliance — get completed trips for reporting.
   // Only callable by service tokens with "latra:read" scope.
   rpc GetTripsForLATRAReport(GetTripsForLATRAReportRequest) returns (GetTripsForLATRAReportResponse);
+}
+
+enum JourneyState {
+  JOURNEY_STATE_UNSPECIFIED = 0;
+  JOURNEY_STATE_CONFIRMED = 1;
+  JOURNEY_STATE_DRIVER_APPROACHING = 2;
+  JOURNEY_STATE_DRIVER_ARRIVED = 3;
+  JOURNEY_STATE_BOARDED = 4;
+  JOURNEY_STATE_IN_TRANSIT = 5;
+  JOURNEY_STATE_DROPPED_OFF = 6;
+  JOURNEY_STATE_WALKING_TO_DESTINATION = 7;
+  JOURNEY_STATE_COMPLETED = 8;
+  JOURNEY_STATE_CANCELLED = 9;
+  JOURNEY_STATE_NO_SHOW = 10;
 }
 
 // -----------------------------------------------------------------------------
@@ -101,6 +130,12 @@ message Booking {
 
   string payment_id = 28;                   // Reference to payment-service record
   string trip_id = 29;                      // Reference to location-service trip
+  JourneyState journey_state = 30;
+  rishfy.common.Timestamp arrived_pickup_at = 31;
+  rishfy.common.Timestamp boarded_at = 32;
+  rishfy.common.Timestamp dropped_off_at = 33;
+  rishfy.common.Timestamp journey_completed_at = 34;
+  rishfy.common.Timestamp no_show_at = 35;
 }
 
 // -----------------------------------------------------------------------------
@@ -197,6 +232,46 @@ message CompleteTripResponse {
   Booking booking = 1;
   rishfy.common.Money settlement_amount = 2;
 }
+
+message ArrivePickupRequest {
+  string booking_id = 1;
+  string driver_user_id = 2;
+  rishfy.common.Coordinates current_location = 3;
+}
+message ArrivePickupResponse { Booking booking = 1; }
+
+message BoardPassengerRequest {
+  string booking_id = 1;
+  string driver_user_id = 2;
+  rishfy.common.Coordinates current_location = 3;
+}
+message BoardPassengerResponse {
+  Booking booking = 1;
+  string trip_id = 2;
+}
+
+message DropoffPassengerRequest {
+  string booking_id = 1;
+  string driver_user_id = 2;
+  rishfy.common.Coordinates current_location = 3;
+}
+message DropoffPassengerResponse {
+  Booking booking = 1;
+  string trip_id = 2;
+}
+
+message MarkNoShowRequest {
+  string booking_id = 1;
+  string driver_user_id = 2;
+  string reason = 3;
+}
+message MarkNoShowResponse { Booking booking = 1; }
+
+message CompleteJourneyRequest {
+  string booking_id = 1;
+  string actor_user_id = 2;
+}
+message CompleteJourneyResponse { Booking booking = 1; }
 
 message SubmitRatingRequest {
   string booking_id = 1;

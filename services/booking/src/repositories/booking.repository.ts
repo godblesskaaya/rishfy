@@ -1,6 +1,18 @@
 import type { Pool } from 'pg';
 import { generateConfirmationCode } from '../utils/confirmation-code.js';
 
+export type JourneyState =
+  | 'confirmed'
+  | 'driver_approaching'
+  | 'driver_arrived'
+  | 'boarded'
+  | 'in_transit'
+  | 'dropped_off'
+  | 'walking_to_destination'
+  | 'completed'
+  | 'cancelled'
+  | 'no_show';
+
 export interface BookingRow {
   id: string;
   route_id: string;
@@ -45,6 +57,13 @@ export interface BookingRow {
   driver_review: string | null;
   created_at: Date;
   updated_at: Date;
+  journey_state: JourneyState | null;
+  trip_id: string | null;
+  arrived_pickup_at: Date | null;
+  boarded_at: Date | null;
+  dropped_off_at: Date | null;
+  journey_completed_at: Date | null;
+  no_show_at: Date | null;
 }
 
 export class BookingRepository {
@@ -166,7 +185,7 @@ export class BookingRepository {
   async confirm(id: string, paymentId: string): Promise<BookingRow> {
     const { rows } = await this.pool.query<BookingRow>(
       `UPDATE bookings SET status='confirmed', payment_status='paid', payment_id=$2,
-       confirmed_at=now(), updated_at=now() WHERE id=$1 RETURNING *`,
+       confirmed_at=now(), journey_state='confirmed', updated_at=now() WHERE id=$1 RETURNING *`,
       [id, paymentId],
     );
     return rows[0]!;
@@ -175,7 +194,7 @@ export class BookingRepository {
   async cancelByPassenger(id: string, reason: string): Promise<BookingRow | null> {
     const { rows } = await this.pool.query<BookingRow>(
       `UPDATE bookings SET status='passenger_cancelled', cancellation_reason=$2,
-       cancelled_at=now(), updated_at=now()
+       cancelled_at=now(), journey_state='cancelled', updated_at=now()
        WHERE id=$1 AND status IN ('pending','confirmed') RETURNING *`,
       [id, reason],
     );
@@ -184,7 +203,7 @@ export class BookingRepository {
 
   async cancelByDriver(routeId: string): Promise<BookingRow[]> {
     const { rows } = await this.pool.query<BookingRow>(
-      `UPDATE bookings SET status='driver_cancelled', cancelled_at=now(), updated_at=now()
+      `UPDATE bookings SET status='driver_cancelled', cancelled_at=now(), journey_state='cancelled', updated_at=now()
        WHERE route_id=$1 AND status IN ('pending','confirmed') RETURNING *`,
       [routeId],
     );
@@ -194,26 +213,109 @@ export class BookingRepository {
   async markExpired(id: string): Promise<void> {
     await this.pool.query(
       `UPDATE bookings SET status='passenger_cancelled', cancellation_reason='EXPIRED',
-       cancelled_at=now(), updated_at=now() WHERE id=$1 AND status='pending'`,
+       cancelled_at=now(), journey_state='cancelled', updated_at=now() WHERE id=$1 AND status='pending'`,
       [id],
     );
   }
 
-  async startTrip(id: string): Promise<BookingRow | null> {
+  async markDriverArrived(id: string): Promise<BookingRow | null> {
     const { rows } = await this.pool.query<BookingRow>(
       `UPDATE bookings
-       SET status='in_progress', trip_started_at=now(), updated_at=now()
-       WHERE id=$1 AND status='confirmed' RETURNING *`,
+       SET journey_state='driver_arrived', arrived_pickup_at=COALESCE(arrived_pickup_at, now()), updated_at=now()
+       WHERE id=$1
+         AND status='confirmed'
+         AND (journey_state IS NULL OR journey_state IN ('confirmed', 'driver_approaching'))
+       RETURNING *`,
       [id],
     );
     return rows[0] ?? null;
   }
 
-  async completeTrip(id: string): Promise<BookingRow | null> {
+  async boardPassenger(id: string, tripId: string): Promise<BookingRow | null> {
     const { rows } = await this.pool.query<BookingRow>(
-      `UPDATE bookings SET status='completed', trip_completed_at=now(), completed_at=now(), updated_at=now()
-       WHERE id=$1 AND trip_started_at IS NOT NULL RETURNING *`,
+      `UPDATE bookings
+       SET journey_state='in_transit',
+           trip_id=COALESCE(trip_id, $2),
+           boarded_at=COALESCE(boarded_at, now()),
+           trip_started_at=COALESCE(trip_started_at, now()),
+           updated_at=now()
+       WHERE id=$1
+         AND status='confirmed'
+         AND (journey_state IS NULL OR journey_state IN ('confirmed', 'driver_approaching', 'driver_arrived'))
+       RETURNING *`,
+      [id, tripId],
+    );
+    return rows[0] ?? null;
+  }
+
+  async dropoffPassenger(id: string): Promise<BookingRow | null> {
+    const { rows } = await this.pool.query<BookingRow>(
+      `UPDATE bookings
+       SET journey_state='walking_to_destination',
+           dropped_off_at=COALESCE(dropped_off_at, now()),
+           trip_completed_at=COALESCE(trip_completed_at, now()),
+           updated_at=now()
+       WHERE id=$1
+         AND status='confirmed'
+         AND journey_state IN ('boarded', 'in_transit')
+       RETURNING *`,
       [id],
+    );
+    return rows[0] ?? null;
+  }
+
+  async completeJourney(id: string): Promise<BookingRow | null> {
+    const { rows } = await this.pool.query<BookingRow>(
+      `UPDATE bookings
+       SET status='completed',
+           journey_state='completed',
+           journey_completed_at=COALESCE(journey_completed_at, now()),
+           completed_at=COALESCE(completed_at, now()),
+           updated_at=now()
+       WHERE id=$1
+         AND (
+           (status='confirmed' AND journey_state IN ('walking_to_destination', 'dropped_off'))
+           OR (status='completed' AND journey_state='walking_to_destination')
+         )
+       RETURNING *`,
+      [id],
+    );
+    return rows[0] ?? null;
+  }
+
+  async completeLegacyTrip(id: string): Promise<BookingRow | null> {
+    const { rows } = await this.pool.query<BookingRow>(
+      `UPDATE bookings
+       SET status='completed',
+           journey_state='completed',
+           dropped_off_at=COALESCE(dropped_off_at, now()),
+           trip_completed_at=COALESCE(trip_completed_at, now()),
+           journey_completed_at=COALESCE(journey_completed_at, now()),
+           completed_at=COALESCE(completed_at, now()),
+           updated_at=now()
+       WHERE id=$1
+         AND status='confirmed'
+         AND journey_state IN ('boarded', 'in_transit', 'walking_to_destination', 'dropped_off')
+       RETURNING *`,
+      [id],
+    );
+    return rows[0] ?? null;
+  }
+
+  async markNoShow(id: string, reason: string): Promise<BookingRow | null> {
+    const { rows } = await this.pool.query<BookingRow>(
+      `UPDATE bookings
+       SET status='no_show',
+           journey_state='no_show',
+           no_show_at=COALESCE(no_show_at, now()),
+           cancelled_at=COALESCE(cancelled_at, now()),
+           cancellation_reason=$2,
+           updated_at=now()
+       WHERE id=$1
+         AND status='confirmed'
+         AND (journey_state IS NULL OR journey_state IN ('confirmed', 'driver_approaching', 'driver_arrived'))
+       RETURNING *`,
+      [id, reason],
     );
     return rows[0] ?? null;
   }
