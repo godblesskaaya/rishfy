@@ -67,22 +67,50 @@ export class LocationRepository {
     return rows[0]!;
   }
 
-  async startTrip(bookingId: string): Promise<TripRow | null> {
+  async getTripById(tripId: string): Promise<TripRow | null> {
     const { rows } = await this.pool.query<TripRow>(
-      `UPDATE trips SET status='in_progress', started_at=now(), updated_at=now()
-       WHERE booking_id=$1 AND status='pending' RETURNING *`,
+      'SELECT * FROM trips WHERE id=$1',
+      [tripId],
+    );
+    return rows[0] ?? null;
+  }
+
+  async getTripByBookingId(bookingId: string): Promise<TripRow | null> {
+    const { rows } = await this.pool.query<TripRow>(
+      'SELECT * FROM trips WHERE booking_id=$1',
       [bookingId],
     );
     return rows[0] ?? null;
   }
 
-  async completeTrip(bookingId: string, pathEncoded: string | null, distanceMeters: number): Promise<TripRow | null> {
+  async startTripById(tripId: string): Promise<TripRow | null> {
     const { rows } = await this.pool.query<TripRow>(
-      `UPDATE trips SET status='completed', completed_at=now(), path_encoded=$2, total_distance_meters=$3, updated_at=now()
-       WHERE booking_id=$1 AND status='in_progress' RETURNING *`,
-      [bookingId, pathEncoded, distanceMeters],
+      `UPDATE trips SET status='in_progress', started_at=now(), updated_at=now()
+       WHERE id=$1 AND status='pending' RETURNING *`,
+      [tripId],
     );
     return rows[0] ?? null;
+  }
+
+  async startTripByBookingId(bookingId: string): Promise<TripRow | null> {
+    const trip = await this.getTripByBookingId(bookingId);
+    if (!trip) return null;
+    return this.startTripById(trip.id);
+  }
+
+  async completeTripById(tripId: string, pathEncoded: string | null, distanceMeters: number): Promise<TripRow | null> {
+    const { rows } = await this.pool.query<TripRow>(
+      `UPDATE trips SET status='completed', completed_at=now(), path_encoded=$2, total_distance_meters=$3, updated_at=now()
+       WHERE id=$1 AND status='in_progress' RETURNING *`,
+      [tripId, pathEncoded, distanceMeters],
+    );
+    return rows[0] ?? null;
+  }
+
+  async completeTripByBookingId(bookingId: string, pathEncoded: string | null, distanceMeters: number): Promise<TripRow | null> {
+    const trip = await this.getTripByBookingId(bookingId);
+    if (!trip) return null;
+    return this.completeTripById(trip.id, pathEncoded, distanceMeters);
   }
 
   async getRecentPath(tripId: string, limit = 500): Promise<DriverLocationPoint[]> {

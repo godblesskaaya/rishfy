@@ -68,6 +68,7 @@ message Trip {
   rishfy.common.Timestamp end_time = 9;
   int32 distance_meters = 10;
   int32 duration_seconds = 11;
+  string passenger_user_id = 12;
 }
 
 // -----------------------------------------------------------------------------
@@ -111,6 +112,17 @@ message GetDriverLocationResponse {
   LocationPoint point = 1;
   bool is_stale = 2;
   int32 age_seconds = 3;
+  string driver_user_id = 4;
+  string trip_id = 5;
+  string booking_id = 6;
+  int32 eta_seconds = 7;
+  int32 distance_to_active_stop_meters = 8;
+  string proximity_state = 9;
+  string active_stop_type = 10;
+  string timestamp = 11;
+  double speed_kmh = 12;
+  double bearing_degrees = 13;
+  double accuracy_meters = 14;
 }
 
 message GetDriversLocationsRequest { repeated string driver_user_ids = 1; }
@@ -119,6 +131,10 @@ message GetDriversLocationsResponse {
     string driver_user_id = 1;
     LocationPoint point = 2;
     bool is_online = 3;
+    string trip_id = 4;
+    string booking_id = 5;
+    string proximity_state = 6;
+    string active_stop_type = 7;
   }
   repeated DriverLocation locations = 1;
 }

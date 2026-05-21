@@ -72,20 +72,20 @@ describe('LocationRepository.createTrip', () => {
   });
 });
 
-describe('LocationRepository.startTrip', () => {
-  it('returns null when booking not found or wrong state', async () => {
+describe('LocationRepository.startTripById', () => {
+  it('returns null when trip not found or wrong state', async () => {
     const pool = makePool([]);
     const repo = new LocationRepository(pool);
-    const result = await repo.startTrip('nonexistent');
+    const result = await repo.startTripById('nonexistent');
     expect(result).toBeNull();
   });
 });
 
-describe('LocationRepository.completeTrip', () => {
+describe('LocationRepository.completeTripById', () => {
   it('passes path_encoded and distance_meters to the query', async () => {
     const pool = makePool([]);
     const repo = new LocationRepository(pool);
-    await repo.completeTrip('booking-1', 'encodedPolyline==', 12500);
+    await repo.completeTripById('trip-1', 'encodedPolyline==', 12500);
     const [, params] = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0] as [string, unknown[]];
     expect(params).toContain('encodedPolyline==');
     expect(params).toContain(12500);

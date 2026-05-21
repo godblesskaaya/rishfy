@@ -52,7 +52,7 @@ export async function locationRoutes(app: FastifyInstance): Promise<void> {
   // POST /api/v1/trips/:bookingId/start
   app.post('/api/v1/trips/:bookingId/start', async (req, reply) => {
     const { bookingId } = req.params as { bookingId: string };
-    const trip = await repo.startTrip(bookingId);
+    const trip = await repo.startTripByBookingId(bookingId);
     if (!trip) return reply.status(409).send({ error: 'TRIP_NOT_FOUND_OR_WRONG_STATE' });
     return reply.send(trip);
   });
@@ -61,7 +61,7 @@ export async function locationRoutes(app: FastifyInstance): Promise<void> {
   app.post('/api/v1/trips/:bookingId/complete', async (req, reply) => {
     const { bookingId } = req.params as { bookingId: string };
     const { pathEncoded = null, distanceMeters = 0 } = req.body as { pathEncoded?: string; distanceMeters?: number };
-    const trip = await repo.completeTrip(bookingId, pathEncoded, distanceMeters);
+    const trip = await repo.completeTripByBookingId(bookingId, pathEncoded, distanceMeters);
     if (!trip) return reply.status(409).send({ error: 'TRIP_NOT_FOUND_OR_WRONG_STATE' });
     return reply.send(trip);
   });
