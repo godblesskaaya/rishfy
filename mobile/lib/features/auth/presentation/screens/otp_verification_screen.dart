@@ -28,10 +28,8 @@ class OtpVerificationScreen extends ConsumerStatefulWidget {
 class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
   static const int _length = AppConstants.otpLength;
 
-  final List<TextEditingController> _controllers =
-      List<TextEditingController>.generate(_length, (_) => TextEditingController());
-  final List<FocusNode> _focusNodes =
-      List<FocusNode>.generate(_length, (_) => FocusNode());
+  final TextEditingController _codeController = TextEditingController();
+  final FocusNode _codeFocusNode = FocusNode();
 
   bool _submitting = false;
   bool _resending = false;
@@ -43,23 +41,24 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
   void initState() {
     super.initState();
     _startResendCooldown();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _codeFocusNode.requestFocus();
+    });
   }
 
   @override
   void dispose() {
     _resendTimer?.cancel();
-    for (final c in _controllers) {
-      c.dispose();
-    }
-    for (final f in _focusNodes) {
-      f.dispose();
-    }
+    _codeController.dispose();
+    _codeFocusNode.dispose();
     super.dispose();
   }
 
   void _startResendCooldown() {
     _resendTimer?.cancel();
-    setState(() => _resendSecondsLeft = AppConstants.otpResendCooldown.inSeconds);
+    setState(
+      () => _resendSecondsLeft = AppConstants.otpResendCooldown.inSeconds,
+    );
     _resendTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
       if (_resendSecondsLeft <= 1) {
@@ -71,27 +70,31 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
     });
   }
 
-  String get _otpCode =>
-      _controllers.map((c) => c.text).join();
+  String get _otpCode => _codeController.text;
 
   void _fillCode(String code) {
-    final digits = code.replaceAll(RegExp(r'\D'), '');
-    for (int i = 0; i < _length; i++) {
-      _controllers[i].text = i < digits.length ? digits[i] : '';
-    }
-    if (digits.length >= _length) {
+    final String digits = code.replaceAll(RegExp(r'\D'), '');
+    final String truncated =
+        digits.length > _length ? digits.substring(0, _length) : digits;
+    _codeController.value = TextEditingValue(
+      text: truncated,
+      selection: TextSelection.collapsed(offset: truncated.length),
+    );
+
+    if (truncated.length >= _length) {
       FocusScope.of(context).unfocus();
       unawaited(_verify());
     } else {
-      final next = digits.length.clamp(0, _length - 1);
-      _focusNodes[next].requestFocus();
+      _codeFocusNode.requestFocus();
     }
     setState(() {});
   }
 
   Future<void> _resendCode() async {
     if (widget.userId.isEmpty) {
-      setState(() => _error = 'Missing user reference — please register again.');
+      setState(
+        () => _error = 'Missing user reference - please register again.',
+      );
       return;
     }
     setState(() {
@@ -99,7 +102,9 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
       _error = null;
     });
     try {
-      await ref.read(authControllerProvider.notifier).resendOtp(userId: widget.userId);
+      await ref
+          .read(authControllerProvider.notifier)
+          .resendOtp(userId: widget.userId);
       if (!mounted) return;
       _startResendCooldown();
       ScaffoldMessenger.of(context).showSnackBar(
@@ -118,7 +123,9 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
 
   Future<void> _verify() async {
     if (widget.userId.isEmpty) {
-      setState(() => _error = 'Missing verification details — please register again.');
+      setState(
+        () => _error = 'Missing verification details - please register again.',
+      );
       return;
     }
     if (_otpCode.length < _length) {
@@ -140,12 +147,9 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
       if (!mounted) return;
       setState(() {
         _error = e.message;
-        // clear boxes on wrong code so the user can retype
-        for (final c in _controllers) {
-          c.clear();
-        }
+        _codeController.clear();
       });
-      _focusNodes[0].requestFocus();
+      _codeFocusNode.requestFocus();
     } catch (_) {
       if (!mounted) return;
       setState(() => _error = 'Verification failed. Please try again.');
@@ -186,7 +190,9 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
                   children: <InlineSpan>[
                     const TextSpan(text: 'Enter the 6-digit code sent to '),
                     TextSpan(
-                      text: widget.contact.isNotEmpty ? widget.contact : 'your account',
+                      text: widget.contact.isNotEmpty
+                          ? widget.contact
+                          : 'your account',
                       style: TextStyle(
                         fontWeight: FontWeight.w600,
                         color: scheme.onSurface,
@@ -197,8 +203,8 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
               ),
               const SizedBox(height: 40),
               _OtpBoxRow(
-                controllers: _controllers,
-                focusNodes: _focusNodes,
+                controller: _codeController,
+                focusNode: _codeFocusNode,
                 onFill: _fillCode,
                 onChanged: () => setState(() {}),
               ),
@@ -247,127 +253,101 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
   }
 }
 
-// ── OTP box row ────────────────────────────────────────────────────────────────
-
 class _OtpBoxRow extends StatelessWidget {
   const _OtpBoxRow({
-    required this.controllers,
-    required this.focusNodes,
+    required this.controller,
+    required this.focusNode,
     required this.onFill,
     required this.onChanged,
   });
 
-  final List<TextEditingController> controllers;
-  final List<FocusNode> focusNodes;
+  final TextEditingController controller;
+  final FocusNode focusNode;
   final void Function(String code) onFill;
   final VoidCallback onChanged;
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: List<Widget>.generate(controllers.length, (int i) {
-        return _OtpBox(
-          controller: controllers[i],
-          focusNode: focusNodes[i],
-          onChanged: (String v) {
-            if (v.length > 1) {
-              // Paste — fill from first box regardless of which box received it
-              onFill(v);
-              return;
-            }
-            if (v.isNotEmpty && i < controllers.length - 1) {
-              focusNodes[i + 1].requestFocus();
-            }
-            onChanged();
-            // Auto-submit on last digit
-            final String code = controllers.map((c) => c.text).join();
-            if (code.length == controllers.length) {
-              FocusScope.of(context).unfocus();
-            }
-          },
-          onBackspace: () {
-            if (controllers[i].text.isEmpty && i > 0) {
-              controllers[i - 1].clear();
-              focusNodes[i - 1].requestFocus();
-              onChanged();
-            }
-          },
-        );
-      }),
-    );
-  }
-}
-
-class _OtpBox extends StatelessWidget {
-  const _OtpBox({
-    required this.controller,
-    required this.focusNode,
-    required this.onChanged,
-    required this.onBackspace,
-  });
-
-  final TextEditingController controller;
-  final FocusNode focusNode;
-  final void Function(String) onChanged;
-  final VoidCallback onBackspace;
-
-  @override
-  Widget build(BuildContext context) {
     final ColorScheme scheme = Theme.of(context).colorScheme;
-    final bool filled = controller.text.isNotEmpty;
+    final String code = controller.text;
 
-    return SizedBox(
-      width: 48,
-      height: 58,
-      child: RawKeyboardListener(
-        focusNode: FocusNode(),
-        onKey: (RawKeyEvent event) {
-          if (event is RawKeyDownEvent &&
-              event.logicalKey == LogicalKeyboardKey.backspace &&
-              controller.text.isEmpty) {
-            onBackspace();
-          }
-        },
-        child: TextField(
-          controller: controller,
-          focusNode: focusNode,
-          textAlign: TextAlign.center,
-          keyboardType: TextInputType.number,
-          maxLength: 6,
-          style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                fontWeight: FontWeight.w700,
-                color: scheme.onSurface,
+    return GestureDetector(
+      onTap: focusNode.requestFocus,
+      child: Stack(
+        alignment: Alignment.center,
+        children: <Widget>[
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: List<Widget>.generate(AppConstants.otpLength, (int i) {
+              final String digit = i < code.length ? code[i] : '';
+              final bool filled = digit.isNotEmpty;
+              final bool focused = focusNode.hasFocus && i == code.length;
+
+              return AnimatedContainer(
+                duration: const Duration(milliseconds: 140),
+                width: 48,
+                height: 58,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: filled
+                      ? scheme.primaryContainer.withValues(alpha: 0.35)
+                      : scheme.surfaceContainerHighest.withValues(alpha: 0.5),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: filled || focused
+                        ? scheme.primary
+                        : scheme.outlineVariant,
+                    width: filled || focused ? 2 : 1,
+                  ),
+                ),
+                child: Text(
+                  digit,
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: scheme.onSurface,
+                      ),
+                ),
+              );
+            }),
+          ),
+          Positioned.fill(
+            child: Opacity(
+              opacity: 0.01,
+              child: TextField(
+                controller: controller,
+                focusNode: focusNode,
+                autofocus: true,
+                autocorrect: false,
+                enableSuggestions: false,
+                keyboardType: TextInputType.number,
+                maxLength: AppConstants.otpLength,
+                inputFormatters: <TextInputFormatter>[
+                  FilteringTextInputFormatter.digitsOnly,
+                  LengthLimitingTextInputFormatter(AppConstants.otpLength),
+                ],
+                decoration: const InputDecoration(
+                  counterText: '',
+                  border: InputBorder.none,
+                ),
+                onChanged: (String value) {
+                  final String digits = value.replaceAll(RegExp(r'\D'), '');
+                  if (digits != value) {
+                    onFill(digits);
+                    return;
+                  }
+                  onChanged();
+                  if (digits.length == AppConstants.otpLength) {
+                    FocusScope.of(context).unfocus();
+                  }
+                },
               ),
-          inputFormatters: <TextInputFormatter>[
-            FilteringTextInputFormatter.digitsOnly,
-          ],
-          decoration: InputDecoration(
-            counterText: '',
-            filled: true,
-            fillColor: filled
-                ? scheme.primaryContainer.withValues(alpha: 0.35)
-                : scheme.surfaceContainerHighest.withValues(alpha: 0.5),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(
-                color: filled ? scheme.primary : scheme.outlineVariant,
-                width: filled ? 2 : 1,
-              ),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: scheme.primary, width: 2.5),
             ),
           ),
-          onChanged: onChanged,
-        ),
+        ],
       ),
     );
   }
 }
-
-// ── Resend button ──────────────────────────────────────────────────────────────
 
 class _ResendButton extends StatelessWidget {
   const _ResendButton({
