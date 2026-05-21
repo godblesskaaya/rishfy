@@ -444,21 +444,27 @@ Published when pending booking expires (payment not completed in 2 min).
 ```json
 {
   "event_type": "driver.location.updated",
-  "event_version": "1.0",
+  "event_version": "1.1",
   "data": {
     "driver_id": 45,
     "trip_id": 890,
+    "booking_id": 5678,
+    "passenger_id": 123,
     "lat": -6.8000,
     "lng": 39.2500,
     "bearing": 127,
-    "speed": 12.5,
-    "accuracy": 5.0,
-    "timestamp": "2026-03-16T08:15:30.000Z"
+    "speed_kmh": 45.0,
+    "accuracy_meters": 5.0,
+    "timestamp": "2026-03-16T08:15:30.000Z",
+    "active_stop_type": "pickup",
+    "distance_to_active_stop_meters": 180,
+    "proximity_state": "approaching_pickup",
+    "eta_seconds": 24
   }
 }
 ```
 
-**Note**: Typically NOT consumed. WebSocket is the primary delivery mechanism. This topic exists for analytics/auditing.
+**Note**: Typically NOT consumed directly. WebSocket is the primary delivery mechanism. This topic exists for analytics/auditing and now carries enough trip context to hydrate passive consumers without inferring booking linkage elsewhere.
 
 ---
 
@@ -469,7 +475,7 @@ Published when Location Service detects driver within 100m of pickup.
 ```json
 {
   "event_type": "driver.arrived",
-  "event_version": "1.0",
+  "event_version": "1.1",
   "data": {
     "driver_id": 45,
     "trip_id": 890,

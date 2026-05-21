@@ -597,6 +597,7 @@ paths:
     post:
       tags: [bookings]
       summary: Driver starts the trip
+      deprecated: true
       security: [{ bearerAuth: [] }]
       parameters:
         - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
@@ -608,11 +609,110 @@ paths:
     post:
       tags: [bookings]
       summary: Driver marks trip complete
+      deprecated: true
       security: [{ bearerAuth: [] }]
       parameters:
         - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
       responses:
         '200': { description: Trip completed }
+
+  /bookings/{id}/arrive-pickup:
+    post:
+      tags: [bookings]
+      summary: Driver marks arrival at the booking pickup point
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Pickup arrival recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Booking'
+        '403': { description: Only the assigned driver can perform this action }
+        '404': { description: Booking not found }
+        '409': { description: Invalid journey state }
+
+  /bookings/{id}/board-passenger:
+    post:
+      tags: [bookings]
+      summary: Driver confirms passenger boarding and starts the in-vehicle leg
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Passenger boarded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Booking'
+        '403': { description: Only the assigned driver can perform this action }
+        '404': { description: Booking not found }
+        '409': { description: Invalid journey state }
+
+  /bookings/{id}/dropoff-passenger:
+    post:
+      tags: [bookings]
+      summary: Driver confirms passenger dropoff and begins the final walking leg
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Passenger dropped off
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Booking'
+        '403': { description: Only the assigned driver can perform this action }
+        '404': { description: Booking not found }
+        '409': { description: Invalid journey state }
+
+  /bookings/{id}/mark-no-show:
+    post:
+      tags: [bookings]
+      summary: Driver marks the booking as a no-show before boarding
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string, default: NO_SHOW }
+      responses:
+        '200':
+          description: Booking marked as no-show
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Booking'
+        '403': { description: Only the assigned driver can perform this action }
+        '404': { description: Booking not found }
+        '409': { description: Invalid journey state }
+
+  /bookings/{id}/complete-journey:
+    post:
+      tags: [bookings]
+      summary: Passenger or driver completes the final walking leg and closes the booking journey
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Booking journey completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Booking'
+        '403': { description: Only booking participants can perform this action }
+        '404': { description: Booking not found }
+        '409': { description: Invalid journey state }
 
   /bookings/{id}/rate:
     post:
@@ -1263,8 +1363,13 @@ components:
         seats_booked: { type: integer }
         status:
           type: string
-          enum: [pending, confirmed, passenger_cancelled, driver_cancelled, declined, completed]
+          enum: [pending, confirmed, passenger_cancelled, driver_cancelled, declined, completed, no_show]
           description: '`declined` set when driver rejects within 10-minute window'
+        journey_state:
+          type: string
+          nullable: true
+          enum: [confirmed, driver_approaching, driver_arrived, boarded, in_transit, dropped_off, walking_to_destination, completed, cancelled, no_show]
+          description: Passenger journey lifecycle state layered on top of coarse booking status
         payment_status: { type: string, enum: [pending, paid, failed, refunded], nullable: true }
         total_price: { type: number }
         platform_fee: { type: number }
@@ -1287,12 +1392,18 @@ components:
         passenger_review: { type: string, nullable: true }
         driver_review: { type: string, nullable: true }
         payment_id: { type: string, format: uuid, nullable: true }
+        trip_id: { type: string, format: uuid, nullable: true }
         cancellation_reason: { type: string, nullable: true }
         declined_reason: { type: string, nullable: true }
         cancellation_policy: { type: string, nullable: true }
         cancelled_at: { type: string, format: date-time, nullable: true }
+        arrived_pickup_at: { type: string, format: date-time, nullable: true }
+        boarded_at: { type: string, format: date-time, nullable: true }
+        dropped_off_at: { type: string, format: date-time, nullable: true }
         trip_started_at: { type: string, format: date-time, nullable: true }
         trip_completed_at: { type: string, format: date-time, nullable: true }
+        journey_completed_at: { type: string, format: date-time, nullable: true }
+        no_show_at: { type: string, format: date-time, nullable: true }
         completed_at: { type: string, format: date-time, nullable: true }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }

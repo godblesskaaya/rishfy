@@ -21,6 +21,8 @@ class PassengerHomeScreen extends ConsumerWidget {
     final bool canSwitch = ref.watch(canSwitchRolesProvider);
     final AsyncValue<List<BookingEntity>> bookingsAsync =
         ref.watch(myBookingsProvider);
+    final AsyncValue<BookingEntity?> activeJourneyAsync =
+        ref.watch(activePassengerJourneyProvider);
 
     return Scaffold(
       body: SafeArea(
@@ -29,7 +31,6 @@ class PassengerHomeScreen extends ConsumerWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-              // Header with role toggle
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: <Widget>[
@@ -38,15 +39,18 @@ class PassengerHomeScreen extends ConsumerWidget {
                     children: <Widget>[
                       Text(
                         'Habari, ${firstName ?? ''}',
-                        style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                              fontWeight: FontWeight.bold,
-                            ),
+                        style: Theme.of(context)
+                            .textTheme
+                            .headlineSmall
+                            ?.copyWith(fontWeight: FontWeight.bold),
                       ),
                       const SizedBox(height: 4),
                       Text(
                         'Where are you going today?',
                         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              color: Theme.of(context).colorScheme.onSurfaceVariant,
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurfaceVariant,
                             ),
                       ),
                     ],
@@ -58,15 +62,15 @@ class PassengerHomeScreen extends ConsumerWidget {
                 ],
               ),
               const SizedBox(height: 24),
-
-              // Role switch (only if user is both passenger and driver)
               if (canSwitch)
                 Container(
                   margin: const EdgeInsets.only(bottom: 24),
                   padding: const EdgeInsets.all(4),
                   decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                    borderRadius: BorderRadius.circular(AppConstants.radiusFull),
+                    color:
+                        Theme.of(context).colorScheme.surfaceContainerHighest,
+                    borderRadius:
+                        BorderRadius.circular(AppConstants.radiusFull),
                   ),
                   child: Row(
                     children: <Widget>[
@@ -93,8 +97,6 @@ class PassengerHomeScreen extends ConsumerWidget {
                     ],
                   ),
                 ),
-
-              // Search CTA
               GestureDetector(
                 onTap: () => context.go('/search'),
                 child: Container(
@@ -108,7 +110,10 @@ class PassengerHomeScreen extends ConsumerWidget {
                   ),
                   child: Row(
                     children: <Widget>[
-                      Icon(Icons.search, color: Theme.of(context).colorScheme.primary),
+                      Icon(
+                        Icons.search,
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
                       const SizedBox(width: 12),
                       Text(
                         'Where to?',
@@ -119,8 +124,15 @@ class PassengerHomeScreen extends ConsumerWidget {
                 ),
               ),
               const SizedBox(height: 32),
-
-              // Quick actions
+              Text(
+                'Current trip',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+              ),
+              const SizedBox(height: 12),
+              _PassengerJourneyCard(activeJourneyAsync: activeJourneyAsync),
+              const SizedBox(height: 32),
               Text(
                 'Quick actions',
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
@@ -156,8 +168,6 @@ class PassengerHomeScreen extends ConsumerWidget {
                 ],
               ),
               const SizedBox(height: 32),
-
-              // Upcoming trips
               Text(
                 'Upcoming trips',
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
@@ -174,14 +184,161 @@ class PassengerHomeScreen extends ConsumerWidget {
   }
 }
 
+class _PassengerJourneyCard extends StatelessWidget {
+  const _PassengerJourneyCard({required this.activeJourneyAsync});
+
+  final AsyncValue<BookingEntity?> activeJourneyAsync;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+
+    Widget placeholder({
+      required IconData icon,
+      required String title,
+      required String subtitle,
+    }) {
+      return Container(
+        padding: const EdgeInsets.all(AppConstants.spaceLg),
+        decoration: BoxDecoration(
+          color: scheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(AppConstants.radiusLg),
+        ),
+        child: Row(
+          children: <Widget>[
+            Icon(icon, color: scheme.primary),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(title, style: Theme.of(context).textTheme.titleSmall),
+                  const SizedBox(height: 4),
+                  Text(subtitle, style: Theme.of(context).textTheme.bodySmall),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return activeJourneyAsync.when(
+      loading: () => placeholder(
+        icon: Icons.sync,
+        title: 'Checking your active trip',
+        subtitle: 'We are loading the latest journey state.',
+      ),
+      error: (Object error, _) => placeholder(
+        icon: Icons.error_outline,
+        title: 'Could not load trip state',
+        subtitle: error.toString(),
+      ),
+      data: (BookingEntity? booking) {
+        if (booking == null) {
+          return placeholder(
+            icon: Icons.map_outlined,
+            title: 'No active trip right now',
+            subtitle: 'Your next confirmed booking will appear here.',
+          );
+        }
+
+        final int? etaSeconds =
+            booking.etaToPickupSeconds ?? booking.etaToDropoffSeconds;
+        final String destination = booking.isJourneyActive
+            ? '/trip/${booking.bookingId}'
+            : '/bookings/${booking.bookingId}';
+
+        return InkWell(
+          borderRadius: BorderRadius.circular(AppConstants.radiusLg),
+          onTap: () => unawaited(context.push(destination)),
+          child: Container(
+            padding: const EdgeInsets.all(AppConstants.spaceLg),
+            decoration: BoxDecoration(
+              border: Border.all(color: scheme.outlineVariant),
+              borderRadius: BorderRadius.circular(AppConstants.radiusLg),
+              gradient: LinearGradient(
+                colors: <Color>[
+                  scheme.primaryContainer,
+                  scheme.surface,
+                ],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Row(
+                  children: <Widget>[
+                    Icon(Icons.alt_route, color: scheme.primary),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        booking.journeyLabel,
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
+                      ),
+                    ),
+                    const Icon(Icons.chevron_right),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  '${booking.originName ?? 'Route'} -> '
+                  '${booking.destinationName ?? ''}',
+                  style: Theme.of(context).textTheme.bodyLarge,
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  booking.isPrePickupJourney
+                      ? 'Pickup: ${booking.pickupDisplayName}'
+                      : 'Drop-off: ${booking.dropoffDisplayName}',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                if (etaSeconds != null) ...<Widget>[
+                  const SizedBox(height: 6),
+                  Text(
+                    'ETA ${_formatEta(etaSeconds)}'
+                    '${booking.etaApproximate == true ? ' approx.' : ''}',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
+                  ),
+                ],
+                const SizedBox(height: 12),
+                Text(
+                  booking.isJourneyActive ? 'Open live trip' : 'View booking',
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                        color: scheme.primary,
+                        fontWeight: FontWeight.w700,
+                      ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  String _formatEta(int seconds) {
+    if (seconds < 60) {
+      return '${seconds}s';
+    }
+    return '${(seconds / 60).ceil()}m';
+  }
+}
+
 class _UpcomingTripsCard extends StatelessWidget {
   const _UpcomingTripsCard({required this.bookingsAsync});
 
   final AsyncValue<List<BookingEntity>> bookingsAsync;
 
-  bool _isUpcoming(BookingEntity b) {
-    if (b.status.contains('cancelled')) return false;
-    if (b.status == 'completed' || b.status == 'expired') return false;
+  bool _isUpcoming(BookingEntity booking) {
+    if (booking.isCancelled || booking.isNoShow) return false;
+    if (booking.isCompleted || booking.status == 'expired') return false;
     return true;
   }
 
@@ -230,7 +387,9 @@ class _UpcomingTripsCard extends StatelessWidget {
         _messageFromError(error),
       ),
       data: (List<BookingEntity> bookings) {
-        final List<BookingEntity> upcoming = bookings.where(_isUpcoming).toList()
+        final List<BookingEntity> upcoming = bookings
+            .where(_isUpcoming)
+            .toList()
           ..sort((BookingEntity a, BookingEntity b) =>
               (a.departureDatetime ?? a.createdAt)
                   .compareTo(b.departureDatetime ?? b.createdAt));
@@ -243,9 +402,9 @@ class _UpcomingTripsCard extends StatelessWidget {
         return Column(
           children: upcoming
               .take(2)
-              .map((BookingEntity b) => Padding(
+              .map((BookingEntity booking) => Padding(
                     padding: const EdgeInsets.only(bottom: 8),
-                    child: _UpcomingTripTile(booking: b),
+                    child: _UpcomingTripTile(booking: booking),
                   ))
               .toList(),
         );
@@ -263,9 +422,15 @@ class _UpcomingTripTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final ColorScheme scheme = Theme.of(context).colorScheme;
     final DateTime when = booking.departureDatetime ?? booking.createdAt;
+
     return InkWell(
       borderRadius: BorderRadius.circular(AppConstants.radiusLg),
-      onTap: () => context.push('/bookings/${booking.bookingId}'),
+      onTap: () {
+        final String destination = booking.isJourneyActive
+            ? '/trip/${booking.bookingId}'
+            : '/bookings/${booking.bookingId}';
+        unawaited(context.push(destination));
+      },
       child: Container(
         padding: const EdgeInsets.all(AppConstants.spaceMd),
         decoration: BoxDecoration(
@@ -281,7 +446,7 @@ class _UpcomingTripTile extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
                   Text(
-                    '${booking.originName ?? 'Route'} → '
+                    '${booking.originName ?? 'Route'} -> '
                     '${booking.destinationName ?? ''}',
                     style: Theme.of(context).textTheme.titleSmall,
                     maxLines: 1,
@@ -290,7 +455,7 @@ class _UpcomingTripTile extends StatelessWidget {
                   const SizedBox(height: 2),
                   Text(
                     '${DateFormat('EEE d MMM, HH:mm').format(when.toLocal())}'
-                    ' · ${booking.status.replaceAll('_', ' ')}',
+                    ' | ${booking.journeyLabel}',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ],

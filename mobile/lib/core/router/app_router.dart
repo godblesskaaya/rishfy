@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../constants/app_logger.dart';
 import '../../features/auth/presentation/providers/auth_provider.dart';
 import '../../features/auth/presentation/screens/forgot_password_screen.dart';
 import '../../features/auth/presentation/screens/login_screen.dart';
@@ -23,14 +22,15 @@ import '../../features/profile/presentation/screens/emergency_contacts_screen.da
 import '../../features/profile/presentation/screens/help_support_screen.dart';
 import '../../features/profile/presentation/screens/legal_screen.dart';
 import '../../features/profile/presentation/screens/payment_methods_screen.dart';
-import '../../features/profile/presentation/screens/vehicle_management_screen.dart';
 import '../../features/profile/presentation/screens/profile_screen.dart';
 import '../../features/profile/presentation/screens/settings_screen.dart';
+import '../../features/profile/presentation/screens/vehicle_management_screen.dart';
 import '../../features/routes/presentation/screens/post_route_screen.dart';
 import '../../features/routes/presentation/screens/route_detail_screen.dart';
 import '../../features/routes/presentation/screens/route_search_screen.dart';
 import '../../features/trip/presentation/screens/active_trip_screen.dart';
 import '../../shared/providers/active_role_provider.dart';
+import '../constants/app_logger.dart';
 
 /// Root navigator keys — expose for nested navigators if needed.
 final GlobalKey<NavigatorState> _rootNavKey =
@@ -186,8 +186,10 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
             driverId: extra?['driverId'] as String?,
             pricePerSeat: extra?['pricePerSeat'] as int?,
             suggestedPickupName: extra?['suggestedPickupName'] as String?,
-            suggestedPickupLat: (extra?['suggestedPickupLat'] as num?)?.toDouble(),
-            suggestedPickupLng: (extra?['suggestedPickupLng'] as num?)?.toDouble(),
+            suggestedPickupLat:
+                (extra?['suggestedPickupLat'] as num?)?.toDouble(),
+            suggestedPickupLng:
+                (extra?['suggestedPickupLng'] as num?)?.toDouble(),
             estimatedPickupTime: extra?['estimatedPickupTime'] != null
                 ? DateTime.tryParse(extra!['estimatedPickupTime'] as String)
                 : null,
@@ -209,6 +211,7 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
       ),
       GoRoute(
         parentNavigatorKey: _rootNavKey,
+        name: 'trip',
         path: '/trip/:bookingId',
         builder: (BuildContext context, GoRouterState state) {
           return ActiveTripScreen(
@@ -259,14 +262,12 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
       GoRoute(
         parentNavigatorKey: _rootNavKey,
         path: '/legal/privacy',
-        builder: (_, __) =>
-            const LegalScreen(document: LegalDocument.privacy),
+        builder: (_, __) => const LegalScreen(document: LegalDocument.privacy),
       ),
       GoRoute(
         parentNavigatorKey: _rootNavKey,
         path: '/legal/terms',
-        builder: (_, __) =>
-            const LegalScreen(document: LegalDocument.terms),
+        builder: (_, __) => const LegalScreen(document: LegalDocument.terms),
       ),
     ],
     errorBuilder: (BuildContext context, GoRouterState state) {

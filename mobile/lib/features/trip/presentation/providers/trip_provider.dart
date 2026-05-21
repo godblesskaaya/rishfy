@@ -8,6 +8,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import '../../../../core/config/env.dart';
 import '../../../../core/storage/secure_storage.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
+import '../../../bookings/domain/entities/booking_entity.dart';
 import '../../data/models/location_models.dart';
 
 // ---- Passenger: subscribe to driver location for a trip ----
@@ -24,6 +25,8 @@ class DriverTrackingState {
   final List<DriverLocationUpdate> history;
   final bool isConnected;
   final String? error;
+
+  bool get hasLiveContext => latest != null || history.isNotEmpty;
 
   DriverTrackingState copyWith({
     DriverLocationUpdate? latest,
@@ -56,6 +59,40 @@ class DriverTrackingNotifier extends StateNotifier<DriverTrackingState> {
   WebSocketChannel? _channel;
   StreamSubscription<dynamic>? _sub;
 
+  void seedFromBooking(BookingEntity booking) {
+    if (booking.driverLat == null || booking.driverLng == null) {
+      return;
+    }
+
+    final DriverLocationUpdate seeded = DriverLocationUpdate.fromBookingContext(
+      driverUserId: booking.driverId ?? '',
+      lat: booking.driverLat!,
+      lng: booking.driverLng!,
+      heading: booking.driverHeading ?? 0,
+      speedKmh: booking.driverSpeedKmh ?? 0,
+      timestamp: booking.driverLocationUpdatedAt ?? DateTime.now(),
+      tripId: booking.tripId,
+      bookingId: booking.bookingId,
+      journeyState: booking.effectiveJourneyState,
+      routeStatus: booking.effectiveRouteStatus,
+      stopLabel: booking.isPrePickupJourney
+          ? booking.pickupDisplayName
+          : booking.dropoffDisplayName,
+      stopType: booking.isPrePickupJourney ? 'pickup' : 'dropoff',
+      etaToPickupSeconds: booking.etaToPickupSeconds,
+      etaToDropoffSeconds: booking.etaToDropoffSeconds,
+      etaApproximate: booking.etaApproximate,
+      etaStale: booking.etaStale,
+    );
+
+    state = state.copyWith(
+      latest: seeded,
+      history: state.history.isEmpty
+          ? <DriverLocationUpdate>[seeded]
+          : state.history,
+    );
+  }
+
   Future<void> connect(String driverId) async {
     if (state.isConnected) return;
 
@@ -83,15 +120,7 @@ class DriverTrackingNotifier extends StateNotifier<DriverTrackingState> {
             if (json['type'] == 'location_update') {
               final DriverLocationUpdate update =
                   DriverLocationUpdate.fromJson(json);
-              final List<DriverLocationUpdate> history =
-                  <DriverLocationUpdate>[...state.history, update];
-              // keep last 100 points for polyline trail
-              state = state.copyWith(
-                latest: update,
-                history: history.length > 100
-                    ? history.sublist(history.length - 100)
-                    : history,
-              );
+              _recordUpdate(update);
             }
           } catch (_) {}
         },
@@ -107,10 +136,23 @@ class DriverTrackingNotifier extends StateNotifier<DriverTrackingState> {
     }
   }
 
+  void _recordUpdate(DriverLocationUpdate update) {
+    final List<DriverLocationUpdate> history = <DriverLocationUpdate>[
+      ...state.history,
+      update
+    ];
+    state = state.copyWith(
+      latest: update,
+      history: history.length > 100
+          ? history.sublist(history.length - 100)
+          : history,
+    );
+  }
+
   @override
   void dispose() {
-    _sub?.cancel();
-    _channel?.sink.close();
+    unawaited(_sub?.cancel());
+    unawaited(_channel?.sink.close());
     super.dispose();
   }
 }
@@ -161,8 +203,7 @@ class DriverBroadcastNotifier extends StateNotifier<DriverBroadcastState> {
       final LocationPermission req = await Geolocator.requestPermission();
       if (req == LocationPermission.denied ||
           req == LocationPermission.deniedForever) {
-        state = DriverBroadcastState(
-            error: 'Location permission denied');
+        state = const DriverBroadcastState(error: 'Location permission denied');
         return;
       }
     }
@@ -175,7 +216,7 @@ class DriverBroadcastNotifier extends StateNotifier<DriverBroadcastState> {
 
     try {
       _channel = WebSocketChannel.connect(uri);
-      state = DriverBroadcastState(isStreaming: true);
+      state = const DriverBroadcastState(isStreaming: true);
 
       _gpsSub = Geolocator.getPositionStream(
         locationSettings: _locationSettings,
@@ -187,11 +228,14 @@ class DriverBroadcastNotifier extends StateNotifier<DriverBroadcastState> {
           );
           _channel?.sink.add(jsonEncode(<String, dynamic>{
             'type': 'location',
-            'driverUserId': _driverUserId,
+            'driverId': _driverUserId,
+            'driver_user_id': _driverUserId,
+            'trip_id': tripId,
             'lat': pos.latitude,
             'lng': pos.longitude,
             'bearing': pos.heading,
-            'speedKmh': pos.speed * 3.6,
+            'speed_kmh': pos.speed * 3.6,
+            'timestamp': DateTime.now().toIso8601String(),
           }));
         },
         onError: (Object e) {
@@ -213,8 +257,8 @@ class DriverBroadcastNotifier extends StateNotifier<DriverBroadcastState> {
 
   @override
   void dispose() {
-    _gpsSub?.cancel();
-    _channel?.sink.close();
+    unawaited(_gpsSub?.cancel());
+    unawaited(_channel?.sink.close());
     super.dispose();
   }
 }

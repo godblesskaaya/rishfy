@@ -9,6 +9,7 @@ import '../../../../core/constants/app_constants.dart';
 import '../../../../core/errors/app_exception.dart';
 import '../../../../shared/providers/active_role_provider.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
+import '../../../bookings/domain/entities/booking_entity.dart';
 import '../../../bookings/presentation/providers/booking_provider.dart';
 import '../../../routes/domain/entities/route_entity.dart';
 import '../../../routes/presentation/providers/route_provider.dart';
@@ -25,6 +26,8 @@ class DriverHomeScreen extends ConsumerWidget {
         ref.watch(myRoutesProvider);
     final AsyncValue<DriverEarningsStats> statsAsync =
         ref.watch(driverEarningsStatsProvider);
+    final AsyncValue<BookingEntity?> activeJourneyAsync =
+        ref.watch(activeDriverJourneyProvider);
 
     return Scaffold(
       body: SafeArea(
@@ -42,9 +45,10 @@ class DriverHomeScreen extends ConsumerWidget {
                     children: <Widget>[
                       Text(
                         'Habari, ${firstName ?? ''}',
-                        style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                              fontWeight: FontWeight.bold,
-                            ),
+                        style:
+                            Theme.of(context).textTheme.headlineSmall?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                ),
                       ),
                       const SizedBox(height: 4),
                       Text(
@@ -105,6 +109,16 @@ class DriverHomeScreen extends ConsumerWidget {
               ),
               const SizedBox(height: 24),
 
+              Text(
+                'Active passenger trip',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+              ),
+              const SizedBox(height: 12),
+              _DriverJourneyCard(activeJourneyAsync: activeJourneyAsync),
+              const SizedBox(height: 24),
+
               // Post a route CTA
               ElevatedButton.icon(
                 onPressed: () => context.push('/routes/post'),
@@ -136,6 +150,140 @@ class DriverHomeScreen extends ConsumerWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _DriverJourneyCard extends StatelessWidget {
+  const _DriverJourneyCard({required this.activeJourneyAsync});
+
+  final AsyncValue<BookingEntity?> activeJourneyAsync;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+
+    Widget placeholder({
+      required IconData icon,
+      required String title,
+      required String subtitle,
+    }) {
+      return Container(
+        padding: const EdgeInsets.all(AppConstants.spaceLg),
+        decoration: BoxDecoration(
+          color: scheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(AppConstants.radiusLg),
+        ),
+        child: Row(
+          children: <Widget>[
+            Icon(icon, color: scheme.primary),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(title, style: Theme.of(context).textTheme.titleSmall),
+                  const SizedBox(height: 4),
+                  Text(subtitle, style: Theme.of(context).textTheme.bodySmall),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return activeJourneyAsync.when(
+      loading: () => placeholder(
+        icon: Icons.sync,
+        title: 'Checking active passenger trip',
+        subtitle: 'We are loading the next journey you need to manage.',
+      ),
+      error: (Object error, _) => placeholder(
+        icon: Icons.error_outline,
+        title: 'Could not load passenger trip',
+        subtitle: error.toString(),
+      ),
+      data: (BookingEntity? booking) {
+        if (booking == null) {
+          return placeholder(
+            icon: Icons.route,
+            title: 'No active passenger stop',
+            subtitle: 'Confirmed and live passenger journeys will appear here.',
+          );
+        }
+
+        final String nextAction = booking.canDriverMarkArrived
+            ? 'Arrive at pickup'
+            : booking.canDriverMarkBoarded
+                ? 'Confirm boarding'
+                : booking.canDriverMarkDroppedOff
+                    ? 'Confirm drop-off'
+                    : booking.isCompleted
+                        ? 'Trip completed'
+                        : booking.journeyLabel;
+        final String focusLabel = booking.isPrePickupJourney
+            ? booking.pickupDisplayName
+            : booking.dropoffDisplayName;
+
+        return InkWell(
+          borderRadius: BorderRadius.circular(AppConstants.radiusLg),
+          onTap: () => unawaited(context.push('/trip/${booking.bookingId}')),
+          child: Container(
+            padding: const EdgeInsets.all(AppConstants.spaceLg),
+            decoration: BoxDecoration(
+              border: Border.all(color: scheme.outlineVariant),
+              borderRadius: BorderRadius.circular(AppConstants.radiusLg),
+              gradient: LinearGradient(
+                colors: <Color>[
+                  scheme.secondaryContainer,
+                  scheme.surface,
+                ],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Row(
+                  children: <Widget>[
+                    Icon(Icons.directions_car_filled, color: scheme.primary),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        booking.journeyLabel,
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
+                      ),
+                    ),
+                    const Icon(Icons.chevron_right),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  '${booking.originName ?? 'Route'} â†’ '
+                  '${booking.destinationName ?? ''}',
+                  style: Theme.of(context).textTheme.bodyLarge,
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Next stop: $focusLabel',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Next action: $nextAction',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }
@@ -201,9 +349,8 @@ class _EarningsCard extends StatelessWidget {
       data: (DriverEarningsStats s) => s.weekTrips,
       orElse: () => 0,
     );
-    final String ratingLabel = (rating == null || rating == 0)
-        ? '—'
-        : rating!.toStringAsFixed(1);
+    final String ratingLabel =
+        (rating == null || rating == 0) ? '—' : rating!.toStringAsFixed(1);
 
     return Container(
       padding: const EdgeInsets.all(AppConstants.spaceLg),
@@ -447,7 +594,8 @@ class _PostedRouteCard extends ConsumerWidget {
                   const SizedBox(height: 4),
                   Row(
                     children: <Widget>[
-                      Icon(Icons.schedule, size: 14, color: scheme.onSurfaceVariant),
+                      Icon(Icons.schedule,
+                          size: 14, color: scheme.onSurfaceVariant),
                       const SizedBox(width: 4),
                       Text(
                         DateFormat('EEE d MMM, HH:mm')
@@ -455,7 +603,8 @@ class _PostedRouteCard extends ConsumerWidget {
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                       const SizedBox(width: 12),
-                      Icon(Icons.event_seat, size: 14, color: scheme.onSurfaceVariant),
+                      Icon(Icons.event_seat,
+                          size: 14, color: scheme.onSurfaceVariant),
                       const SizedBox(width: 4),
                       Text(
                         '${route.availableSeats}/${route.totalSeats}',
@@ -467,10 +616,11 @@ class _PostedRouteCard extends ConsumerWidget {
               ),
             ),
             PopupMenuButton<String>(
-              icon: Icon(Icons.more_vert, size: 20, color: scheme.onSurfaceVariant),
+              icon: Icon(Icons.more_vert,
+                  size: 20, color: scheme.onSurfaceVariant),
               onSelected: (String value) {
                 if (value == 'view') {
-                  context.push('/routes/${route.routeId}');
+                  unawaited(context.push('/routes/${route.routeId}'));
                 } else if (value == 'cancel') {
                   unawaited(_confirmCancel(context, ref));
                 }

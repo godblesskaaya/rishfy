@@ -117,7 +117,7 @@ class RouteRemoteDataSource {
   Future<RouteDto> createRoute(CreateRouteRequest req) async {
     final Response<Map<String, dynamic>> res =
         await _dio.post<Map<String, dynamic>>(
-      '/api/v1/routes',
+      '/api/v1/routes/',
       data: <String, dynamic>{
         'vehicle_id': req.vehicleId,
         'origin_name': req.originName.trim(),
