@@ -293,6 +293,14 @@ services:
       REDIS_URL: redis://redis:6379/4
       KAFKA_BROKERS: kafka:9092
       BOOKING_GRPC_URL: booking-service:50054
+      PAYMENT_PROVIDER: ${PAYMENT_PROVIDER:-azampay}
+      AZAMPAY_BASE_URL: ${AZAMPAY_BASE_URL:-https://sandbox.azampay.co.tz}
+      AZAMPAY_AUTH_URL: ${AZAMPAY_AUTH_URL:-https://authenticator-sandbox.azampay.co.tz}
+      AZAMPAY_APP_NAME: ${AZAMPAY_APP_NAME:-}
+      AZAMPAY_CLIENT_ID: ${AZAMPAY_CLIENT_ID:-}
+      AZAMPAY_CLIENT_SECRET: ${AZAMPAY_CLIENT_SECRET:-}
+      AZAMPAY_API_KEY: ${AZAMPAY_API_KEY:-}
+      AZAMPAY_CALLBACK_SECRET: ${AZAMPAY_CALLBACK_SECRET:-dev_azampay_callback_secret}
       # Mobile money sandbox creds — NEVER commit real keys
       MPESA_API_KEY: ${MPESA_API_KEY:-sandbox_key}
       MPESA_API_SECRET: ${MPESA_API_SECRET:-sandbox_secret}

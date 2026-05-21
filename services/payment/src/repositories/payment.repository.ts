@@ -103,7 +103,11 @@ export class PaymentRepository {
 
   async setProviderReference(id: string, providerRef: string): Promise<void> {
     await this.pool.query(
-      'UPDATE payments SET provider_reference=$2, status=\'processing\', updated_at=now() WHERE id=$1',
+      `UPDATE payments
+       SET provider_reference=$2,
+           status=CASE WHEN status='pending' THEN 'processing' ELSE status END,
+           updated_at=now()
+       WHERE id=$1`,
       [id, providerRef],
     );
   }

@@ -88,3 +88,22 @@ describe('BookingRepository journey transitions', () => {
     );
   });
 });
+
+describe('BookingRepository.completeTrip', () => {
+  it('only completes an in-progress booking', async () => {
+    const pool = {
+      query: vi.fn().mockResolvedValue({
+        rows: [{ id: 'booking-1', status: 'completed' }],
+      }),
+    };
+    const repo = new BookingRepository(pool as never);
+
+    const result = await repo.completeTrip('booking-1');
+
+    expect(result).toEqual({ id: 'booking-1', status: 'completed' });
+    expect(pool.query).toHaveBeenCalledWith(
+      expect.stringContaining("WHERE id=$1 AND status='in_progress'"),
+      ['booking-1'],
+    );
+  });
+});
