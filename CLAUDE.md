@@ -12,9 +12,9 @@ Every commit must be attributed to the team member who owns that code. **Never a
 | Area | Owner | git identity |
 |------|-------|-------------|
 | Auth service, user service | CodeWithStella | `stellakahungo24@gmail.com` |
-| Route service, location service, mobile app | godblesskaaya | `godblessgkaaya@gmail.com` |
+| Route service, location service | godblesskaaya | `godblessgkaaya@gmail.com` |
 | Booking service, payment service, admin | Ezzy141 | `mazwaezekiel@gmail.com` |
-| Notification service, docs | fatma-nassib | `abdallah.nassib.fatma@gmail.com` |
+| Notification service, mobile app, docs | fatma-nassib | `abdallah.nassib.fatma@gmail.com` |
 
 ```bash
 # Stage only that person's files, then:
