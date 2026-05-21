@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -14,16 +16,11 @@ class BookingsScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final String activeRole = ref.watch(activeRoleProvider);
-    final bool isDriverMode = activeRole == 'driver';
-
-    if (isDriverMode) {
-      return const _DriverBookingsView();
-    }
-    return const _PassengerBookingsView();
+    return activeRole == 'driver'
+        ? const _DriverBookingsView()
+        : const _PassengerBookingsView();
   }
 }
-
-// ── Driver view ────────────────────────────────────────────────────────────────
 
 class _DriverBookingsView extends ConsumerWidget {
   const _DriverBookingsView();
@@ -49,45 +46,50 @@ class _DriverBookingsView extends ConsumerWidget {
         body: asyncBookings.when(
           loading: () =>
               const LoadingView(message: 'Loading your passengers...'),
-          error: (Object e, _) => ErrorView(
-            message: e.toString(),
+          error: (Object error, _) => ErrorView(
+            message: error.toString(),
             onRetry: () => ref.invalidate(myDriverBookingsProvider),
           ),
           data: (List<BookingEntity> bookings) {
-            final List<BookingEntity> cancelled =
-                bookings.where(_isCancelled).toList();
+            final List<BookingEntity> cancelled = bookings
+                .where((BookingEntity booking) =>
+                    booking.isCancelled || booking.isNoShow)
+                .toList();
             final List<BookingEntity> past = bookings
-                .where((BookingEntity b) => !_isCancelled(b) && _isPast(b))
+                .where((BookingEntity booking) =>
+                    !(booking.isCancelled || booking.isNoShow) &&
+                    (booking.isCompleted || booking.status == 'expired'))
                 .toList();
             final List<BookingEntity> upcoming = bookings
-                .where(
-                    (BookingEntity b) => !_isCancelled(b) && !_isPast(b))
+                .where((BookingEntity booking) =>
+                    !(booking.isCancelled || booking.isNoShow) &&
+                    !(booking.isCompleted || booking.status == 'expired'))
                 .toList();
 
             return TabBarView(
               children: <Widget>[
-                _DriverBookingsTab(
+                _BookingsTab(
                   bookings: upcoming,
+                  role: _BookingRole.driver,
                   icon: Icons.directions_car_outlined,
                   emptyTitle: 'No upcoming passengers',
                   emptySubtitle:
                       'Post a route and passengers will book automatically',
-                  onRefresh: () =>
-                      ref.refresh(myDriverBookingsProvider.future),
+                  onRefresh: () => ref.refresh(myDriverBookingsProvider.future),
                 ),
-                _DriverBookingsTab(
+                _BookingsTab(
                   bookings: past,
+                  role: _BookingRole.driver,
                   icon: Icons.history,
                   emptyTitle: 'No completed trips yet',
-                  onRefresh: () =>
-                      ref.refresh(myDriverBookingsProvider.future),
+                  onRefresh: () => ref.refresh(myDriverBookingsProvider.future),
                 ),
-                _DriverBookingsTab(
+                _BookingsTab(
                   bookings: cancelled,
+                  role: _BookingRole.driver,
                   icon: Icons.cancel_outlined,
                   emptyTitle: 'No cancelled bookings',
-                  onRefresh: () =>
-                      ref.refresh(myDriverBookingsProvider.future),
+                  onRefresh: () => ref.refresh(myDriverBookingsProvider.future),
                 ),
               ],
             );
@@ -97,180 +99,6 @@ class _DriverBookingsView extends ConsumerWidget {
     );
   }
 }
-
-class _DriverBookingsTab extends StatelessWidget {
-  const _DriverBookingsTab({
-    required this.bookings,
-    required this.icon,
-    required this.emptyTitle,
-    required this.onRefresh,
-    this.emptySubtitle,
-  });
-
-  final List<BookingEntity> bookings;
-  final IconData icon;
-  final String emptyTitle;
-  final String? emptySubtitle;
-  final Future<void> Function() onRefresh;
-
-  @override
-  Widget build(BuildContext context) {
-    if (bookings.isEmpty) {
-      return EmptyView(
-        icon: icon,
-        title: emptyTitle,
-        subtitle: emptySubtitle,
-      );
-    }
-
-    final List<BookingEntity> sorted = <BookingEntity>[...bookings]
-      ..sort((BookingEntity a, BookingEntity b) {
-        final DateTime ta = a.departureDatetime ?? a.createdAt;
-        final DateTime tb = b.departureDatetime ?? b.createdAt;
-        return ta.compareTo(tb);
-      });
-
-    return RefreshIndicator(
-      onRefresh: onRefresh,
-      child: ListView.separated(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.all(16),
-        itemCount: sorted.length,
-        separatorBuilder: (_, __) => const SizedBox(height: 8),
-        itemBuilder: (BuildContext context, int index) {
-          final BookingEntity booking = sorted[index];
-          return _DriverBookingCard(booking: booking);
-        },
-      ),
-    );
-  }
-}
-
-class _DriverBookingCard extends StatelessWidget {
-  const _DriverBookingCard({required this.booking});
-
-  final BookingEntity booking;
-
-  @override
-  Widget build(BuildContext context) {
-    final ColorScheme scheme = Theme.of(context).colorScheme;
-    final String statusLabel = _driverStatusLabel(booking.status);
-    final Color statusColor = _driverStatusColor(booking.status, scheme);
-    final DateTime departure =
-        booking.departureDatetime ?? booking.createdAt;
-
-    return Card(
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: () => context.push('/bookings/${booking.bookingId}'),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              // Status + time row
-              Row(
-                children: <Widget>[
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: statusColor.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Text(
-                      statusLabel,
-                      style: TextStyle(
-                        color: statusColor,
-                        fontWeight: FontWeight.w600,
-                        fontSize: 11,
-                      ),
-                    ),
-                  ),
-                  const Spacer(),
-                  Text(
-                    DateFormat('d MMM · HH:mm').format(departure.toLocal()),
-                    style: Theme.of(context).textTheme.labelSmall,
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              // Route
-              Text(
-                '${booking.originName ?? '—'} → ${booking.destinationName ?? '—'}',
-                style: Theme.of(context)
-                    .textTheme
-                    .bodyMedium
-                    ?.copyWith(fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 4),
-              // Seats + pickup
-              Text(
-                '${booking.seatCount} seat${booking.seatCount == 1 ? '' : 's'}'
-                '${booking.suggestedPickupName != null ? ' · Pickup: ${booking.suggestedPickupName}' : ''}',
-                style: Theme.of(context)
-                    .textTheme
-                    .bodySmall
-                    ?.copyWith(color: scheme.onSurfaceVariant),
-              ),
-              const SizedBox(height: 8),
-              // Earnings + action arrow
-              Row(
-                children: <Widget>[
-                  Text(
-                    'TZS ${NumberFormat('#,###').format(booking.totalPriceTzs)}',
-                    style: TextStyle(
-                      color: scheme.primary,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const Spacer(),
-                  Icon(Icons.chevron_right, color: scheme.onSurfaceVariant),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  String _driverStatusLabel(String status) {
-    switch (status) {
-      case 'pending':
-        return 'Awaiting payment';
-      case 'confirmed':
-        return 'Ready to start';
-      case 'completed':
-        return 'Completed';
-      case 'declined':
-        return 'Declined';
-      case 'driver_cancelled':
-        return 'You cancelled';
-      case 'passenger_cancelled':
-        return 'Passenger cancelled';
-      case 'no_show':
-        return 'No show';
-      default:
-        return status.replaceAll('_', ' ');
-    }
-  }
-
-  Color _driverStatusColor(String status, ColorScheme scheme) {
-    switch (status) {
-      case 'confirmed':
-        return Colors.green.shade700;
-      case 'pending':
-        return Colors.orange.shade700;
-      case 'completed':
-        return scheme.primary;
-      default:
-        return scheme.onSurfaceVariant;
-    }
-  }
-}
-
-// ── Passenger view (unchanged) ─────────────────────────────────────────────────
 
 class _PassengerBookingsView extends ConsumerWidget {
   const _PassengerBookingsView();
@@ -294,40 +122,47 @@ class _PassengerBookingsView extends ConsumerWidget {
           ),
         ),
         body: asyncBookings.when(
-          loading: () =>
-              const LoadingView(message: 'Loading your bookings...'),
-          error: (Object e, _) => ErrorView(
-            message: e.toString(),
+          loading: () => const LoadingView(message: 'Loading your bookings...'),
+          error: (Object error, _) => ErrorView(
+            message: error.toString(),
             onRetry: () => ref.invalidate(myBookingsProvider),
           ),
           data: (List<BookingEntity> bookings) {
-            final List<BookingEntity> cancelled =
-                bookings.where(_isCancelled).toList();
+            final List<BookingEntity> cancelled = bookings
+                .where((BookingEntity booking) =>
+                    booking.isCancelled || booking.isNoShow)
+                .toList();
             final List<BookingEntity> past = bookings
-                .where((BookingEntity b) => !_isCancelled(b) && _isPast(b))
+                .where((BookingEntity booking) =>
+                    !(booking.isCancelled || booking.isNoShow) &&
+                    (booking.isCompleted || booking.status == 'expired'))
                 .toList();
             final List<BookingEntity> upcoming = bookings
-                .where(
-                    (BookingEntity b) => !_isCancelled(b) && !_isPast(b))
+                .where((BookingEntity booking) =>
+                    !(booking.isCancelled || booking.isNoShow) &&
+                    !(booking.isCompleted || booking.status == 'expired'))
                 .toList();
 
             return TabBarView(
               children: <Widget>[
-                _PassengerBookingsTab(
+                _BookingsTab(
                   bookings: upcoming,
+                  role: _BookingRole.passenger,
                   icon: Icons.event_available,
                   emptyTitle: 'No upcoming bookings',
                   emptySubtitle: 'Search for routes to book your next ride',
                   onRefresh: () => ref.refresh(myBookingsProvider.future),
                 ),
-                _PassengerBookingsTab(
+                _BookingsTab(
                   bookings: past,
+                  role: _BookingRole.passenger,
                   icon: Icons.history,
                   emptyTitle: 'No past bookings',
                   onRefresh: () => ref.refresh(myBookingsProvider.future),
                 ),
-                _PassengerBookingsTab(
+                _BookingsTab(
                   bookings: cancelled,
+                  role: _BookingRole.passenger,
                   icon: Icons.cancel_outlined,
                   emptyTitle: 'No cancelled bookings',
                   onRefresh: () => ref.refresh(myBookingsProvider.future),
@@ -341,9 +176,12 @@ class _PassengerBookingsView extends ConsumerWidget {
   }
 }
 
-class _PassengerBookingsTab extends StatelessWidget {
-  const _PassengerBookingsTab({
+enum _BookingRole { passenger, driver }
+
+class _BookingsTab extends StatelessWidget {
+  const _BookingsTab({
     required this.bookings,
+    required this.role,
     required this.icon,
     required this.emptyTitle,
     required this.onRefresh,
@@ -351,6 +189,7 @@ class _PassengerBookingsTab extends StatelessWidget {
   });
 
   final List<BookingEntity> bookings;
+  final _BookingRole role;
   final IconData icon;
   final String emptyTitle;
   final String? emptySubtitle;
@@ -366,44 +205,34 @@ class _PassengerBookingsTab extends StatelessWidget {
       );
     }
 
+    final List<BookingEntity> sorted = <BookingEntity>[...bookings]
+      ..sort((BookingEntity a, BookingEntity b) {
+        final DateTime aTime = a.departureDatetime ?? a.createdAt;
+        final DateTime bTime = b.departureDatetime ?? b.createdAt;
+        final int aEta =
+            a.etaToPickupSeconds ?? a.etaToDropoffSeconds ?? 1 << 20;
+        final int bEta =
+            b.etaToPickupSeconds ?? b.etaToDropoffSeconds ?? 1 << 20;
+        if (a.isJourneyActive != b.isJourneyActive) {
+          return a.isJourneyActive ? -1 : 1;
+        }
+        if (aEta != bEta) {
+          return aEta.compareTo(bEta);
+        }
+        return aTime.compareTo(bTime);
+      });
+
     return RefreshIndicator(
       onRefresh: onRefresh,
       child: ListView.separated(
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(16),
-        itemCount: bookings.length,
+        itemCount: sorted.length,
         separatorBuilder: (_, __) => const SizedBox(height: 8),
         itemBuilder: (BuildContext context, int index) {
-          final BookingEntity booking = bookings[index];
-          return Card(
-            child: ListTile(
-              onTap: () => context.push('/bookings/${booking.bookingId}'),
-              title: Text(
-                '${booking.originName ?? 'Route'} → ${booking.destinationName ?? ''}',
-              ),
-              subtitle: Text(
-                '${DateFormat('EEE, d MMM · HH:mm').format((booking.departureDatetime ?? booking.createdAt).toLocal())}\nSeats: ${booking.seatCount}',
-              ),
-              trailing: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: <Widget>[
-                  Text(
-                    'TZS ${NumberFormat('#,###').format(booking.totalPriceTzs)}',
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.primary,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    booking.status.replaceAll('_', ' '),
-                    style: Theme.of(context).textTheme.labelSmall,
-                  ),
-                ],
-              ),
-              isThreeLine: true,
-            ),
+          return _BookingCard(
+            booking: sorted[index],
+            role: role,
           );
         },
       ),
@@ -411,11 +240,168 @@ class _PassengerBookingsTab extends StatelessWidget {
   }
 }
 
-bool _isCancelled(BookingEntity booking) {
-  return booking.status.contains('cancelled') ||
-      booking.status == 'declined';
-}
+class _BookingCard extends StatelessWidget {
+  const _BookingCard({
+    required this.booking,
+    required this.role,
+  });
 
-bool _isPast(BookingEntity booking) {
-  return booking.status == 'completed' || booking.status == 'expired';
+  final BookingEntity booking;
+  final _BookingRole role;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+    final DateTime departure = booking.departureDatetime ?? booking.createdAt;
+    final String statusLabel = _statusLabel(booking);
+    final Color statusColor = _statusColor(booking, scheme);
+
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () {
+          final String destination = booking.isJourneyActive
+              ? '/trip/${booking.bookingId}'
+              : '/bookings/${booking.bookingId}';
+          unawaited(context.push(destination));
+        },
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Row(
+                children: <Widget>[
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: statusColor.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      statusLabel,
+                      style: TextStyle(
+                        color: statusColor,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ),
+                  const Spacer(),
+                  Text(
+                    DateFormat('d MMM | HH:mm').format(departure.toLocal()),
+                    style: Theme.of(context).textTheme.labelSmall,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '${booking.originName ?? '-'} -> ${booking.destinationName ?? '-'}',
+                style: Theme.of(context)
+                    .textTheme
+                    .bodyMedium
+                    ?.copyWith(fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                _secondaryLine(booking),
+                style: Theme.of(context)
+                    .textTheme
+                    .bodySmall
+                    ?.copyWith(color: scheme.onSurfaceVariant),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: <Widget>[
+                  Text(
+                    'TZS ${NumberFormat('#,###').format(booking.totalPriceTzs)}',
+                    style: TextStyle(
+                      color: scheme.primary,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const Spacer(),
+                  Text(
+                    booking.isJourneyActive ? 'Open live trip' : 'View details',
+                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
+                  ),
+                  const SizedBox(width: 4),
+                  Icon(Icons.chevron_right, color: scheme.onSurfaceVariant),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _secondaryLine(BookingEntity booking) {
+    final String seats =
+        '${booking.seatCount} seat${booking.seatCount == 1 ? '' : 's'}';
+    final String stopLabel = booking.isPrePickupJourney
+        ? booking.pickupDisplayName
+        : booking.dropoffDisplayName;
+    final int? eta = booking.etaToPickupSeconds ?? booking.etaToDropoffSeconds;
+    final List<String> parts = <String>[
+      seats,
+      stopLabel,
+      if (eta != null) 'ETA ${_formatEta(eta)}',
+    ];
+    if (role == _BookingRole.driver && booking.canDriverMarkArrived) {
+      parts.add('Next: Arrive at pickup');
+    } else if (role == _BookingRole.driver && booking.canDriverMarkBoarded) {
+      parts.add('Next: Confirm boarding');
+    } else if (role == _BookingRole.driver && booking.canDriverMarkDroppedOff) {
+      parts.add('Next: Confirm drop-off');
+    }
+    return parts.join(' | ');
+  }
+
+  String _statusLabel(BookingEntity booking) {
+    if (booking.isCancelled) {
+      if (booking.normalizedStatus == 'driver_cancelled') {
+        return 'You cancelled';
+      }
+      if (booking.normalizedStatus == 'passenger_cancelled') {
+        return role == _BookingRole.driver
+            ? 'Passenger cancelled'
+            : 'Cancelled';
+      }
+      return 'Cancelled';
+    }
+    if (booking.isNoShow) {
+      return 'No show';
+    }
+    return booking.journeyLabel;
+  }
+
+  Color _statusColor(BookingEntity booking, ColorScheme scheme) {
+    if (booking.isCancelled || booking.isNoShow) {
+      return scheme.error;
+    }
+    if (booking.isCompleted) {
+      return scheme.primary;
+    }
+    if (booking.isJourneyActive) {
+      return Colors.blue.shade700;
+    }
+    if (booking.effectiveJourneyState == 'confirmed') {
+      return Colors.green.shade700;
+    }
+    if (booking.isPending) {
+      return Colors.orange.shade700;
+    }
+    return scheme.onSurfaceVariant;
+  }
+
+  String _formatEta(int seconds) {
+    if (seconds < 60) {
+      return '${seconds}s';
+    }
+    return '${(seconds / 60).ceil()}m';
+  }
 }

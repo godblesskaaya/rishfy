@@ -10,7 +10,6 @@ import '../../../../core/errors/app_exception.dart';
 import '../../../../shared/widgets/async_views.dart';
 import '../../../../shared/widgets/primary_button.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
-import '../../../trip/presentation/providers/trip_provider.dart';
 import '../../domain/entities/booking_entity.dart';
 import '../providers/booking_provider.dart';
 
@@ -20,7 +19,8 @@ class BookingDetailScreen extends ConsumerStatefulWidget {
   final String bookingId;
 
   @override
-  ConsumerState<BookingDetailScreen> createState() => _BookingDetailScreenState();
+  ConsumerState<BookingDetailScreen> createState() =>
+      _BookingDetailScreenState();
 }
 
 class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
@@ -47,58 +47,8 @@ class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
     final DateTime expiresAt = createdAt.add(const Duration(minutes: 10));
     final Duration left = expiresAt.difference(DateTime.now());
     setState(() => _declineTimeLeft = left.isNegative ? Duration.zero : left);
-    if (_declineTimeLeft == Duration.zero) _countdownTimer?.cancel();
-  }
-
-  Future<void> _startTrip(BookingEntity booking) async {
-    setState(() => _busy = true);
-    try {
-      await ref.read(startTripProvider.notifier).start(booking.bookingId);
-      if (!mounted) return;
-      final TripActionState s = ref.read(startTripProvider);
-      if (s.status == TripActionStatus.failed) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(s.error ?? 'Could not start trip')),
-        );
-        return;
-      }
-      await ref
-          .read(driverBroadcastProvider.notifier)
-          .startStreaming(booking.bookingId);
-      if (!mounted) return;
-      final DriverBroadcastState bs = ref.read(driverBroadcastProvider);
-      if (bs.isStreaming) {
-        context.push('/trip/${booking.bookingId}');
-      } else if (bs.error != null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not broadcast location: ${bs.error}')),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  Future<void> _completeTrip(BookingEntity booking) async {
-    setState(() => _busy = true);
-    try {
-      await ref.read(completeTripProvider.notifier).complete(booking.bookingId);
-      if (!mounted) return;
-      final TripActionState s = ref.read(completeTripProvider);
-      if (s.status == TripActionStatus.failed) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(s.error ?? 'Could not complete trip')),
-        );
-        return;
-      }
-      await ref.read(driverBroadcastProvider.notifier).stopStreaming();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Trip completed!')),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _busy = false);
+    if (_declineTimeLeft == Duration.zero) {
+      _countdownTimer?.cancel();
     }
   }
 
@@ -113,10 +63,10 @@ class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
           .cancelBooking(widget.bookingId, reason: reason);
       ref.invalidate(bookingDetailProvider(widget.bookingId));
       ref.invalidate(myBookingsProvider);
-    } catch (e) {
+    } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(_friendlyError(e, 'cancel booking'))),
+        SnackBar(content: Text(_friendlyError(error, 'cancel booking'))),
       );
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -124,7 +74,7 @@ class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
   }
 
   Future<String?> _showCancelReasonDialog() async {
-    final TextEditingController ctrl = TextEditingController();
+    final TextEditingController controller = TextEditingController();
     final bool? confirmed = await showDialog<bool>(
       context: context,
       builder: (BuildContext ctx) => AlertDialog(
@@ -133,10 +83,10 @@ class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
-            const Text('Let the driver know why (optional).'),
+            const Text('Let the other rider know why (optional).'),
             const SizedBox(height: 12),
             TextField(
-              controller: ctrl,
+              controller: controller,
               maxLines: 2,
               decoration: const InputDecoration(
                 hintText: 'Reason',
@@ -157,15 +107,10 @@ class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
         ],
       ),
     );
-    final String value = ctrl.text;
-    ctrl.dispose();
+    final String value = controller.text.trim();
+    controller.dispose();
     if (confirmed != true) return null;
     return value;
-  }
-
-  String _friendlyError(Object e, String action) {
-    if (e is AppException) return e.message;
-    return 'Failed to $action. Please try again.';
   }
 
   Future<void> _declineBooking() async {
@@ -180,7 +125,7 @@ class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
     if (!mounted) return;
     if (result.status == DeclineBookingStatus.success) {
       ref.invalidate(bookingDetailProvider(widget.bookingId));
-      ref.invalidate(myBookingsProvider);
+      ref.invalidate(myDriverBookingsProvider);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Booking declined.')),
       );
@@ -192,13 +137,13 @@ class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
   }
 
   Future<String?> _showDeclineReasonDialog() async {
-    final TextEditingController ctrl = TextEditingController();
+    final TextEditingController controller = TextEditingController();
     final String? reason = await showDialog<String>(
       context: context,
       builder: (BuildContext ctx) => AlertDialog(
         title: const Text('Decline booking'),
         content: TextField(
-          controller: ctrl,
+          controller: controller,
           maxLines: 2,
           decoration: const InputDecoration(
             hintText: 'Reason (optional)',
@@ -211,13 +156,13 @@ class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
             child: const Text('Cancel'),
           ),
           TextButton(
-            onPressed: () => Navigator.of(ctx).pop(ctrl.text.trim()),
+            onPressed: () => Navigator.of(ctx).pop(controller.text.trim()),
             child: const Text('Decline'),
           ),
         ],
       ),
     );
-    ctrl.dispose();
+    controller.dispose();
     return reason;
   }
 
@@ -227,23 +172,26 @@ class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
 
     final bool? confirmed = await showDialog<bool>(
       context: context,
-      builder: (BuildContext context) {
+      builder: (BuildContext dialogContext) {
         return StatefulBuilder(
-          builder:
-              (BuildContext context, void Function(void Function()) setDialogState) {
+          builder: (
+            BuildContext context,
+            void Function(void Function()) setDialogState,
+          ) {
             return AlertDialog(
               title: const Text('Rate this trip'),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
                   DropdownButtonFormField<int>(
-                    value: rating,
+                    initialValue: rating,
                     decoration: const InputDecoration(labelText: 'Rating'),
                     items: List<DropdownMenuItem<int>>.generate(
                       5,
-                      (int i) => DropdownMenuItem<int>(
-                        value: i + 1,
-                        child: Text('${i + 1} star${i == 0 ? '' : 's'}'),
+                      (int index) => DropdownMenuItem<int>(
+                        value: index + 1,
+                        child:
+                            Text('${index + 1} star${index == 0 ? '' : 's'}'),
                       ),
                     ),
                     onChanged: (int? value) {
@@ -282,6 +230,7 @@ class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
       commentCtrl.dispose();
       return;
     }
+
     setState(() => _busy = true);
     try {
       await ref.read(bookingDataSourceProvider).rateTrip(
@@ -293,10 +242,10 @@ class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
           );
       ref.invalidate(bookingDetailProvider(widget.bookingId));
       ref.invalidate(myBookingsProvider);
-    } catch (e) {
+    } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(_friendlyError(e, 'submit rating'))),
+        SnackBar(content: Text(_friendlyError(error, 'submit rating'))),
       );
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -304,9 +253,14 @@ class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
     }
   }
 
-  String _formatCountdown(Duration d) {
-    final int mins = d.inMinutes;
-    final int secs = d.inSeconds % 60;
+  String _friendlyError(Object error, String action) {
+    if (error is AppException) return error.message;
+    return 'Failed to $action. Please try again.';
+  }
+
+  String _formatCountdown(Duration duration) {
+    final int mins = duration.inMinutes;
+    final int secs = duration.inSeconds % 60;
     return '${mins.toString().padLeft(2, '0')}:${secs.toString().padLeft(2, '0')}';
   }
 
@@ -321,36 +275,29 @@ class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
       appBar: AppBar(title: const Text('Booking details')),
       body: asyncBooking.when(
         loading: () => const LoadingView(message: 'Loading booking...'),
-        error: (Object e, _) => ErrorView(
-          message: e.toString(),
+        error: (Object error, _) => ErrorView(
+          message: error.toString(),
           onRetry: () =>
               ref.invalidate(bookingDetailProvider(widget.bookingId)),
         ),
         data: (BookingEntity booking) {
-          final bool canCancel =
-              booking.status == 'pending' || booking.status == 'confirmed';
-          final bool canRate = booking.status == 'completed';
-          final bool isDriver = currentUserId != null &&
-              booking.driverId == currentUserId;
-          final bool canDecline = isDriver &&
-              booking.status == 'pending' &&
-              _declineTimeLeft > Duration.zero;
-          final bool declineWindowOpen = isDriver && booking.status == 'pending';
-          final bool isTrackable = booking.status == 'confirmed' ||
-              booking.status == 'in_progress';
-          final bool canStartTrip = isDriver && booking.status == 'confirmed';
-          final bool canCompleteTrip =
-              isDriver && booking.status == 'in_progress';
-          final DriverBroadcastState broadcastState =
-              ref.watch(driverBroadcastProvider);
-          final TripActionState startState = ref.watch(startTripProvider);
-          final TripActionState completeState =
-              ref.watch(completeTripProvider);
+          final bool isDriver =
+              currentUserId != null && booking.driverId == currentUserId;
+          final bool canCancel = !isDriver &&
+              (booking.isPending ||
+                  booking.effectiveJourneyState == 'confirmed');
+          final bool canRate = booking.isCompleted;
+          final bool declineWindowOpen =
+              isDriver && booking.normalizedStatus == 'pending';
+          final bool canDecline =
+              declineWindowOpen && _declineTimeLeft > Duration.zero;
+          final bool canOpenJourney = booking.isJourneyActive ||
+              booking.effectiveJourneyState == 'confirmed';
 
-          // Start countdown when booking data is first available
           if (declineWindowOpen && _countdownTimer == null) {
             WidgetsBinding.instance.addPostFrameCallback(
-                (_) => _startCountdown(booking.createdAt));
+              (_) => _startCountdown(booking.createdAt),
+            );
           }
 
           return SingleChildScrollView(
@@ -358,66 +305,19 @@ class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(AppConstants.spaceMd),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        Text(
-                          '${booking.originName ?? 'Route'} → '
-                          '${booking.destinationName ?? ''}',
-                          style: Theme.of(context).textTheme.titleMedium,
-                        ),
-                        const SizedBox(height: 8),
-                        _DetailRow(
-                            label: 'Booking ID', value: booking.bookingId),
-                        _DetailRow(
-                          label: 'Created',
-                          value: DateFormat('EEE, d MMM y · HH:mm')
-                              .format(booking.createdAt.toLocal()),
-                        ),
-                        if (booking.departureDatetime != null)
-                          _DetailRow(
-                            label: 'Departure',
-                            value: DateFormat('EEE, d MMM y · HH:mm')
-                                .format(booking.departureDatetime!.toLocal()),
-                          ),
-                        _DetailRow(label: 'Status', value: booking.status),
-                        _DetailRow(
-                            label: 'Payment', value: booking.paymentStatus),
-                        _DetailRow(
-                            label: 'Seats', value: '${booking.seatCount}'),
-                        _DetailRow(
-                          label: 'Total',
-                          value:
-                              'TZS ${NumberFormat('#,###').format(booking.totalPriceTzs)}',
-                        ),
-                        if (booking.confirmationCode != null)
-                          _DetailRow(
-                            label: 'Confirmation code',
-                            value: booking.confirmationCode!,
-                          ),
-                        if (booking.suggestedPickupName != null)
-                          _DetailRow(
-                            label: 'Pickup point',
-                            value: booking.suggestedPickupName!,
-                          ),
-                      ],
-                    ),
-                  ),
-                ),
+                _BookingSummaryCard(booking: booking),
                 const SizedBox(height: 16),
-                _BookingStatusTimeline(status: booking.status),
+                _BookingStatusTimeline(status: booking.effectiveJourneyState),
                 const SizedBox(height: 16),
-                // ── Decline section (drivers only) ─────────────────────
                 if (declineWindowOpen) ...<Widget>[
                   Container(
                     padding: const EdgeInsets.all(AppConstants.spaceMd),
                     decoration: BoxDecoration(
                       color: _declineTimeLeft > Duration.zero
                           ? Theme.of(context).colorScheme.tertiaryContainer
-                          : Theme.of(context).colorScheme.surfaceContainerHighest,
+                          : Theme.of(context)
+                              .colorScheme
+                              .surfaceContainerHighest,
                       borderRadius:
                           BorderRadius.circular(AppConstants.radiusMd),
                     ),
@@ -437,101 +337,48 @@ class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
                     ),
                   ),
                   const SizedBox(height: 8),
-                  if (canDecline)
-                    OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor:
-                            Theme.of(context).colorScheme.error,
-                        side: BorderSide(
-                            color: Theme.of(context).colorScheme.error),
-                      ),
-                      onPressed: declineState.status ==
-                              DeclineBookingStatus.loading
-                          ? null
-                          : _declineBooking,
-                      icon: const Icon(Icons.close),
-                      label: const Text('Decline booking'),
-                    ),
-                  const SizedBox(height: 8),
                 ],
-                // ── Live tracking entry (passenger or driver) ──────────
-                if (isTrackable) ...<Widget>[
+                if (canOpenJourney) ...<Widget>[
                   PrimaryButton(
-                    label: isDriver ? 'Open trip map' : 'Track driver',
-                    icon: Icons.location_on,
-                    onPressed: () =>
-                        context.push('/trip/${booking.bookingId}'),
+                    label: booking.isJourneyActive
+                        ? 'Open live trip'
+                        : 'Open journey workspace',
+                    icon: Icons.alt_route,
+                    onPressed: () => context.push('/trip/${booking.bookingId}'),
                   ),
                   const SizedBox(height: 12),
                 ],
-                // ── Driver: start trip (begins location broadcast) ─────
-                if (canStartTrip) ...<Widget>[
-                  PrimaryButton(
-                    label: (broadcastState.isStreaming ||
-                            startState.status == TripActionStatus.loading)
-                        ? 'Starting…'
-                        : 'Start trip',
-                    icon: Icons.play_arrow,
-                    loading: startState.status == TripActionStatus.loading,
-                    onPressed: (_busy ||
-                            broadcastState.isStreaming ||
-                            startState.status == TripActionStatus.loading)
-                        ? null
-                        : () => _startTrip(booking),
-                  ),
-                  if (broadcastState.error != null) ...<Widget>[
-                    const SizedBox(height: 6),
-                    Text(
-                      broadcastState.error!,
-                      style: TextStyle(
+                if (canDecline) ...<Widget>[
+                  OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Theme.of(context).colorScheme.error,
+                      side: BorderSide(
                         color: Theme.of(context).colorScheme.error,
-                        fontSize: 12,
                       ),
                     ),
-                  ],
-                  const SizedBox(height: 12),
-                ],
-                // ── Driver: complete trip ───────────────────────────────
-                if (canCompleteTrip) ...<Widget>[
-                  PrimaryButton(
-                    label: completeState.status == TripActionStatus.loading
-                        ? 'Completing…'
-                        : 'Complete trip',
-                    icon: Icons.check_circle_outline,
-                    loading:
-                        completeState.status == TripActionStatus.loading,
-                    onPressed: (_busy ||
-                            completeState.status == TripActionStatus.loading)
-                        ? null
-                        : () => _completeTrip(booking),
+                    onPressed:
+                        declineState.status == DeclineBookingStatus.loading
+                            ? null
+                            : _declineBooking,
+                    icon: const Icon(Icons.close),
+                    label: const Text('Decline booking'),
                   ),
-                  if (completeState.error != null) ...<Widget>[
-                    const SizedBox(height: 6),
-                    Text(
-                      completeState.error!,
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.error,
-                        fontSize: 12,
-                      ),
-                    ),
-                  ],
                   const SizedBox(height: 12),
                 ],
-                // ── Passenger actions ──────────────────────────────────
-                if (canCancel && !isDriver)
+                if (canCancel) ...<Widget>[
                   PrimaryButton(
                     label: 'Cancel booking',
                     loading: _busy,
                     onPressed: _busy ? null : _cancelBooking,
                   ),
-                if (canRate) ...<Widget>[
-                  if (canCancel && !isDriver) const SizedBox(height: 12),
+                  const SizedBox(height: 12),
+                ],
+                if (canRate)
                   PrimaryButton(
                     label: 'Rate trip',
                     loading: _busy,
                     onPressed: _busy ? null : _rateBooking,
                   ),
-                ],
               ],
             ),
           );
@@ -541,30 +388,106 @@ class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
   }
 }
 
+class _BookingSummaryCard extends StatelessWidget {
+  const _BookingSummaryCard({required this.booking});
+
+  final BookingEntity booking;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(AppConstants.spaceMd),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              '${booking.originName ?? 'Route'} -> '
+              '${booking.destinationName ?? ''}',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 8),
+            _DetailRow(label: 'Booking ID', value: booking.bookingId),
+            _DetailRow(
+              label: 'Created',
+              value: DateFormat('EEE, d MMM y | HH:mm')
+                  .format(booking.createdAt.toLocal()),
+            ),
+            if (booking.departureDatetime != null)
+              _DetailRow(
+                label: 'Departure',
+                value: DateFormat('EEE, d MMM y | HH:mm')
+                    .format(booking.departureDatetime!.toLocal()),
+              ),
+            _DetailRow(label: 'Journey state', value: booking.journeyLabel),
+            _DetailRow(
+                label: 'Route state', value: booking.effectiveRouteStatus),
+            _DetailRow(label: 'Payment', value: booking.paymentStatus),
+            _DetailRow(label: 'Seats', value: '${booking.seatCount}'),
+            _DetailRow(
+              label: 'Total',
+              value:
+                  'TZS ${NumberFormat('#,###').format(booking.totalPriceTzs)}',
+            ),
+            if (booking.confirmationCode != null)
+              _DetailRow(
+                label: 'Confirmation code',
+                value: booking.confirmationCode!,
+              ),
+            _DetailRow(label: 'Pickup', value: booking.pickupDisplayName),
+            _DetailRow(label: 'Drop-off', value: booking.dropoffDisplayName),
+            if (booking.etaToPickupSeconds != null)
+              _DetailRow(
+                label: 'ETA to pickup',
+                value: _formatEta(booking.etaToPickupSeconds!),
+              ),
+            if (booking.etaToDropoffSeconds != null)
+              _DetailRow(
+                label: 'ETA to drop-off',
+                value: _formatEta(booking.etaToDropoffSeconds!),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _formatEta(int seconds) {
+    if (seconds < 60) {
+      return '${seconds}s';
+    }
+    return '${(seconds / 60).ceil()}m';
+  }
+}
+
 class _BookingStatusTimeline extends StatelessWidget {
   const _BookingStatusTimeline({required this.status});
 
   final String status;
 
-  static const List<({String key, String label})> _steps = <({String key, String label})>[
+  static const List<({String key, String label})> _steps =
+      <({String key, String label})>[
     (key: 'pending', label: 'Pending'),
     (key: 'confirmed', label: 'Confirmed'),
-    (key: 'in_progress', label: 'In Transit'),
+    (key: 'driver_approaching', label: 'Approaching'),
+    (key: 'driver_arrived', label: 'Arrived'),
+    (key: 'in_transit', label: 'In transit'),
+    (key: 'walking_to_destination', label: 'Final walk'),
     (key: 'completed', label: 'Completed'),
   ];
 
   @override
   Widget build(BuildContext context) {
     final ColorScheme scheme = Theme.of(context).colorScheme;
-    final bool isCancelled = status == 'cancelled' || status == 'declined';
-    final int activeIndex =
-        _steps.indexWhere((s) => s.key == status);
+    final bool isExceptionState =
+        status == 'cancelled' || status == 'no_show' || status == 'declined';
+    final int activeIndex = _timelineIndex(status);
 
     return Row(
-      children: List<Widget>.generate(_steps.length * 2 - 1, (int i) {
-        if (i.isOdd) {
-          final int stepIndex = i ~/ 2;
-          final bool passed = !isCancelled && stepIndex < activeIndex;
+      children: List<Widget>.generate(_steps.length * 2 - 1, (int index) {
+        if (index.isOdd) {
+          final int stepIndex = index ~/ 2;
+          final bool passed = !isExceptionState && stepIndex < activeIndex;
           return Expanded(
             child: Container(
               height: 2,
@@ -572,18 +495,19 @@ class _BookingStatusTimeline extends StatelessWidget {
             ),
           );
         }
-        final int stepIndex = i ~/ 2;
-        final bool isActive = !isCancelled && stepIndex == activeIndex;
-        final bool passed = !isCancelled && stepIndex < activeIndex;
-        final bool isCancelledHere =
-            isCancelled && stepIndex == activeIndex.clamp(0, _steps.length - 1);
 
-        final Color circleColor = isCancelledHere
+        final int stepIndex = index ~/ 2;
+        final bool isActive = !isExceptionState && stepIndex == activeIndex;
+        final bool passed = !isExceptionState && stepIndex < activeIndex;
+        final bool isExceptionHere = isExceptionState &&
+            stepIndex == activeIndex.clamp(0, _steps.length - 1);
+
+        final Color circleColor = isExceptionHere
             ? scheme.error
             : (isActive || passed)
                 ? scheme.primary
                 : scheme.outlineVariant;
-        final Color textColor = (isActive || passed || isCancelledHere)
+        final Color textColor = (isActive || passed || isExceptionHere)
             ? scheme.onSurface
             : scheme.onSurfaceVariant;
 
@@ -595,13 +519,13 @@ class _BookingStatusTimeline extends StatelessWidget {
               height: 24,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: (isActive || passed) && !isCancelledHere
+                color: (isActive || passed) && !isExceptionHere
                     ? circleColor
                     : Colors.transparent,
                 border: Border.all(color: circleColor, width: 2),
               ),
               child: Center(
-                child: isCancelledHere
+                child: isExceptionHere
                     ? Icon(Icons.close, size: 12, color: scheme.error)
                     : passed
                         ? Icon(Icons.check, size: 12, color: scheme.onPrimary)
@@ -619,6 +543,27 @@ class _BookingStatusTimeline extends StatelessWidget {
         );
       }),
     );
+  }
+
+  int _timelineIndex(String state) {
+    switch (state) {
+      case 'walking_to_pickup':
+      case 'waiting_for_driver':
+        return 1;
+      case 'boarded':
+      case 'approaching_dropoff':
+        return 4;
+      case 'dropped_off':
+        return 5;
+      case 'cancelled':
+      case 'no_show':
+        return 2;
+      default:
+        final int exact = _steps.indexWhere(
+          (({String key, String label}) step) => step.key == state,
+        );
+        return exact >= 0 ? exact : 0;
+    }
   }
 }
 

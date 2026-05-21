@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/errors/app_exception.dart';
@@ -8,6 +9,9 @@ import '../../domain/entities/booking_entity.dart';
 
 String _errorMessage(Object e, String fallback) {
   if (e is AppException) return e.message;
+  if (e is DioException && e.error is AppException) {
+    return (e.error! as AppException).message;
+  }
   return fallback;
 }
 
@@ -47,9 +51,8 @@ class CreateBookingState {
       );
 }
 
-final createBookingProvider =
-    StateNotifierProvider.autoDispose<CreateBookingNotifier,
-        CreateBookingState>(
+final createBookingProvider = StateNotifierProvider.autoDispose<
+    CreateBookingNotifier, CreateBookingState>(
   (Ref ref) => CreateBookingNotifier(ref.read(bookingDataSourceProvider)),
 );
 
@@ -70,7 +73,8 @@ class CreateBookingNotifier extends StateNotifier<CreateBookingState> {
     } catch (e) {
       state = state.copyWith(
         status: CreateBookingStatus.failed,
-        error: _errorMessage(e, 'Could not start the booking. Please try again.'),
+        error:
+            _errorMessage(e, 'Could not start the booking. Please try again.'),
       );
     }
   }
@@ -118,6 +122,20 @@ final FutureProvider<List<BookingEntity>> myDriverBookingsProvider =
   return dtos.map((BookingDto d) => d.toDomain()).toList();
 });
 
+final Provider<AsyncValue<BookingEntity?>> activePassengerJourneyProvider =
+    Provider<AsyncValue<BookingEntity?>>((Ref ref) {
+  final AsyncValue<List<BookingEntity>> asyncBookings =
+      ref.watch(myBookingsProvider);
+  return asyncBookings.whenData(_selectActiveJourney);
+});
+
+final Provider<AsyncValue<BookingEntity?>> activeDriverJourneyProvider =
+    Provider<AsyncValue<BookingEntity?>>((Ref ref) {
+  final AsyncValue<List<BookingEntity>> asyncBookings =
+      ref.watch(myDriverBookingsProvider);
+  return asyncBookings.whenData(_selectActiveJourney);
+});
+
 /// Computed weekly stats for the driver from completed bookings.
 class DriverEarningsStats {
   const DriverEarningsStats({
@@ -149,7 +167,7 @@ final Provider<AsyncValue<DriverEarningsStats>> driverEarningsStatsProvider =
     int weekTrips = 0;
     int lifetime = 0;
     for (final BookingEntity b in bookings) {
-      if (b.status != 'completed') continue;
+      if (!b.isCompleted) continue;
       lifetime++;
       final DateTime ts = b.departureDatetime ?? b.createdAt;
       if (ts.isAfter(weekStart)) {
@@ -198,9 +216,8 @@ class DeclineBookingState {
       );
 }
 
-final declineBookingProvider =
-    StateNotifierProvider.autoDispose<DeclineBookingNotifier,
-        DeclineBookingState>(
+final declineBookingProvider = StateNotifierProvider.autoDispose<
+    DeclineBookingNotifier, DeclineBookingState>(
   (Ref ref) => DeclineBookingNotifier(ref.read(bookingDataSourceProvider)),
 );
 
@@ -232,62 +249,151 @@ enum TripActionStatus { idle, loading, success, failed }
 class TripActionState {
   const TripActionState({
     this.status = TripActionStatus.idle,
+    this.action,
     this.error,
   });
 
   final TripActionStatus status;
+  final String? action;
   final String? error;
 
-  TripActionState copyWith({TripActionStatus? status, String? error}) =>
+  TripActionState copyWith({
+    TripActionStatus? status,
+    String? action,
+    String? error,
+  }) =>
       TripActionState(
         status: status ?? this.status,
+        action: action ?? this.action,
         error: error,
       );
 }
 
-final startTripProvider =
-    StateNotifierProvider.autoDispose<TripActionNotifier, TripActionState>(
-  (Ref ref) => TripActionNotifier(ref.read(bookingDataSourceProvider), ref),
+final journeyActionProvider =
+    StateNotifierProvider.autoDispose<JourneyActionNotifier, TripActionState>(
+  (Ref ref) => JourneyActionNotifier(ref.read(bookingDataSourceProvider), ref),
 );
 
-final completeTripProvider =
-    StateNotifierProvider.autoDispose<TripActionNotifier, TripActionState>(
-  (Ref ref) => TripActionNotifier(ref.read(bookingDataSourceProvider), ref),
-);
-
-class TripActionNotifier extends StateNotifier<TripActionState> {
-  TripActionNotifier(this._ds, this._ref) : super(const TripActionState());
+class JourneyActionNotifier extends StateNotifier<TripActionState> {
+  JourneyActionNotifier(this._ds, this._ref) : super(const TripActionState());
 
   final BookingRemoteDataSource _ds;
   final Ref _ref;
 
+  Future<void> arrivePickup(String bookingId) async {
+    await _runAction(
+      bookingId: bookingId,
+      actionLabel: 'arrive at pickup',
+      operation: () => _ds.arriveAtPickup(bookingId),
+    );
+  }
+
+  Future<void> boardPassenger(String bookingId) async {
+    await _runAction(
+      bookingId: bookingId,
+      actionLabel: 'board passenger',
+      operation: () => _ds.boardPassenger(bookingId),
+    );
+  }
+
+  Future<void> dropoffPassenger(String bookingId) async {
+    await _runAction(
+      bookingId: bookingId,
+      actionLabel: 'drop off passenger',
+      operation: () => _ds.dropoffPassenger(bookingId),
+    );
+  }
+
+  Future<void> markNoShow(String bookingId, {String? reason}) async {
+    await _runAction(
+      bookingId: bookingId,
+      actionLabel: 'mark no-show',
+      operation: () => _ds.markNoShow(bookingId, reason: reason),
+    );
+  }
+
   Future<void> start(String bookingId) async {
-    state = state.copyWith(status: TripActionStatus.loading, error: null);
+    await _runAction(
+      bookingId: bookingId,
+      actionLabel: 'start trip',
+      operation: () => _ds.startTrip(bookingId),
+    );
+  }
+
+  Future<void> complete(String bookingId) async {
+    await _runAction(
+      bookingId: bookingId,
+      actionLabel: 'complete trip',
+      operation: () => _ds.completeTrip(bookingId),
+    );
+  }
+
+  Future<void> _runAction({
+    required String bookingId,
+    required String actionLabel,
+    required Future<BookingDto> Function() operation,
+  }) async {
+    state = state.copyWith(
+      status: TripActionStatus.loading,
+      action: actionLabel,
+      error: null,
+    );
     try {
-      await _ds.startTrip(bookingId);
-      _ref.invalidate(bookingDetailProvider(bookingId));
-      _ref.invalidate(myDriverBookingsProvider);
-      state = state.copyWith(status: TripActionStatus.success);
+      await operation();
+      _invalidateBookingSurfaces(bookingId);
+      state = state.copyWith(
+        status: TripActionStatus.success,
+        action: actionLabel,
+      );
     } catch (e) {
       state = state.copyWith(
         status: TripActionStatus.failed,
-        error: _errorMessage(e, 'Could not start trip.'),
+        action: actionLabel,
+        error: _errorMessage(e, 'Could not $actionLabel.'),
       );
     }
   }
 
-  Future<void> complete(String bookingId) async {
-    state = state.copyWith(status: TripActionStatus.loading, error: null);
-    try {
-      await _ds.completeTrip(bookingId);
-      _ref.invalidate(bookingDetailProvider(bookingId));
-      _ref.invalidate(myDriverBookingsProvider);
-      state = state.copyWith(status: TripActionStatus.success);
-    } catch (e) {
-      state = state.copyWith(
-        status: TripActionStatus.failed,
-        error: _errorMessage(e, 'Could not complete trip.'),
-      );
-    }
+  void _invalidateBookingSurfaces(String bookingId) {
+    _ref.invalidate(bookingDetailProvider(bookingId));
+    _ref.invalidate(myBookingsProvider);
+    _ref.invalidate(myDriverBookingsProvider);
+    _ref.invalidate(activePassengerJourneyProvider);
+    _ref.invalidate(activeDriverJourneyProvider);
+    _ref.invalidate(driverEarningsStatsProvider);
   }
+}
+
+BookingEntity? _selectActiveJourney(List<BookingEntity> bookings) {
+  final List<BookingEntity> active = bookings
+      .where((BookingEntity booking) => booking.isJourneyActive)
+      .toList()
+    ..sort(_sortBookingsForJourneyEntry);
+  if (active.isNotEmpty) {
+    return active.first;
+  }
+
+  final List<BookingEntity> upcoming = bookings
+      .where((BookingEntity booking) =>
+          !booking.isCancelled &&
+          !booking.isNoShow &&
+          !booking.isCompleted &&
+          !booking.isPending)
+      .toList()
+    ..sort(_sortBookingsForJourneyEntry);
+  if (upcoming.isNotEmpty) {
+    return upcoming.first;
+  }
+  return null;
+}
+
+int _sortBookingsForJourneyEntry(BookingEntity a, BookingEntity b) {
+  final int aEta = a.etaToPickupSeconds ?? a.etaToDropoffSeconds ?? (1 << 30);
+  final int bEta = b.etaToPickupSeconds ?? b.etaToDropoffSeconds ?? (1 << 30);
+  if (aEta != bEta) {
+    return aEta.compareTo(bEta);
+  }
+  final DateTime aTime = a.departureDatetime ?? a.createdAt;
+  final DateTime bTime = b.departureDatetime ?? b.createdAt;
+  return aTime.compareTo(bTime);
 }

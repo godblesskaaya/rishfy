@@ -45,8 +45,7 @@ class BookingRemoteDataSource {
   Future<BookingDto> getBooking(String bookingId) async {
     final Response<Map<String, dynamic>> res =
         await _dio.get<Map<String, dynamic>>('/api/v1/bookings/$bookingId');
-    return BookingDto.fromJson(
-        res.data?['booking'] as Map<String, dynamic>? ?? res.data!);
+    return BookingDto.fromJson(res.data ?? <String, dynamic>{});
   }
 
   Future<String> pollPaymentStatus(String paymentId) async {
@@ -92,20 +91,74 @@ class BookingRemoteDataSource {
   }
 
   Future<BookingDto> startTrip(String bookingId) async {
-    final Response<Map<String, dynamic>> res =
-        await _dio.post<Map<String, dynamic>>(
+    return _postBookingAction(
       '/api/v1/bookings/$bookingId/start-trip',
+      data: const <String, dynamic>{},
     );
-    return BookingDto.fromJson(
-        res.data?['booking'] as Map<String, dynamic>? ?? res.data!);
   }
 
   Future<BookingDto> completeTrip(String bookingId) async {
-    final Response<Map<String, dynamic>> res =
-        await _dio.post<Map<String, dynamic>>(
+    return _postBookingAction(
       '/api/v1/bookings/$bookingId/complete-trip',
+      data: const <String, dynamic>{},
     );
-    return BookingDto.fromJson(
-        res.data?['booking'] as Map<String, dynamic>? ?? res.data!);
+  }
+
+  Future<BookingDto> arriveAtPickup(String bookingId) async {
+    return _postBookingAction(
+      '/api/v1/bookings/$bookingId/arrive-pickup',
+      data: const <String, dynamic>{},
+    );
+  }
+
+  Future<BookingDto> boardPassenger(String bookingId) async {
+    try {
+      return await _postBookingAction(
+        '/api/v1/bookings/$bookingId/board-passenger',
+        data: const <String, dynamic>{},
+      );
+    } on DioException catch (error) {
+      if (_shouldFallbackToLegacyAction(error)) {
+        return startTrip(bookingId);
+      }
+      rethrow;
+    }
+  }
+
+  Future<BookingDto> dropoffPassenger(String bookingId) async {
+    try {
+      return await _postBookingAction(
+        '/api/v1/bookings/$bookingId/dropoff-passenger',
+        data: const <String, dynamic>{},
+      );
+    } on DioException catch (error) {
+      if (_shouldFallbackToLegacyAction(error)) {
+        return completeTrip(bookingId);
+      }
+      rethrow;
+    }
+  }
+
+  Future<BookingDto> markNoShow(String bookingId, {String? reason}) async {
+    return _postBookingAction(
+      '/api/v1/bookings/$bookingId/mark-no-show',
+      data: <String, dynamic>{
+        if (reason != null && reason.trim().isNotEmpty) 'reason': reason.trim(),
+      },
+    );
+  }
+
+  Future<BookingDto> _postBookingAction(
+    String path, {
+    required Map<String, dynamic> data,
+  }) async {
+    final Response<Map<String, dynamic>> res =
+        await _dio.post<Map<String, dynamic>>(path, data: data);
+    return BookingDto.fromJson(res.data ?? <String, dynamic>{});
+  }
+
+  bool _shouldFallbackToLegacyAction(DioException error) {
+    final int? statusCode = error.response?.statusCode;
+    return statusCode == 404 || statusCode == 405 || statusCode == 501;
   }
 }

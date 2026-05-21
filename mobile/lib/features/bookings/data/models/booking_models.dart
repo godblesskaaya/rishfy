@@ -1,3 +1,5 @@
+// ignore_for_file: sort_constructors_first
+
 import '../../domain/entities/booking_entity.dart';
 
 class BookingDto {
@@ -21,8 +23,31 @@ class BookingDto {
     this.suggestedPickupName,
     this.pickupLat,
     this.pickupLng,
+    this.suggestedDropoffName,
+    this.dropoffPointLat,
+    this.dropoffPointLng,
     this.destinationLat,
     this.destinationLng,
+    this.tripId,
+    this.journeyState,
+    this.routeStatus,
+    this.routePolyline,
+    this.pickupWalkingDistance,
+    this.pickupWalkingTime,
+    this.dropoffWalkingDistance,
+    this.dropoffWalkingTime,
+    this.etaToPickupSeconds,
+    this.etaToDropoffSeconds,
+    this.etaUpdatedAt,
+    this.etaApproximate,
+    this.etaStale,
+    this.driverLat,
+    this.driverLng,
+    this.driverHeading,
+    this.driverSpeedKmh,
+    this.driverLocationUpdatedAt,
+    this.tripStartedAt,
+    this.tripCompletedAt,
   });
 
   final String bookingId;
@@ -44,35 +69,230 @@ class BookingDto {
   final String? suggestedPickupName;
   final double? pickupLat;
   final double? pickupLng;
+  final String? suggestedDropoffName;
+  final double? dropoffPointLat;
+  final double? dropoffPointLng;
   final double? destinationLat;
   final double? destinationLng;
+  final String? tripId;
+  final String? journeyState;
+  final String? routeStatus;
+  final String? routePolyline;
+  final int? pickupWalkingDistance;
+  final int? pickupWalkingTime;
+  final int? dropoffWalkingDistance;
+  final int? dropoffWalkingTime;
+  final int? etaToPickupSeconds;
+  final int? etaToDropoffSeconds;
+  final DateTime? etaUpdatedAt;
+  final bool? etaApproximate;
+  final bool? etaStale;
+  final double? driverLat;
+  final double? driverLng;
+  final double? driverHeading;
+  final double? driverSpeedKmh;
+  final DateTime? driverLocationUpdatedAt;
+  final DateTime? tripStartedAt;
+  final DateTime? tripCompletedAt;
 
-  factory BookingDto.fromJson(Map<String, dynamic> j) => BookingDto(
-        bookingId: _readRequiredString(j, <String>['booking_id', 'id']),
-        routeId: _readRequiredString(j, <String>['route_id']),
-        passengerUserId:
-            _readString(j, <String>['passenger_user_id', 'passenger_id']) ?? '',
-        seatCount: _toInt(j['seat_count'] ?? j['seats_booked']),
-        totalPriceTzs: _toInt(j['total_price'] ?? j['total_price_tzs']),
-        status: _readRequiredString(j, <String>['status']),
-        paymentStatus: _readString(j, <String>['payment_status']) ?? 'pending',
-        createdAt: _parseDateTime(j['created_at']),
-        driverId: _readString(j, <String>['driver_id']),
-        confirmationCode: _readString(j, <String>['confirmation_code']),
-        originName: _readString(j, <String>['origin_name']),
-        destinationName: _readString(j, <String>['destination_name']),
-        departureDatetime: _readString(j, <String>['departure_datetime']) != null
-            ? _parseDateTime(j['departure_datetime'])
-            : null,
-        driverName: _readString(j, <String>['driver_name']),
-        vehiclePlate: _readString(j, <String>['vehicle_plate']),
-        paymentId: _readString(j, <String>['payment_id']),
-        suggestedPickupName: _readString(j, <String>['suggested_pickup_name']),
-        pickupLat: _toDouble(j['pickup_point_lat'] ?? j['pickupPointLat'] ?? j['pickup_lat'] ?? j['pickupLat']),
-        pickupLng: _toDouble(j['pickup_point_lng'] ?? j['pickupPointLng'] ?? j['pickup_lng'] ?? j['pickupLng']),
-        destinationLat: _toDouble(j['dropoff_point_lat'] ?? j['dropoffPointLat'] ?? j['dropoff_lat'] ?? j['dropoffLat'] ?? j['destination_lat']),
-        destinationLng: _toDouble(j['dropoff_point_lng'] ?? j['dropoffPointLng'] ?? j['dropoff_lng'] ?? j['dropoffLng'] ?? j['destination_lng']),
-      );
+  factory BookingDto.fromJson(Map<String, dynamic> j) {
+    final Map<String, dynamic> data = _readMap(j, <String>['data']) ?? j;
+    final Map<String, dynamic> booking =
+        _readMap(data, <String>['booking']) ?? data;
+    final Map<String, dynamic> trip = _readMap(data, <String>['trip']) ??
+        _readMap(booking, <String>['trip']) ??
+        <String, dynamic>{};
+    final Map<String, dynamic> tripContext =
+        _readMap(data, <String>['trip_context', 'journey_context']) ??
+            _readMap(booking, <String>['trip_context', 'journey_context']) ??
+            <String, dynamic>{};
+    final Map<String, dynamic> pickupPoint =
+        _readMap(tripContext, <String>['pickup_point']) ??
+            _readMap(booking, <String>['pickup_point']) ??
+            <String, dynamic>{};
+    final Map<String, dynamic> dropoffPoint =
+        _readMap(tripContext, <String>['dropoff_point']) ??
+            _readMap(booking, <String>['dropoff_point']) ??
+            <String, dynamic>{};
+    final Map<String, dynamic> driverLocation =
+        _readMap(tripContext, <String>['driver_location']) ??
+            _readMap(data, <String>['driver_location']) ??
+            <String, dynamic>{};
+
+    return BookingDto(
+      bookingId: _readRequiredString(booking, <String>['booking_id', 'id']),
+      routeId: _readRequiredString(booking, <String>['route_id']),
+      passengerUserId: _readString(
+            booking,
+            <String>['passenger_user_id', 'passenger_id'],
+          ) ??
+          '',
+      seatCount: _toInt(booking['seat_count'] ?? booking['seats_booked']),
+      totalPriceTzs:
+          _toInt(booking['total_price'] ?? booking['total_price_tzs']),
+      status: _readRequiredString(booking, <String>['status']),
+      paymentStatus:
+          _readString(booking, <String>['payment_status']) ?? 'pending',
+      createdAt: _parseDateTime(booking['created_at']),
+      driverId: _readString(booking, <String>['driver_id']),
+      confirmationCode: _readString(booking, <String>['confirmation_code']),
+      originName: _readString(booking, <String>['origin_name']),
+      destinationName:
+          _readString(booking, <String>['destination_name', 'dropoff_name']),
+      departureDatetime:
+          _readString(booking, <String>['departure_datetime']) != null
+              ? _parseDateTime(booking['departure_datetime'])
+              : null,
+      driverName: _readString(booking, <String>['driver_name']),
+      vehiclePlate: _readString(booking, <String>['vehicle_plate']),
+      paymentId: _readString(booking, <String>['payment_id']),
+      suggestedPickupName: _readString(
+            booking,
+            <String>['suggested_pickup_name', 'pickup_point_label'],
+          ) ??
+          _readString(pickupPoint, <String>['label', 'name']),
+      pickupLat: _toDouble(
+        pickupPoint['lat'] ??
+            booking['pickup_point_lat'] ??
+            booking['pickupPointLat'] ??
+            booking['pickup_lat'] ??
+            booking['pickupLat'],
+      ),
+      pickupLng: _toDouble(
+        pickupPoint['lng'] ??
+            pickupPoint['lon'] ??
+            booking['pickup_point_lng'] ??
+            booking['pickupPointLng'] ??
+            booking['pickup_lng'] ??
+            booking['pickupLng'],
+      ),
+      suggestedDropoffName: _readString(
+            booking,
+            <String>[
+              'suggested_dropoff_name',
+              'dropoff_point_label',
+              'dropoff_name',
+            ],
+          ) ??
+          _readString(dropoffPoint, <String>['label', 'name']),
+      dropoffPointLat: _toDouble(
+        dropoffPoint['lat'] ??
+            booking['dropoff_point_lat'] ??
+            booking['dropoffPointLat'] ??
+            booking['dropoff_lat'] ??
+            booking['dropoffLat'],
+      ),
+      dropoffPointLng: _toDouble(
+        dropoffPoint['lng'] ??
+            dropoffPoint['lon'] ??
+            booking['dropoff_point_lng'] ??
+            booking['dropoffPointLng'] ??
+            booking['dropoff_lng'] ??
+            booking['dropoffLng'],
+      ),
+      destinationLat: _toDouble(
+        booking['destination_lat'] ??
+            booking['final_destination_lat'] ??
+            booking['dropoff_point_lat'] ??
+            booking['dropoffPointLat'] ??
+            booking['dropoff_lat'] ??
+            booking['dropoffLat'],
+      ),
+      destinationLng: _toDouble(
+        booking['destination_lng'] ??
+            booking['final_destination_lng'] ??
+            booking['dropoff_point_lng'] ??
+            booking['dropoffPointLng'] ??
+            booking['dropoff_lng'] ??
+            booking['dropoffLng'],
+      ),
+      tripId: _readString(
+            trip,
+            <String>['trip_id', 'id'],
+          ) ??
+          _readString(booking, <String>['trip_id']) ??
+          _readString(tripContext, <String>['trip_id']),
+      journeyState: _readString(
+            tripContext,
+            <String>['journey_state', 'state', 'booking_journey_state'],
+          ) ??
+          _readString(
+              booking, <String>['journey_state', 'booking_journey_state']) ??
+          _readString(trip, <String>['journey_state', 'state']) ??
+          _readString(booking, <String>['status']),
+      routeStatus: _readString(
+            tripContext,
+            <String>['route_status'],
+          ) ??
+          _readString(booking, <String>['route_status']) ??
+          _readString(trip, <String>['route_status', 'status']),
+      routePolyline: _readString(
+            tripContext,
+            <String>['route_polyline', 'encoded_polyline'],
+          ) ??
+          _readString(booking, <String>['route_polyline', 'encoded_polyline']),
+      pickupWalkingDistance: _toNullableInt(
+        tripContext['pickup_walking_distance'] ??
+            booking['pickup_walking_distance'] ??
+            booking['pickupWalkingDistance'],
+      ),
+      pickupWalkingTime: _toNullableInt(
+        tripContext['pickup_walking_time'] ??
+            booking['pickup_walking_time'] ??
+            booking['pickupWalkingTime'],
+      ),
+      dropoffWalkingDistance: _toNullableInt(
+        tripContext['dropoff_walking_distance'] ??
+            booking['dropoff_walking_distance'] ??
+            booking['dropoffWalkingDistance'],
+      ),
+      dropoffWalkingTime: _toNullableInt(
+        tripContext['dropoff_walking_time'] ??
+            booking['dropoff_walking_time'] ??
+            booking['dropoffWalkingTime'],
+      ),
+      etaToPickupSeconds: _toNullableInt(
+        tripContext['eta_to_pickup_seconds'] ??
+            tripContext['pickup_eta_seconds'] ??
+            booking['eta_to_pickup_seconds'],
+      ),
+      etaToDropoffSeconds: _toNullableInt(
+        tripContext['eta_to_dropoff_seconds'] ??
+            tripContext['dropoff_eta_seconds'] ??
+            booking['eta_to_dropoff_seconds'],
+      ),
+      etaUpdatedAt: _parseNullableDateTime(
+        tripContext['eta_updated_at'] ?? booking['eta_updated_at'],
+      ),
+      etaApproximate: _toBool(
+        tripContext['eta_approximate'] ?? booking['eta_approximate'],
+      ),
+      etaStale: _toBool(
+        tripContext['eta_stale'] ?? booking['eta_stale'],
+      ),
+      driverLat: _toDouble(
+        driverLocation['lat'] ?? booking['driver_lat'],
+      ),
+      driverLng: _toDouble(
+        driverLocation['lng'] ?? driverLocation['lon'] ?? booking['driver_lng'],
+      ),
+      driverHeading: _toDouble(
+        driverLocation['heading'] ?? driverLocation['bearing'],
+      ),
+      driverSpeedKmh: _toDouble(
+        driverLocation['speed_kmh'] ?? driverLocation['speedKmh'],
+      ),
+      driverLocationUpdatedAt: _parseNullableDateTime(
+        driverLocation['timestamp'] ?? booking['driver_location_updated_at'],
+      ),
+      tripStartedAt: _parseNullableDateTime(
+        booking['trip_started_at'] ?? trip['actual_start_time'],
+      ),
+      tripCompletedAt: _parseNullableDateTime(
+        booking['trip_completed_at'] ?? trip['actual_end_time'],
+      ),
+    );
+  }
 
   BookingEntity toDomain() => BookingEntity(
         bookingId: bookingId,
@@ -94,8 +314,31 @@ class BookingDto {
         suggestedPickupName: suggestedPickupName,
         pickupLat: pickupLat,
         pickupLng: pickupLng,
+        suggestedDropoffName: suggestedDropoffName,
+        dropoffPointLat: dropoffPointLat,
+        dropoffPointLng: dropoffPointLng,
         destinationLat: destinationLat,
         destinationLng: destinationLng,
+        tripId: tripId,
+        journeyState: journeyState,
+        routeStatus: routeStatus,
+        routePolyline: routePolyline,
+        pickupWalkingDistance: pickupWalkingDistance,
+        pickupWalkingTime: pickupWalkingTime,
+        dropoffWalkingDistance: dropoffWalkingDistance,
+        dropoffWalkingTime: dropoffWalkingTime,
+        etaToPickupSeconds: etaToPickupSeconds,
+        etaToDropoffSeconds: etaToDropoffSeconds,
+        etaUpdatedAt: etaUpdatedAt,
+        etaApproximate: etaApproximate,
+        etaStale: etaStale,
+        driverLat: driverLat,
+        driverLng: driverLng,
+        driverHeading: driverHeading,
+        driverSpeedKmh: driverSpeedKmh,
+        driverLocationUpdatedAt: driverLocationUpdatedAt,
+        tripStartedAt: tripStartedAt,
+        tripCompletedAt: tripCompletedAt,
       );
 }
 
@@ -162,7 +405,8 @@ class CreateBookingRequest {
         if (pickupLng != null) 'pickupLng': pickupLng,
         if (dropoffLat != null) 'dropoffLat': dropoffLat,
         if (dropoffLng != null) 'dropoffLng': dropoffLng,
-        if (suggestedPickupName != null) 'suggestedPickupName': suggestedPickupName,
+        if (suggestedPickupName != null)
+          'suggestedPickupName': suggestedPickupName,
         if (pickupPointLat != null) 'pickupPointLat': pickupPointLat,
         if (pickupPointLng != null) 'pickupPointLng': pickupPointLng,
         if (dropoffPointLat != null) 'dropoffPointLat': dropoffPointLat,
@@ -221,12 +465,29 @@ double? _toDouble(dynamic value) {
   return null;
 }
 
+bool? _toBool(dynamic value) {
+  if (value == null) return null;
+  if (value is bool) return value;
+  if (value is num) return value != 0;
+  if (value is String) {
+    final String normalized = value.trim().toLowerCase();
+    if (normalized == 'true' || normalized == '1') return true;
+    if (normalized == 'false' || normalized == '0') return false;
+  }
+  return null;
+}
+
 int _toInt(dynamic value, {int fallback = 0}) {
   if (value == null) return fallback;
   if (value is int) return value;
   if (value is num) return value.toInt();
   if (value is String) return double.tryParse(value)?.round() ?? fallback;
   return fallback;
+}
+
+int? _toNullableInt(dynamic value) {
+  if (value == null) return null;
+  return _toInt(value, fallback: 0);
 }
 
 DateTime _parseDateTime(dynamic value, {DateTime? fallback}) {
@@ -238,12 +499,39 @@ DateTime _parseDateTime(dynamic value, {DateTime? fallback}) {
   }
 }
 
+DateTime? _parseNullableDateTime(dynamic value) {
+  if (value == null) return null;
+  try {
+    return DateTime.parse(value.toString());
+  } catch (_) {
+    return null;
+  }
+}
+
 String _readRequiredString(Map<String, dynamic> json, List<String> keys) {
   final String? value = _readString(json, keys);
   if (value == null || value.isEmpty) {
     throw FormatException('Missing required string for keys: $keys');
   }
   return value;
+}
+
+Map<String, dynamic>? _readMap(Map<String, dynamic> json, List<String> keys) {
+  for (final String key in keys) {
+    final dynamic value = json[key];
+    if (value is Map<String, dynamic>) {
+      return value;
+    }
+    if (value is Map) {
+      return value.map(
+        (dynamic mapKey, dynamic mapValue) => MapEntry(
+          mapKey.toString(),
+          mapValue,
+        ),
+      );
+    }
+  }
+  return null;
 }
 
 String? _readString(Map<String, dynamic> json, List<String> keys) {
