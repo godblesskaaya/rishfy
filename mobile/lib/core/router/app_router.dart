@@ -15,6 +15,7 @@ import '../../features/bookings/presentation/screens/create_booking_screen.dart'
 import '../../features/home/presentation/screens/driver_home_screen.dart';
 import '../../features/home/presentation/screens/passenger_home_screen.dart';
 import '../../features/home/presentation/screens/shell_screen.dart';
+import '../../features/notifications/presentation/providers/notification_provider.dart';
 import '../../features/notifications/presentation/screens/notification_preferences_screen.dart';
 import '../../features/notifications/presentation/screens/notifications_screen.dart';
 import '../../features/profile/presentation/screens/edit_profile_screen.dart';
@@ -39,6 +40,7 @@ final GlobalKey<NavigatorState> _shellNavKey =
     GlobalKey<NavigatorState>(debugLabel: 'shell');
 
 final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
+  ref.watch(notificationInteractionProvider);
   return GoRouter(
     navigatorKey: _rootNavKey,
     initialLocation: '/splash',

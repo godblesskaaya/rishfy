@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,6 +9,7 @@ import '../../../../core/localization/app_localizations.dart';
 import '../../../../shared/providers/active_role_provider.dart';
 import '../../../auth/domain/entities/user.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
+import '../../../notifications/presentation/providers/notification_provider.dart';
 import '../../../profile/domain/emergency_contact.dart';
 import '../../../profile/presentation/providers/emergency_contacts_provider.dart';
 
@@ -16,16 +19,44 @@ class ShellScreen extends ConsumerWidget {
   final Widget child;
 
   List<_Tab> _passengerTabs(AppLocalizations l) => <_Tab>[
-        _Tab(path: '/home', icon: Icons.home_outlined, activeIcon: Icons.home, label: l.t('home')),
-        _Tab(path: '/search', icon: Icons.search, activeIcon: Icons.search, label: l.t('search')),
-        _Tab(path: '/bookings', icon: Icons.receipt_long_outlined, activeIcon: Icons.receipt_long, label: l.t('bookings')),
-        _Tab(path: '/profile', icon: Icons.person_outline, activeIcon: Icons.person, label: l.t('profile')),
+        _Tab(
+            path: '/home',
+            icon: Icons.home_outlined,
+            activeIcon: Icons.home,
+            label: l.t('home')),
+        _Tab(
+            path: '/search',
+            icon: Icons.search,
+            activeIcon: Icons.search,
+            label: l.t('search')),
+        _Tab(
+            path: '/bookings',
+            icon: Icons.receipt_long_outlined,
+            activeIcon: Icons.receipt_long,
+            label: l.t('bookings')),
+        _Tab(
+            path: '/profile',
+            icon: Icons.person_outline,
+            activeIcon: Icons.person,
+            label: l.t('profile')),
       ];
 
   List<_Tab> _driverTabs(AppLocalizations l) => <_Tab>[
-        _Tab(path: '/home', icon: Icons.home_outlined, activeIcon: Icons.home, label: l.t('home')),
-        _Tab(path: '/bookings', icon: Icons.receipt_long_outlined, activeIcon: Icons.receipt_long, label: l.locale.languageCode == 'sw' ? 'Safari' : 'Trips'),
-        _Tab(path: '/profile', icon: Icons.person_outline, activeIcon: Icons.person, label: l.t('profile')),
+        _Tab(
+            path: '/home',
+            icon: Icons.home_outlined,
+            activeIcon: Icons.home,
+            label: l.t('home')),
+        _Tab(
+            path: '/bookings',
+            icon: Icons.receipt_long_outlined,
+            activeIcon: Icons.receipt_long,
+            label: l.locale.languageCode == 'sw' ? 'Safari' : 'Trips'),
+        _Tab(
+            path: '/profile',
+            icon: Icons.person_outline,
+            activeIcon: Icons.person,
+            label: l.t('profile')),
       ];
 
   int _indexOf(String location, List<_Tab> tabs) {
@@ -41,6 +72,47 @@ class ShellScreen extends ConsumerWidget {
     final AsyncValue<AuthState> auth = ref.watch(authControllerProvider);
     final String role = ref.watch(activeRoleProvider);
     final AppLocalizations l = AppLocalizations.of(context);
+    final NotificationInteractionState notificationInteraction =
+        ref.watch(notificationInteractionProvider);
+
+    ref.listen<NotificationInteractionState>(
+      notificationInteractionProvider,
+      (
+        NotificationInteractionState? previous,
+        NotificationInteractionState next,
+      ) {
+        final NotificationPrompt? prompt = next.foregroundPrompt;
+        if (prompt != null &&
+            prompt.id != previous?.foregroundPrompt?.id &&
+            context.mounted) {
+          ScaffoldMessenger.of(context)
+            ..hideCurrentSnackBar()
+            ..showSnackBar(
+              SnackBar(
+                content: Text('${prompt.title}\n${prompt.body}'),
+                action: SnackBarAction(
+                  label: 'Open',
+                  onPressed: () => unawaited(context.push(prompt.route)),
+                ),
+              ),
+            );
+          ref
+              .read(notificationInteractionProvider.notifier)
+              .clearForegroundPrompt();
+        }
+      },
+    );
+
+    final String? pendingRoute = notificationInteraction.pendingRoute;
+    if (pendingRoute != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!context.mounted) {
+          return;
+        }
+        ref.read(notificationInteractionProvider.notifier).clearPendingRoute();
+        unawaited(context.push(pendingRoute));
+      });
+    }
 
     return auth.when(
       data: (AuthState state) {
@@ -272,7 +344,7 @@ class _EmergencyFabState extends State<_EmergencyFab>
     return GestureDetector(
       onLongPressStart: (_) {
         setState(() => _isHolding = true);
-        _controller.forward();
+        unawaited(_controller.forward());
       },
       onLongPressEnd: (_) {
         if (_isHolding) {

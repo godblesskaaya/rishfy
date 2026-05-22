@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -7,69 +9,57 @@ import '../../../../shared/widgets/async_views.dart';
 import '../../data/models/notification_models.dart';
 import '../providers/notification_preferences_provider.dart';
 import '../providers/notification_provider.dart';
+import '../providers/notification_provider.dart' as notification_ui
+    show notificationRouteFor;
 
 class NotificationsScreen extends ConsumerWidget {
   const NotificationsScreen({super.key});
 
   IconData _iconForType(String type) {
     switch (type) {
-      case 'booking_confirmed': return Icons.check_circle;
-      case 'booking_cancelled': return Icons.cancel;
-      case 'trip_started': return Icons.directions_car;
-      case 'trip_completed': return Icons.flag;
-      case 'payment_confirmed': return Icons.payments;
-      case 'payment_failed': return Icons.payment;
-      default: return Icons.notifications;
+      case 'booking_confirmed':
+        return Icons.check_circle;
+      case 'booking_cancelled':
+        return Icons.cancel;
+      case 'trip_started':
+        return Icons.directions_car;
+      case 'trip_completed':
+        return Icons.flag;
+      case 'payment_confirmed':
+        return Icons.payments;
+      case 'payment_failed':
+        return Icons.payment;
+      default:
+        return Icons.notifications;
     }
   }
 
-  void _handleNotificationTap(BuildContext ctx, NotificationDto n) {
-    final Map<String, dynamic>? data = n.data;
-    String? readString(List<String> keys) {
-      if (data == null) return null;
-      for (final String key in keys) {
-        final Object? value = data[key];
-        if (value is String && value.isNotEmpty) return value;
-        if (value is num) return value.toString();
-      }
-      return null;
-    }
-
-    // Trip events take precedence — they're time-sensitive.
-    if (n.type == 'trip_started' || n.type == 'trip_completed') {
-      final String? bookingId =
-          readString(<String>['booking_id', 'bookingId', 'trip_id', 'tripId']);
-      if (bookingId != null) {
-        ctx.push(
-          n.type == 'trip_started'
-              ? '/trip/$bookingId'
-              : '/bookings/$bookingId',
-        );
-        return;
-      }
-    }
-
-    final String? bookingId =
-        readString(<String>['booking_id', 'bookingId']);
-    if (bookingId != null) {
-      ctx.push('/bookings/$bookingId');
-      return;
-    }
-
-    final String? routeId = readString(<String>['route_id', 'routeId']);
-    if (routeId != null) {
-      ctx.push('/routes/$routeId');
+  void _handleNotificationTap(
+      BuildContext context, NotificationDto notification) {
+    final String? route = notificationRouteFor(
+      type: notification.type,
+      data: notification.data,
+    );
+    if (route != null) {
+      unawaited(context.push(route));
     }
   }
 
-  Color _colorForType(String type, BuildContext ctx) {
+  String? notificationRouteFor({
+    required String type,
+    Map<String, dynamic>? data,
+  }) {
+    return notification_ui.notificationRouteFor(type: type, data: data);
+  }
+
+  Color _colorForType(String type, BuildContext context) {
     if (type.contains('failed') || type.contains('cancel')) {
-      return Theme.of(ctx).colorScheme.error;
+      return Theme.of(context).colorScheme.error;
     }
     if (type.contains('confirm') || type.contains('complete')) {
       return Colors.green;
     }
-    return Theme.of(ctx).colorScheme.primary;
+    return Theme.of(context).colorScheme.primary;
   }
 
   @override
@@ -88,10 +78,13 @@ class NotificationsScreen extends ConsumerWidget {
                   color: Theme.of(context).colorScheme.primary,
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: Text('${state.unreadCount}',
-                    style: TextStyle(
-                        color: Theme.of(context).colorScheme.onPrimary,
-                        fontSize: 12)),
+                child: Text(
+                  '${state.unreadCount}',
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onPrimary,
+                    fontSize: 12,
+                  ),
+                ),
               ),
             ],
           ],
@@ -99,7 +92,8 @@ class NotificationsScreen extends ConsumerWidget {
         actions: <Widget>[
           if (state.unreadCount > 0)
             TextButton(
-              onPressed: () => ref.read(notificationProvider.notifier).markAllRead(),
+              onPressed: () =>
+                  ref.read(notificationProvider.notifier).markAllRead(),
               child: const Text('Mark all read'),
             ),
           IconButton(
@@ -112,13 +106,19 @@ class NotificationsScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildBody(BuildContext context, WidgetRef ref, NotificationState state) {
+  Widget _buildBody(
+    BuildContext context,
+    WidgetRef ref,
+    NotificationState state,
+  ) {
     final NotificationPreferences prefs =
         ref.watch(notificationPreferencesProvider);
     final List<NotificationDto> visible = state.notifications
-        .where((NotificationDto n) =>
-            prefs.isEnabled(categoryFor(n.type)) ||
-            categoryFor(n.type) == NotificationCategory.system)
+        .where(
+          (NotificationDto notification) =>
+              prefs.isEnabled(categoryFor(notification.type)) ||
+              categoryFor(notification.type) == NotificationCategory.system,
+        )
         .toList();
     if (state.isLoading && visible.isEmpty) {
       return const Center(child: CircularProgressIndicator());
@@ -141,17 +141,21 @@ class NotificationsScreen extends ConsumerWidget {
       child: ListView.separated(
         itemCount: visible.length,
         separatorBuilder: (_, __) => const Divider(height: 1),
-        itemBuilder: (BuildContext ctx, int i) {
-          final NotificationDto n = visible[i];
+        itemBuilder: (BuildContext itemContext, int index) {
+          final NotificationDto notification = visible[index];
           return _NotificationTile(
-            notification: n,
-            icon: _iconForType(n.type),
-            iconColor: _colorForType(n.type, ctx),
+            notification: notification,
+            icon: _iconForType(notification.type),
+            iconColor: _colorForType(notification.type, itemContext),
             onTap: () {
-              if (!n.isRead) {
-                ref.read(notificationProvider.notifier).markRead(n.notificationId);
+              if (!notification.isRead) {
+                unawaited(
+                  ref
+                      .read(notificationProvider.notifier)
+                      .markRead(notification.notificationId),
+                );
               }
-              _handleNotificationTap(ctx, n);
+              _handleNotificationTap(itemContext, notification);
             },
           );
         },
@@ -178,27 +182,36 @@ class _NotificationTile extends StatelessWidget {
     final bool unread = !notification.isRead;
     return ListTile(
       tileColor: unread
-          ? Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.3)
+          ? Theme.of(context)
+              .colorScheme
+              .primaryContainer
+              .withValues(alpha: 0.3)
           : null,
       leading: CircleAvatar(
         backgroundColor: iconColor.withValues(alpha: 0.15),
         child: Icon(icon, color: iconColor, size: 20),
       ),
-      title: Text(notification.title,
-          style: TextStyle(
-              fontWeight: unread ? FontWeight.bold : FontWeight.normal)),
+      title: Text(
+        notification.title,
+        style: TextStyle(
+          fontWeight: unread ? FontWeight.bold : FontWeight.normal,
+        ),
+      ),
       subtitle: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           Text(notification.body),
           const SizedBox(height: 2),
-          Text(timeago.format(notification.createdAt),
-              style: Theme.of(context).textTheme.labelSmall),
+          Text(
+            timeago.format(notification.createdAt),
+            style: Theme.of(context).textTheme.labelSmall,
+          ),
         ],
       ),
       trailing: unread
           ? Container(
-              width: 8, height: 8,
+              width: 8,
+              height: 8,
               decoration: BoxDecoration(
                 color: Theme.of(context).colorScheme.primary,
                 shape: BoxShape.circle,

@@ -11,6 +11,7 @@ class BookingEntity extends Equatable {
     required this.paymentStatus,
     required this.createdAt,
     this.driverId,
+    this.passengerName,
     this.confirmationCode,
     this.originName,
     this.destinationName,
@@ -30,6 +31,7 @@ class BookingEntity extends Equatable {
     this.journeyState,
     this.routeStatus,
     this.routePolyline,
+    this.estimatedPickupTime,
     this.pickupWalkingDistance,
     this.pickupWalkingTime,
     this.dropoffWalkingDistance,
@@ -44,8 +46,12 @@ class BookingEntity extends Equatable {
     this.driverHeading,
     this.driverSpeedKmh,
     this.driverLocationUpdatedAt,
+    this.arrivedPickupAt,
+    this.boardedAt,
+    this.droppedOffAt,
     this.tripStartedAt,
     this.tripCompletedAt,
+    this.journeyCompletedAt,
   });
 
   final String bookingId;
@@ -57,6 +63,7 @@ class BookingEntity extends Equatable {
   final String paymentStatus;
   final DateTime createdAt;
   final String? driverId;
+  final String? passengerName;
   final String? confirmationCode;
   final String? originName;
   final String? destinationName;
@@ -76,6 +83,7 @@ class BookingEntity extends Equatable {
   final String? journeyState;
   final String? routeStatus;
   final String? routePolyline;
+  final DateTime? estimatedPickupTime;
   final int? pickupWalkingDistance;
   final int? pickupWalkingTime;
   final int? dropoffWalkingDistance;
@@ -90,8 +98,12 @@ class BookingEntity extends Equatable {
   final double? driverHeading;
   final double? driverSpeedKmh;
   final DateTime? driverLocationUpdatedAt;
+  final DateTime? arrivedPickupAt;
+  final DateTime? boardedAt;
+  final DateTime? droppedOffAt;
   final DateTime? tripStartedAt;
   final DateTime? tripCompletedAt;
+  final DateTime? journeyCompletedAt;
 
   static const Set<String> _activeJourneyStates = <String>{
     'confirmed',
@@ -114,11 +126,17 @@ class BookingEntity extends Equatable {
       return explicitJourneyState;
     }
 
-    if (tripCompletedAt != null) {
+    if (journeyCompletedAt != null) {
       return 'completed';
     }
-    if (tripStartedAt != null) {
+    if (droppedOffAt != null || tripCompletedAt != null) {
+      return 'walking_to_destination';
+    }
+    if (boardedAt != null || tripStartedAt != null) {
       return 'in_transit';
+    }
+    if (arrivedPickupAt != null) {
+      return 'driver_arrived';
     }
 
     switch (normalizedStatus) {
@@ -201,11 +219,15 @@ class BookingEntity extends Equatable {
         'completed',
       }.contains(effectiveJourneyState);
 
-  bool get canDriverMarkArrived => effectiveJourneyState == 'confirmed';
+  bool get canDriverMarkArrived => const <String>{
+        'confirmed',
+        'walking_to_pickup',
+        'waiting_for_driver',
+        'driver_approaching',
+      }.contains(effectiveJourneyState);
   bool get canDriverMarkBoarded => const <String>{
         'confirmed',
         'driver_arrived',
-        'driver_approaching',
       }.contains(effectiveJourneyState);
   bool get canDriverMarkDroppedOff => const <String>{
         'boarded',
@@ -214,21 +236,51 @@ class BookingEntity extends Equatable {
       }.contains(effectiveJourneyState);
   bool get canDriverMarkNoShow => const <String>{
         'confirmed',
+        'waiting_for_driver',
         'driver_arrived',
         'driver_approaching',
       }.contains(effectiveJourneyState);
+  bool get canParticipantCompleteJourney => const <String>{
+        'dropped_off',
+        'walking_to_destination',
+      }.contains(effectiveJourneyState);
+  bool get hasPassengerIdentity =>
+      passengerName != null && passengerName!.trim().isNotEmpty;
 
   String get pickupDisplayName =>
       suggestedPickupName ?? originName ?? 'Pickup point';
 
   String get dropoffDisplayName =>
       suggestedDropoffName ?? destinationName ?? 'Drop-off point';
+  String get passengerDisplayName =>
+      hasPassengerIdentity ? passengerName!.trim() : 'Passenger';
 
   double? get resolvedPickupLat => pickupLat;
   double? get resolvedPickupLng => pickupLng;
   double? get resolvedDropoffLat => dropoffPointLat ?? destinationLat;
   double? get resolvedDropoffLng => dropoffPointLng ?? destinationLng;
   String get journeyStreamId => tripId ?? bookingId;
+  String get nextStopLabel =>
+      isPrePickupJourney ? pickupDisplayName : dropoffDisplayName;
+
+  String get nextDriverActionLabel {
+    if (canDriverMarkArrived) {
+      return 'Arrive at pickup';
+    }
+    if (canDriverMarkBoarded) {
+      return 'Confirm boarding';
+    }
+    if (canDriverMarkDroppedOff) {
+      return 'Confirm drop-off';
+    }
+    if (canParticipantCompleteJourney) {
+      return 'Passenger finishing final walk';
+    }
+    if (isCompleted) {
+      return 'Trip completed';
+    }
+    return journeyLabel;
+  }
 
   String get journeyLabel {
     switch (effectiveJourneyState) {
@@ -290,6 +342,7 @@ class BookingEntity extends Equatable {
         bookingId,
         status,
         paymentStatus,
+        passengerName,
         journeyState,
         routeStatus,
         tripId,
@@ -297,11 +350,16 @@ class BookingEntity extends Equatable {
         pickupLng,
         dropoffPointLat,
         dropoffPointLng,
+        estimatedPickupTime,
         destinationLat,
         destinationLng,
         etaToPickupSeconds,
         etaToDropoffSeconds,
         driverLat,
         driverLng,
+        arrivedPickupAt,
+        boardedAt,
+        droppedOffAt,
+        journeyCompletedAt,
       ];
 }

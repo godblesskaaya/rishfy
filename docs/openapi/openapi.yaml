@@ -542,7 +542,7 @@ paths:
   /bookings/{id}/cancel:
     post:
       tags: [bookings]
-      summary: Cancel a booking
+      summary: Cancel a booking before boarding begins
       security: [{ bearerAuth: [] }]
       parameters:
         - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
@@ -571,7 +571,7 @@ paths:
                           refundedAmountTzs: { type: integer }
                           refundReference: { type: string }
         '403': { description: Not the passenger }
-        '409': { description: Cannot cancel in current state }
+        '409': { description: Cannot cancel after the booking has entered the in-vehicle or post-dropoff legs }
 
   /bookings/{id}/emergency:
     post:
@@ -596,8 +596,9 @@ paths:
   /bookings/{id}/start-trip:
     post:
       tags: [bookings]
-      summary: Driver starts the trip
+      summary: Legacy alias for boarding the passenger
       deprecated: true
+      description: Prefer `/bookings/{id}/board-passenger`. Successful calls transition the booking to the canonical `in_transit` journey state.
       security: [{ bearerAuth: [] }]
       parameters:
         - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
@@ -608,8 +609,9 @@ paths:
   /bookings/{id}/complete-trip:
     post:
       tags: [bookings]
-      summary: Driver marks trip complete
+      summary: Legacy alias for closing older trip flows
       deprecated: true
+      description: Prefer `/bookings/{id}/dropoff-passenger` followed by `/bookings/{id}/complete-journey`. This endpoint remains for compatibility with older mobile flows.
       security: [{ bearerAuth: [] }]
       parameters:
         - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
@@ -620,6 +622,7 @@ paths:
     post:
       tags: [bookings]
       summary: Driver marks arrival at the booking pickup point
+      description: Allowed only before boarding begins, typically from `confirmed` or `driver_approaching`.
       security: [{ bearerAuth: [] }]
       parameters:
         - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
@@ -638,6 +641,7 @@ paths:
     post:
       tags: [bookings]
       summary: Driver confirms passenger boarding and starts the in-vehicle leg
+      description: Allowed only from `driver_arrived`. The canonical post-boarding state is `in_transit`.
       security: [{ bearerAuth: [] }]
       parameters:
         - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
@@ -656,6 +660,7 @@ paths:
     post:
       tags: [bookings]
       summary: Driver confirms passenger dropoff and begins the final walking leg
+      description: Allowed only from the in-vehicle leg. The canonical post-dropoff state is `walking_to_destination`.
       security: [{ bearerAuth: [] }]
       parameters:
         - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
@@ -674,6 +679,7 @@ paths:
     post:
       tags: [bookings]
       summary: Driver marks the booking as a no-show before boarding
+      description: Allowed only from `driver_arrived`, after the driver has reached pickup but before the passenger boards.
       security: [{ bearerAuth: [] }]
       parameters:
         - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
@@ -700,6 +706,7 @@ paths:
     post:
       tags: [bookings]
       summary: Passenger or driver completes the final walking leg and closes the booking journey
+      description: Allowed only once the booking has reached `walking_to_destination`. Legacy `dropped_off` rows remain accepted for compatibility.
       security: [{ bearerAuth: [] }]
       parameters:
         - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
@@ -1369,7 +1376,7 @@ components:
           type: string
           nullable: true
           enum: [confirmed, driver_approaching, driver_arrived, boarded, in_transit, dropped_off, walking_to_destination, completed, cancelled, no_show]
-          description: Passenger journey lifecycle state layered on top of coarse booking status
+          description: Passenger journey lifecycle state layered on top of coarse booking status. `in_transit` is the canonical post-boarding state; `boarded` and `dropped_off` are legacy compatibility values.
         payment_status: { type: string, enum: [pending, paid, failed, refunded], nullable: true }
         total_price: { type: number }
         platform_fee: { type: number }

@@ -148,6 +148,13 @@ class BookingRemoteDataSource {
     );
   }
 
+  Future<BookingDto> completeJourney(String bookingId) async {
+    return _postBookingAction(
+      '/api/v1/bookings/$bookingId/complete-journey',
+      data: const <String, dynamic>{},
+    );
+  }
+
   Future<BookingDto> _postBookingAction(
     String path, {
     required Map<String, dynamic> data,

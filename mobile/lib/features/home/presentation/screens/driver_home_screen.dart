@@ -213,18 +213,12 @@ class _DriverJourneyCard extends StatelessWidget {
           );
         }
 
-        final String nextAction = booking.canDriverMarkArrived
-            ? 'Arrive at pickup'
-            : booking.canDriverMarkBoarded
-                ? 'Confirm boarding'
-                : booking.canDriverMarkDroppedOff
-                    ? 'Confirm drop-off'
-                    : booking.isCompleted
-                        ? 'Trip completed'
-                        : booking.journeyLabel;
-        final String focusLabel = booking.isPrePickupJourney
-            ? booking.pickupDisplayName
-            : booking.dropoffDisplayName;
+        final String nextAction = booking.nextDriverActionLabel;
+        final String focusLabel = booking.nextStopLabel;
+        final int? eta =
+            booking.etaToPickupSeconds ?? booking.etaToDropoffSeconds;
+        final String stopLabel =
+            booking.isPrePickupJourney ? 'Pickup stop' : 'Drop-off stop';
 
         return InkWell(
           borderRadius: BorderRadius.circular(AppConstants.radiusLg),
@@ -269,12 +263,35 @@ class _DriverJourneyCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  'Next stop: $focusLabel',
+                  booking.passengerDisplayName,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  '$stopLabel: $focusLabel',
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
                 const SizedBox(height: 6),
                 Text(
                   'Next action: $nextAction',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
+                ),
+                if (eta != null) ...<Widget>[
+                  const SizedBox(height: 6),
+                  Text(
+                    'ETA ${_formatEta(eta)}${booking.etaApproximate == true ? ' approx.' : ''}',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
+                  ),
+                ],
+                const SizedBox(height: 10),
+                Text(
+                  _driverHint(booking),
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: scheme.onSurfaceVariant,
                       ),
@@ -285,6 +302,29 @@ class _DriverJourneyCard extends StatelessWidget {
         );
       },
     );
+  }
+
+  String _driverHint(BookingEntity booking) {
+    if (booking.canDriverMarkArrived) {
+      return 'Navigate to the pickup stop and confirm arrival when the passenger can see you.';
+    }
+    if (booking.canDriverMarkBoarded) {
+      return 'The pickup stop is active. Confirm boarding once the passenger is seated.';
+    }
+    if (booking.canDriverMarkDroppedOff) {
+      return 'Keep the fixed route visible and confirm drop-off at the passenger stop.';
+    }
+    if (booking.canParticipantCompleteJourney) {
+      return 'Driving work is done. The passenger is finishing the final walking leg.';
+    }
+    return 'Open the trip to review the latest booking context.';
+  }
+
+  String _formatEta(int seconds) {
+    if (seconds < 60) {
+      return '${seconds}s';
+    }
+    return '${(seconds / 60).ceil()}m';
   }
 }
 

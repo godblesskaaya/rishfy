@@ -13,6 +13,7 @@ class BookingDto {
     required this.paymentStatus,
     required this.createdAt,
     this.driverId,
+    this.passengerName,
     this.confirmationCode,
     this.originName,
     this.destinationName,
@@ -32,6 +33,7 @@ class BookingDto {
     this.journeyState,
     this.routeStatus,
     this.routePolyline,
+    this.estimatedPickupTime,
     this.pickupWalkingDistance,
     this.pickupWalkingTime,
     this.dropoffWalkingDistance,
@@ -46,8 +48,12 @@ class BookingDto {
     this.driverHeading,
     this.driverSpeedKmh,
     this.driverLocationUpdatedAt,
+    this.arrivedPickupAt,
+    this.boardedAt,
+    this.droppedOffAt,
     this.tripStartedAt,
     this.tripCompletedAt,
+    this.journeyCompletedAt,
   });
 
   final String bookingId;
@@ -59,6 +65,7 @@ class BookingDto {
   final String paymentStatus;
   final DateTime createdAt;
   final String? driverId;
+  final String? passengerName;
   final String? confirmationCode;
   final String? originName;
   final String? destinationName;
@@ -78,6 +85,7 @@ class BookingDto {
   final String? journeyState;
   final String? routeStatus;
   final String? routePolyline;
+  final DateTime? estimatedPickupTime;
   final int? pickupWalkingDistance;
   final int? pickupWalkingTime;
   final int? dropoffWalkingDistance;
@@ -92,8 +100,12 @@ class BookingDto {
   final double? driverHeading;
   final double? driverSpeedKmh;
   final DateTime? driverLocationUpdatedAt;
+  final DateTime? arrivedPickupAt;
+  final DateTime? boardedAt;
+  final DateTime? droppedOffAt;
   final DateTime? tripStartedAt;
   final DateTime? tripCompletedAt;
+  final DateTime? journeyCompletedAt;
 
   factory BookingDto.fromJson(Map<String, dynamic> j) {
     final Map<String, dynamic> data = _readMap(j, <String>['data']) ?? j;
@@ -135,6 +147,10 @@ class BookingDto {
           _readString(booking, <String>['payment_status']) ?? 'pending',
       createdAt: _parseDateTime(booking['created_at']),
       driverId: _readString(booking, <String>['driver_id']),
+      passengerName: _readString(
+        booking,
+        <String>['passenger_name', 'passengerName'],
+      ),
       confirmationCode: _readString(booking, <String>['confirmation_code']),
       originName: _readString(booking, <String>['origin_name']),
       destinationName:
@@ -231,6 +247,11 @@ class BookingDto {
             <String>['route_polyline', 'encoded_polyline'],
           ) ??
           _readString(booking, <String>['route_polyline', 'encoded_polyline']),
+      estimatedPickupTime: _parseNullableDateTime(
+        tripContext['estimated_pickup_time'] ??
+            booking['estimated_pickup_time'] ??
+            booking['estimatedPickupTime'],
+      ),
       pickupWalkingDistance: _toNullableInt(
         tripContext['pickup_walking_distance'] ??
             booking['pickup_walking_distance'] ??
@@ -285,11 +306,17 @@ class BookingDto {
       driverLocationUpdatedAt: _parseNullableDateTime(
         driverLocation['timestamp'] ?? booking['driver_location_updated_at'],
       ),
+      arrivedPickupAt: _parseNullableDateTime(booking['arrived_pickup_at']),
+      boardedAt: _parseNullableDateTime(booking['boarded_at']),
+      droppedOffAt: _parseNullableDateTime(booking['dropped_off_at']),
       tripStartedAt: _parseNullableDateTime(
         booking['trip_started_at'] ?? trip['actual_start_time'],
       ),
       tripCompletedAt: _parseNullableDateTime(
         booking['trip_completed_at'] ?? trip['actual_end_time'],
+      ),
+      journeyCompletedAt: _parseNullableDateTime(
+        booking['journey_completed_at'],
       ),
     );
   }
@@ -304,6 +331,7 @@ class BookingDto {
         paymentStatus: paymentStatus,
         createdAt: createdAt,
         driverId: driverId,
+        passengerName: passengerName,
         confirmationCode: confirmationCode,
         originName: originName,
         destinationName: destinationName,
@@ -323,6 +351,7 @@ class BookingDto {
         journeyState: journeyState,
         routeStatus: routeStatus,
         routePolyline: routePolyline,
+        estimatedPickupTime: estimatedPickupTime,
         pickupWalkingDistance: pickupWalkingDistance,
         pickupWalkingTime: pickupWalkingTime,
         dropoffWalkingDistance: dropoffWalkingDistance,
@@ -337,8 +366,12 @@ class BookingDto {
         driverHeading: driverHeading,
         driverSpeedKmh: driverSpeedKmh,
         driverLocationUpdatedAt: driverLocationUpdatedAt,
+        arrivedPickupAt: arrivedPickupAt,
+        boardedAt: boardedAt,
+        droppedOffAt: droppedOffAt,
         tripStartedAt: tripStartedAt,
         tripCompletedAt: tripCompletedAt,
+        journeyCompletedAt: journeyCompletedAt,
       );
 }
 

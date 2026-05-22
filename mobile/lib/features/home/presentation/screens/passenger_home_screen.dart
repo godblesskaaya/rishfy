@@ -245,9 +245,17 @@ class _PassengerJourneyCard extends StatelessWidget {
 
         final int? etaSeconds =
             booking.etaToPickupSeconds ?? booking.etaToDropoffSeconds;
-        final String destination = booking.isJourneyActive
+        final String destination = booking.canOpenJourney
             ? '/trip/${booking.bookingId}'
             : '/bookings/${booking.bookingId}';
+        final String actionLabel = booking.canParticipantCompleteJourney
+            ? 'Finish final walk'
+            : booking.canOpenJourney
+                ? booking.isJourneyActive
+                    ? 'Open live trip'
+                    : 'Open journey workspace'
+                : 'View booking';
+        final String phaseHint = _phaseHint(booking);
 
         return InkWell(
           borderRadius: BorderRadius.circular(AppConstants.radiusLg),
@@ -297,6 +305,36 @@ class _PassengerJourneyCard extends StatelessWidget {
                       : 'Drop-off: ${booking.dropoffDisplayName}',
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
+                const SizedBox(height: 6),
+                Text(
+                  phaseHint,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
+                ),
+                if (booking.isPrePickupJourney &&
+                    (booking.pickupWalkingDistance != null ||
+                        booking.pickupWalkingTime != null)) ...<Widget>[
+                  const SizedBox(height: 6),
+                  Text(
+                    'Walk to pickup ${_walkLabel(booking.pickupWalkingDistance, booking.pickupWalkingTime)}',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
+                  ),
+                ],
+                if (booking.isPostDropoffJourney &&
+                    (booking.dropoffWalkingDistance != null ||
+                        booking.dropoffWalkingTime != null) &&
+                    !booking.isCompleted) ...<Widget>[
+                  const SizedBox(height: 6),
+                  Text(
+                    'Final walk ${_walkLabel(booking.dropoffWalkingDistance, booking.dropoffWalkingTime)}',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
+                  ),
+                ],
                 if (etaSeconds != null) ...<Widget>[
                   const SizedBox(height: 6),
                   Text(
@@ -309,7 +347,7 @@ class _PassengerJourneyCard extends StatelessWidget {
                 ],
                 const SizedBox(height: 12),
                 Text(
-                  booking.isJourneyActive ? 'Open live trip' : 'View booking',
+                  actionLabel,
                   style: Theme.of(context).textTheme.labelLarge?.copyWith(
                         color: scheme.primary,
                         fontWeight: FontWeight.w700,
@@ -328,6 +366,42 @@ class _PassengerJourneyCard extends StatelessWidget {
       return '${seconds}s';
     }
     return '${(seconds / 60).ceil()}m';
+  }
+
+  String _phaseHint(BookingEntity booking) {
+    switch (booking.effectiveJourneyState) {
+      case 'confirmed':
+      case 'walking_to_pickup':
+        return 'Head to the pickup point before your driver arrives.';
+      case 'waiting_for_driver':
+        return 'You are at pickup. Keep your phone nearby for live updates.';
+      case 'driver_approaching':
+        return 'Your driver is close. Be ready to board at pickup.';
+      case 'driver_arrived':
+        return 'Your driver is waiting at pickup now.';
+      case 'boarded':
+      case 'in_transit':
+      case 'approaching_dropoff':
+        return 'You are onboard. Follow the route to your drop-off stop.';
+      case 'dropped_off':
+      case 'walking_to_destination':
+        return 'You are on the final walking leg to your destination.';
+      case 'completed':
+        return 'This journey is complete.';
+      default:
+        return 'Open this journey for the latest trip context.';
+    }
+  }
+
+  String _walkLabel(int? distanceMeters, int? timeSeconds) {
+    final List<String> parts = <String>[];
+    if (distanceMeters != null) {
+      parts.add('${distanceMeters}m');
+    }
+    if (timeSeconds != null) {
+      parts.add('${(timeSeconds / 60).ceil()} min');
+    }
+    return parts.isEmpty ? 'details pending' : parts.join(' | ');
   }
 }
 
@@ -426,7 +500,7 @@ class _UpcomingTripTile extends StatelessWidget {
     return InkWell(
       borderRadius: BorderRadius.circular(AppConstants.radiusLg),
       onTap: () {
-        final String destination = booking.isJourneyActive
+        final String destination = booking.canOpenJourney
             ? '/trip/${booking.bookingId}'
             : '/bookings/${booking.bookingId}';
         unawaited(context.push(destination));
@@ -457,6 +531,15 @@ class _UpcomingTripTile extends StatelessWidget {
                     '${DateFormat('EEE d MMM, HH:mm').format(when.toLocal())}'
                     ' | ${booking.journeyLabel}',
                     style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    booking.canOpenJourney
+                        ? 'Open journey workspace'
+                        : 'View booking details',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
                   ),
                 ],
               ),

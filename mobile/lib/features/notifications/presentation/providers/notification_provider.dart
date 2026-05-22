@@ -1,8 +1,84 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/network/dio_client.dart';
 import '../../data/models/notification_models.dart';
+
+String? _readPayloadString(
+  Map<String, dynamic>? data,
+  List<String> keys,
+) {
+  if (data == null) {
+    return null;
+  }
+  for (final String key in keys) {
+    final Object? value = data[key];
+    if (value is String && value.trim().isNotEmpty) {
+      return value.trim();
+    }
+    if (value is num) {
+      return value.toString();
+    }
+  }
+  return null;
+}
+
+String? notificationRouteFor({
+  required String type,
+  Map<String, dynamic>? data,
+}) {
+  final String normalizedType = type.trim().toLowerCase().replaceAll('.', '_');
+  final String? explicitPath = _readPayloadString(
+    data,
+    <String>['path', 'route', 'destination', 'deeplink'],
+  );
+  if (explicitPath != null && explicitPath.startsWith('/')) {
+    return explicitPath;
+  }
+
+  final String? bookingId = _readPayloadString(
+    data,
+    <String>['booking_id', 'bookingId', 'entity_id', 'entityId'],
+  );
+  final String? journeyState = _readPayloadString(
+    data,
+    <String>['journey_state', 'journeyState', 'state'],
+  )?.toLowerCase();
+  final bool liveTripPreferred = const <String>{
+        'walking_to_pickup',
+        'waiting_for_driver',
+        'driver_approaching',
+        'driver_arrived',
+        'boarded',
+        'in_transit',
+        'approaching_dropoff',
+        'dropped_off',
+        'walking_to_destination',
+      }.contains(journeyState) ||
+      normalizedType.startsWith('trip_') ||
+      normalizedType.contains('arrived') ||
+      normalizedType.contains('approach') ||
+      normalizedType.contains('boarded') ||
+      normalizedType.contains('dropoff') ||
+      normalizedType.contains('walking');
+
+  if (bookingId != null) {
+    return liveTripPreferred ? '/trip/$bookingId' : '/bookings/$bookingId';
+  }
+
+  final String? routeId = _readPayloadString(
+    data,
+    <String>['route_id', 'routeId'],
+  );
+  if (routeId != null) {
+    return '/routes/$routeId';
+  }
+
+  return null;
+}
 
 class NotificationState {
   const NotificationState({
@@ -39,7 +115,7 @@ final StateNotifierProvider<NotificationNotifier, NotificationState>
 
 class NotificationNotifier extends StateNotifier<NotificationState> {
   NotificationNotifier(this._dio) : super(const NotificationState()) {
-    load();
+    unawaited(load());
   }
 
   final Dio _dio;
@@ -65,8 +141,7 @@ class NotificationNotifier extends StateNotifier<NotificationState> {
 
   Future<void> markRead(String notificationId) async {
     try {
-      await _dio.patch<void>(
-          '/api/v1/notifications/$notificationId/read');
+      await _dio.patch<void>('/api/v1/notifications/$notificationId/read');
       state = state.copyWith(
         notifications: state.notifications.map((NotificationDto n) {
           return n.notificationId == notificationId
@@ -162,5 +237,134 @@ class NotificationNotifier extends StateNotifier<NotificationState> {
       }
       return item['is_read'] == false || item['read'] == false;
     }).length;
+  }
+}
+
+class NotificationPrompt {
+  const NotificationPrompt({
+    required this.id,
+    required this.title,
+    required this.body,
+    required this.route,
+  });
+
+  final String id;
+  final String title;
+  final String body;
+  final String route;
+}
+
+class NotificationInteractionState {
+  const NotificationInteractionState({
+    this.pendingRoute,
+    this.foregroundPrompt,
+  });
+
+  final String? pendingRoute;
+  final NotificationPrompt? foregroundPrompt;
+
+  NotificationInteractionState copyWith({
+    String? pendingRoute,
+    NotificationPrompt? foregroundPrompt,
+    bool clearPendingRoute = false,
+    bool clearForegroundPrompt = false,
+  }) =>
+      NotificationInteractionState(
+        pendingRoute:
+            clearPendingRoute ? null : pendingRoute ?? this.pendingRoute,
+        foregroundPrompt: clearForegroundPrompt
+            ? null
+            : foregroundPrompt ?? this.foregroundPrompt,
+      );
+}
+
+final StateNotifierProvider<NotificationInteractionNotifier,
+        NotificationInteractionState> notificationInteractionProvider =
+    StateNotifierProvider<NotificationInteractionNotifier,
+        NotificationInteractionState>(
+  (Ref ref) => NotificationInteractionNotifier(ref),
+);
+
+class NotificationInteractionNotifier
+    extends StateNotifier<NotificationInteractionState> {
+  NotificationInteractionNotifier(this._ref)
+      : super(const NotificationInteractionState()) {
+    unawaited(_initialize());
+  }
+
+  final Ref _ref;
+  StreamSubscription<RemoteMessage>? _foregroundSub;
+  StreamSubscription<RemoteMessage>? _openedAppSub;
+
+  Future<void> _initialize() async {
+    _foregroundSub ??= FirebaseMessaging.onMessage.listen(_handleForeground);
+    _openedAppSub ??=
+        FirebaseMessaging.onMessageOpenedApp.listen(_handleOpenedApp);
+
+    final RemoteMessage? initialMessage =
+        await FirebaseMessaging.instance.getInitialMessage();
+    if (initialMessage != null) {
+      _handleOpenedApp(initialMessage);
+    }
+  }
+
+  void _handleForeground(RemoteMessage message) {
+    unawaited(_ref.read(notificationProvider.notifier).load());
+    final String? route = notificationRouteFor(
+      type: _messageType(message),
+      data: message.data,
+    );
+    if (route == null) {
+      return;
+    }
+
+    state = state.copyWith(
+      foregroundPrompt: NotificationPrompt(
+        id: _messageId(message),
+        title: message.notification?.title ?? 'Trip update',
+        body: message.notification?.body ?? 'Open the latest journey update.',
+        route: route,
+      ),
+    );
+  }
+
+  void _handleOpenedApp(RemoteMessage message) {
+    unawaited(_ref.read(notificationProvider.notifier).load());
+    final String? route = notificationRouteFor(
+      type: _messageType(message),
+      data: message.data,
+    );
+    if (route == null) {
+      return;
+    }
+
+    state = state.copyWith(pendingRoute: route);
+  }
+
+  String _messageType(RemoteMessage message) {
+    final String? type = message.data['type']?.toString() ??
+        message.data['event_type']?.toString() ??
+        message.data['template_key']?.toString();
+    return (type == null || type.trim().isEmpty) ? 'info' : type;
+  }
+
+  String _messageId(RemoteMessage message) =>
+      message.messageId ??
+      message.sentTime?.toIso8601String() ??
+      DateTime.now().toIso8601String();
+
+  void clearPendingRoute() {
+    state = state.copyWith(clearPendingRoute: true);
+  }
+
+  void clearForegroundPrompt() {
+    state = state.copyWith(clearForegroundPrompt: true);
+  }
+
+  @override
+  void dispose() {
+    unawaited(_foregroundSub?.cancel());
+    unawaited(_openedAppSub?.cancel());
+    super.dispose();
   }
 }

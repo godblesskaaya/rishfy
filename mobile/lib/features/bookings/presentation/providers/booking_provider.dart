@@ -133,7 +133,7 @@ final Provider<AsyncValue<BookingEntity?>> activeDriverJourneyProvider =
     Provider<AsyncValue<BookingEntity?>>((Ref ref) {
   final AsyncValue<List<BookingEntity>> asyncBookings =
       ref.watch(myDriverBookingsProvider);
-  return asyncBookings.whenData(_selectActiveJourney);
+  return asyncBookings.whenData(_selectDriverJourney);
 });
 
 /// Computed weekly stats for the driver from completed bookings.
@@ -312,6 +312,14 @@ class JourneyActionNotifier extends StateNotifier<TripActionState> {
     );
   }
 
+  Future<void> completeJourney(String bookingId) async {
+    await _runAction(
+      bookingId: bookingId,
+      actionLabel: 'finish journey',
+      operation: () => _ds.completeJourney(bookingId),
+    );
+  }
+
   Future<void> start(String bookingId) async {
     await _runAction(
       bookingId: bookingId,
@@ -396,4 +404,34 @@ int _sortBookingsForJourneyEntry(BookingEntity a, BookingEntity b) {
   final DateTime aTime = a.departureDatetime ?? a.createdAt;
   final DateTime bTime = b.departureDatetime ?? b.createdAt;
   return aTime.compareTo(bTime);
+}
+
+BookingEntity? _selectDriverJourney(List<BookingEntity> bookings) {
+  final List<BookingEntity> operational = bookings
+      .where((BookingEntity booking) =>
+          !booking.isCancelled &&
+          !booking.isNoShow &&
+          !booking.isCompleted &&
+          (booking.canDriverMarkArrived ||
+              booking.canDriverMarkBoarded ||
+              booking.canDriverMarkDroppedOff))
+      .toList()
+    ..sort(_sortBookingsForJourneyEntry);
+  if (operational.isNotEmpty) {
+    return operational.first;
+  }
+
+  final List<BookingEntity> upcoming = bookings
+      .where((BookingEntity booking) =>
+          !booking.isCancelled &&
+          !booking.isNoShow &&
+          !booking.isCompleted &&
+          !booking.isPostDropoffJourney)
+      .toList()
+    ..sort(_sortBookingsForJourneyEntry);
+  if (upcoming.isNotEmpty) {
+    return upcoming.first;
+  }
+
+  return null;
 }

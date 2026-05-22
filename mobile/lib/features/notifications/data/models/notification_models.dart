@@ -1,3 +1,5 @@
+// ignore_for_file: sort_constructors_first
+
 class NotificationDto {
   const NotificationDto({
     required this.notificationId,
@@ -55,10 +57,7 @@ String _readString(
   throw FormatException('Missing required string for keys: $keys');
 }
 
-bool? _readBool(
-  Map<String, dynamic> json,
-  List<String> keys,
-) {
+bool? _readBool(Map<String, dynamic> json, List<String> keys) {
   for (final String key in keys) {
     final dynamic value = json[key];
     if (value == null) {

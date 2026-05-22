@@ -78,10 +78,24 @@ export class NotificationService {
             fcmToken: params.fcmToken,
             phone: params.phone,
           });
-          if (result.success) {
+          if (result.status === 'sent') {
             await this.repo.markDelivered(notif.id, result.providerMessageId);
+          } else if (result.status === 'skipped') {
+            await this.repo.markSkipped(notif.id, result.error ?? result.code ?? 'SKIPPED');
+            logger.warn({
+              notifId: notif.id,
+              channel,
+              code: result.code,
+              reason: result.error,
+            }, 'Notification delivery skipped');
           } else {
-            await this.repo.markFailed(notif.id, result.error ?? 'UNKNOWN');
+            await this.repo.markFailed(notif.id, result.error ?? result.code ?? 'UNKNOWN');
+            logger.error({
+              notifId: notif.id,
+              channel,
+              code: result.code,
+              reason: result.error,
+            }, 'Notification delivery failed');
           }
         } catch (err) {
           await this.repo.markFailed(notif.id, String(err));

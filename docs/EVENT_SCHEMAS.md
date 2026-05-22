@@ -444,12 +444,13 @@ Published when pending booking expires (payment not completed in 2 min).
 ```json
 {
   "event_type": "driver.location.updated",
-  "event_version": "1.1",
+  "event_version": "1.2",
   "data": {
     "driver_id": 45,
     "trip_id": 890,
     "booking_id": 5678,
     "passenger_id": 123,
+    "trip_status": "in_progress",
     "lat": -6.8000,
     "lng": 39.2500,
     "bearing": 127,
@@ -457,14 +458,21 @@ Published when pending booking expires (payment not completed in 2 min).
     "accuracy_meters": 5.0,
     "timestamp": "2026-03-16T08:15:30.000Z",
     "active_stop_type": "pickup",
+    "active_stop_lat": -6.7924,
+    "active_stop_lng": 39.2083,
     "distance_to_active_stop_meters": 180,
     "proximity_state": "approaching_pickup",
-    "eta_seconds": 24
+    "eta_seconds": 24,
+    "eta_source": "reported_speed",
+    "current_route_fraction": 0.02,
+    "active_stop_route_fraction": 0,
+    "remaining_route_fraction": 0,
+    "route_geometry_source": "trip_endpoints_linear_fallback"
   }
 }
 ```
 
-**Note**: Typically NOT consumed directly. WebSocket is the primary delivery mechanism. This topic exists for analytics/auditing and now carries enough trip context to hydrate passive consumers without inferring booking linkage elsewhere.
+**Note**: Typically NOT consumed directly. WebSocket is the primary delivery mechanism. This topic exists for analytics/auditing and now carries enough trip context to hydrate passive consumers without inferring booking linkage elsewhere. `route_geometry_source` makes it explicit when stop geometry is a linear fallback derived from trip endpoints rather than a full route polyline.
 
 ---
 
@@ -622,7 +630,7 @@ async function handleEvent(event: Event) {
 | `booking-service` | `booking-consumer` | `payment.completed`, `payment.failed`, `payment.refunded`, `route.cancelled_by_driver` |
 | `payment-service` | `payment-consumer` | `trip.completed`, `booking.cancelled` (for refunds) |
 | `route-service` | `route-consumer` | `booking.cancelled`, `booking.expired` (to release seats) |
-| `notification-service` | `notification-consumer` | Most topics (for delivering notifications) |
+| `notification-service` | `notification-consumer` | `booking.created`, `booking.cancelled`, `payment.completed`, `payment.failed`, `trip.started`, `trip.completed`, `trip.emergency_triggered`, `driver.arrived`, plus legacy booking journey topics during migration |
 | `user-service` | `user-consumer` | `rating.submitted` (to update averages) |
 | `location-service` | `location-consumer` | `trip.started`, `trip.completed` |
 | `latra-reporter` | `latra-consumer` | `trip.completed` |
@@ -744,6 +752,6 @@ await consumer.run({
 ---
 
 **Document Owner**: Backend Team
-**Last Updated**: 2026-03-15
-**Version**: 1.0
+**Last Updated**: 2026-05-22
+**Version**: 1.1
 **Status**: Approved for Development

@@ -73,13 +73,16 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
 
         if (actionLabel == 'drop off passenger' ||
             actionLabel == 'complete trip' ||
-            actionLabel == 'mark no-show') {
+            actionLabel == 'mark no-show' ||
+            actionLabel == 'finish journey') {
           await ref.read(driverBroadcastProvider.notifier).stopStreaming();
           if (!mounted) {
             return;
           }
-          if (isDriver) {
-            context.go('/bookings');
+          if (actionLabel == 'finish journey' && !isDriver) {
+            GoRouter.of(this.context).go('/bookings/${widget.bookingId}');
+          } else if (isDriver) {
+            GoRouter.of(this.context).go('/bookings');
           }
         } else if (actionLabel == 'board passenger' &&
             mounted &&
@@ -261,6 +264,9 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
                 booking: booking,
                 tracking: tracking,
                 actionState: actionState,
+                onCompleteJourney: () => ref
+                    .read(journeyActionProvider.notifier)
+                    .completeJourney(widget.bookingId),
               ),
             ),
           ),
@@ -520,16 +526,19 @@ class _PassengerJourneyPanel extends StatelessWidget {
     required this.booking,
     required this.tracking,
     required this.actionState,
+    required this.onCompleteJourney,
   });
 
   final BookingEntity booking;
   final DriverTrackingState tracking;
   final TripActionState actionState;
+  final VoidCallback onCompleteJourney;
 
   @override
   Widget build(BuildContext context) {
     final DriverLocationUpdate? update = tracking.latest;
     final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
     final List<Widget> details = <Widget>[
       Row(
         children: <Widget>[
@@ -564,6 +573,33 @@ class _PassengerJourneyPanel extends StatelessWidget {
       const SizedBox(height: 8),
       Text(_journeyMessage(booking)),
       const SizedBox(height: 12),
+      _JourneyPhaseStrip(state: booking.effectiveJourneyState),
+      const SizedBox(height: 12),
+      Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(AppConstants.spaceMd),
+        decoration: BoxDecoration(
+          color: scheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(AppConstants.radiusMd),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              'What to do now',
+              style: theme.textTheme.labelLarge?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              _nextPassengerAction(booking),
+              style: theme.textTheme.bodyMedium,
+            ),
+          ],
+        ),
+      ),
+      const SizedBox(height: 12),
       _InfoRow(
         icon: Icons.pin_drop_outlined,
         label: booking.isPrePickupJourney ? 'Pickup' : 'Drop-off',
@@ -572,6 +608,46 @@ class _PassengerJourneyPanel extends StatelessWidget {
             : booking.dropoffDisplayName,
       ),
     ];
+
+    if (booking.isPrePickupJourney &&
+        (booking.pickupWalkingDistance != null ||
+            booking.pickupWalkingTime != null)) {
+      details.add(
+        _InfoRow(
+          icon: Icons.directions_walk,
+          label: 'Walk to pickup',
+          value: _formatWalk(
+            booking.pickupWalkingDistance,
+            booking.pickupWalkingTime,
+          ),
+        ),
+      );
+    }
+
+    if (booking.isPostDropoffJourney &&
+        (booking.dropoffWalkingDistance != null ||
+            booking.dropoffWalkingTime != null)) {
+      details.add(
+        _InfoRow(
+          icon: Icons.directions_walk,
+          label: 'Final walk',
+          value: _formatWalk(
+            booking.dropoffWalkingDistance,
+            booking.dropoffWalkingTime,
+          ),
+        ),
+      );
+    }
+
+    if (booking.estimatedPickupTime != null && booking.isPrePickupJourney) {
+      details.add(
+        _InfoRow(
+          icon: Icons.event_available,
+          label: 'Suggested pickup',
+          value: _formatDateTime(booking.estimatedPickupTime!),
+        ),
+      );
+    }
 
     final int? eta = booking.isPrePickupJourney
         ? (update?.etaToPickupSeconds ?? booking.etaToPickupSeconds)
@@ -583,6 +659,16 @@ class _PassengerJourneyPanel extends StatelessWidget {
           label: 'ETA',
           value:
               '${_formatEta(eta)}${booking.etaApproximate == true ? ' approx.' : ''}',
+        ),
+      );
+    }
+
+    if (booking.etaStale == true) {
+      details.add(
+        const _InfoRow(
+          icon: Icons.warning_amber_rounded,
+          label: 'ETA quality',
+          value: 'Driver ETA is stale. Keep following live location updates.',
         ),
       );
     }
@@ -604,7 +690,18 @@ class _PassengerJourneyPanel extends StatelessWidget {
       );
     }
 
-    if (booking.isCompleted) {
+    if (booking.canParticipantCompleteJourney) {
+      details.add(const SizedBox(height: 12));
+      details.add(
+        PrimaryButton(
+          label: 'Finish journey',
+          loading: actionState.status == TripActionStatus.loading,
+          onPressed: actionState.status == TripActionStatus.loading
+              ? null
+              : onCompleteJourney,
+        ),
+      );
+    } else if (booking.isCompleted) {
       details.add(const SizedBox(height: 12));
       details.add(
         PrimaryButton(
@@ -644,9 +741,11 @@ class _PassengerJourneyPanel extends StatelessWidget {
   String _journeyMessage(BookingEntity booking) {
     switch (booking.effectiveJourneyState) {
       case 'confirmed':
+        return 'Your booking is confirmed. Head to the suggested pickup point before the driver arrives.';
       case 'walking_to_pickup':
+        return 'Walk to the suggested pickup point so you are ready for boarding.';
       case 'waiting_for_driver':
-        return 'Head to the suggested pickup point and keep an eye on driver updates.';
+        return 'Stay at the pickup point and keep live driver updates visible.';
       case 'driver_approaching':
         return 'Your driver is getting close to the pickup point.';
       case 'driver_arrived':
@@ -669,11 +768,57 @@ class _PassengerJourneyPanel extends StatelessWidget {
     }
   }
 
+  String _nextPassengerAction(BookingEntity booking) {
+    switch (booking.effectiveJourneyState) {
+      case 'confirmed':
+      case 'walking_to_pickup':
+        return 'Walk to ${booking.pickupDisplayName} and keep your phone nearby for live driver updates.';
+      case 'waiting_for_driver':
+        return 'Wait at ${booking.pickupDisplayName} and watch for the driver approaching.';
+      case 'driver_approaching':
+        return 'Move to the curb or meeting point at ${booking.pickupDisplayName}.';
+      case 'driver_arrived':
+        return 'Meet the driver now and confirm the vehicle plate before boarding.';
+      case 'boarded':
+      case 'in_transit':
+        return 'Stay onboard and track progress to ${booking.dropoffDisplayName}.';
+      case 'approaching_dropoff':
+        return 'Get ready to alight at ${booking.dropoffDisplayName}.';
+      case 'dropped_off':
+      case 'walking_to_destination':
+        return 'Continue the final walk to your destination, then finish the journey here.';
+      case 'completed':
+        return 'Open your booking summary to review or rate the trip.';
+      default:
+        return 'Open the booking summary if you need more trip details.';
+    }
+  }
+
   String _formatEta(int seconds) {
     if (seconds < 60) {
       return '${seconds}s';
     }
     return '${(seconds / 60).ceil()}m';
+  }
+
+  String _formatWalk(int? distanceMeters, int? timeSeconds) {
+    final List<String> parts = <String>[];
+    if (distanceMeters != null) {
+      parts.add('${distanceMeters}m');
+    }
+    if (timeSeconds != null) {
+      parts.add('${(timeSeconds / 60).ceil()} min');
+    }
+    return parts.isEmpty ? 'Pending' : parts.join(' • ');
+  }
+
+  String _formatDateTime(DateTime value) {
+    final DateTime local = value.toLocal();
+    final String hour = local.hour.toString().padLeft(2, '0');
+    final String minute = local.minute.toString().padLeft(2, '0');
+    final String day = local.day.toString().padLeft(2, '0');
+    final String month = local.month.toString().padLeft(2, '0');
+    return '$day/$month/${local.year} $hour:$minute';
   }
 
   String _timeAgo(DateTime timestamp) {
@@ -706,21 +851,10 @@ class _DriverJourneySheet extends StatelessWidget {
   Widget build(BuildContext context) {
     final ColorScheme scheme = Theme.of(context).colorScheme;
     final bool isLoading = actionState.status == TripActionStatus.loading;
+    final int? eta = booking.etaToPickupSeconds ?? booking.etaToDropoffSeconds;
 
     String nextActionLabel() {
-      if (booking.canDriverMarkArrived) {
-        return 'Arrive at pickup';
-      }
-      if (booking.canDriverMarkBoarded) {
-        return 'Passenger boarded';
-      }
-      if (booking.canDriverMarkDroppedOff) {
-        return 'Passenger dropped off';
-      }
-      if (booking.isCompleted) {
-        return 'Trip completed';
-      }
-      return booking.journeyLabel;
+      return booking.nextDriverActionLabel;
     }
 
     VoidCallback? primaryAction() {
@@ -773,6 +907,71 @@ class _DriverJourneySheet extends StatelessWidget {
               ],
             ),
             const SizedBox(height: AppConstants.spaceMd),
+            _JourneyPhaseStrip(
+              state: booking.effectiveJourneyState,
+              isDriver: true,
+            ),
+            const SizedBox(height: AppConstants.spaceMd),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(AppConstants.spaceMd),
+              decoration: BoxDecoration(
+                color: scheme.primaryContainer.withValues(alpha: 0.45),
+                borderRadius: BorderRadius.circular(AppConstants.radiusMd),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    'Passenger',
+                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    booking.passengerDisplayName,
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${booking.seatCount} seat${booking.seatCount == 1 ? '' : 's'} booked'
+                    '${booking.confirmationCode != null ? ' • Code ${booking.confirmationCode}' : ''}',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: AppConstants.spaceMd),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(AppConstants.spaceMd),
+              decoration: BoxDecoration(
+                color: scheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(AppConstants.radiusMd),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    'Operational focus',
+                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    _driverSheetHint(booking),
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: AppConstants.spaceMd),
             Text(
               '${booking.originName ?? 'Route'} -> ${booking.destinationName ?? ''}',
               style: Theme.of(context).textTheme.bodyMedium,
@@ -788,6 +987,13 @@ class _DriverJourneySheet extends StatelessWidget {
               label: 'Drop-off',
               value: booking.dropoffDisplayName,
             ),
+            if (eta != null)
+              _InfoRow(
+                icon: Icons.schedule,
+                label: booking.isPrePickupJourney ? 'ETA to pickup' : 'ETA',
+                value:
+                    '${_formatEta(eta)}${booking.etaApproximate == true ? ' approx.' : ''}',
+              ),
             const SizedBox(height: AppConstants.spaceMd),
             Text(
               'Next action: ${nextActionLabel()}',
@@ -835,11 +1041,130 @@ class _DriverJourneySheet extends StatelessWidget {
                   label: 'Back to bookings',
                   onPressed: () => context.go('/bookings'),
                 ),
+              )
+            else if (booking.canParticipantCompleteJourney)
+              SizedBox(
+                width: double.infinity,
+                child: PrimaryButton(
+                  label: 'Passenger on final walk',
+                  onPressed: () => context.go('/bookings'),
+                ),
               ),
           ],
         ),
       ),
     );
+  }
+
+  String _driverSheetHint(BookingEntity booking) {
+    if (booking.canDriverMarkArrived) {
+      return 'Reach the passenger pickup stop and confirm arrival once you are at the meeting point.';
+    }
+    if (booking.canDriverMarkBoarded) {
+      return 'The pickup stop is active. Confirm boarding only after the passenger is seated.';
+    }
+    if (booking.canDriverMarkDroppedOff) {
+      return 'Drive the fixed route to the passenger drop-off stop and confirm once they alight.';
+    }
+    if (booking.canParticipantCompleteJourney) {
+      return 'Driving work is complete. The passenger is finishing the last walking leg.';
+    }
+    return 'No operational action is pending for this booking.';
+  }
+
+  String _formatEta(int seconds) {
+    if (seconds < 60) {
+      return '${seconds}s';
+    }
+    return '${(seconds / 60).ceil()}m';
+  }
+}
+
+class _JourneyPhaseStrip extends StatelessWidget {
+  const _JourneyPhaseStrip({
+    required this.state,
+    this.isDriver = false,
+  });
+
+  final String state;
+  final bool isDriver;
+
+  static const List<({String key, String label})> _steps =
+      <({String key, String label})>[
+    (key: 'confirmed', label: 'Pickup'),
+    (key: 'driver_arrived', label: 'Arrived'),
+    (key: 'in_transit', label: 'Onboard'),
+    (key: 'walking_to_destination', label: 'Final walk'),
+    (key: 'completed', label: 'Done'),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+    final int activeIndex = _activeIndex(state);
+
+    return Row(
+      children: List<Widget>.generate(_steps.length, (int index) {
+        final bool completed = index < activeIndex;
+        final bool active = index == activeIndex;
+        final Color color =
+            completed || active ? scheme.primary : scheme.outlineVariant;
+
+        return Expanded(
+          child: Padding(
+            padding: EdgeInsets.only(right: index == _steps.length - 1 ? 0 : 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Container(
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: color,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  _steps[index].label,
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: active || completed
+                            ? scheme.onSurface
+                            : scheme.onSurfaceVariant,
+                        fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+                      ),
+                ),
+              ],
+            ),
+          ),
+        );
+      }),
+    );
+  }
+
+  int _activeIndex(String state) {
+    switch (state) {
+      case 'confirmed':
+      case 'walking_to_pickup':
+      case 'waiting_for_driver':
+      case 'driver_approaching':
+        return 0;
+      case 'driver_arrived':
+        return 1;
+      case 'boarded':
+      case 'in_transit':
+      case 'approaching_dropoff':
+        return 2;
+      case 'dropped_off':
+      case 'walking_to_destination':
+        return 3;
+      case 'completed':
+        return 4;
+      case 'cancelled':
+      case 'no_show':
+        return isDriver ? 0 : 1;
+      default:
+        return 0;
+    }
   }
 }
 

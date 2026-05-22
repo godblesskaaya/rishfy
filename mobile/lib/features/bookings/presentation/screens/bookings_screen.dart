@@ -260,7 +260,7 @@ class _BookingCard extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: () {
-          final String destination = booking.isJourneyActive
+          final String destination = booking.canOpenJourney
               ? '/trip/${booking.bookingId}'
               : '/bookings/${booking.bookingId}';
           unawaited(context.push(destination));
@@ -323,7 +323,13 @@ class _BookingCard extends StatelessWidget {
                   ),
                   const Spacer(),
                   Text(
-                    booking.isJourneyActive ? 'Open live trip' : 'View details',
+                    booking.canParticipantCompleteJourney
+                        ? 'Finish journey'
+                        : booking.canOpenJourney
+                            ? booking.isJourneyActive
+                                ? 'Open live trip'
+                                : 'Open journey'
+                            : 'View details',
                     style: Theme.of(context).textTheme.labelMedium?.copyWith(
                           color: scheme.onSurfaceVariant,
                         ),
@@ -342,21 +348,23 @@ class _BookingCard extends StatelessWidget {
   String _secondaryLine(BookingEntity booking) {
     final String seats =
         '${booking.seatCount} seat${booking.seatCount == 1 ? '' : 's'}';
-    final String stopLabel = booking.isPrePickupJourney
-        ? booking.pickupDisplayName
-        : booking.dropoffDisplayName;
+    final String stopLabel = booking.nextStopLabel;
     final int? eta = booking.etaToPickupSeconds ?? booking.etaToDropoffSeconds;
     final List<String> parts = <String>[
+      if (role == _BookingRole.driver) booking.passengerDisplayName,
       seats,
       stopLabel,
       if (eta != null) 'ETA ${_formatEta(eta)}',
     ];
-    if (role == _BookingRole.driver && booking.canDriverMarkArrived) {
-      parts.add('Next: Arrive at pickup');
-    } else if (role == _BookingRole.driver && booking.canDriverMarkBoarded) {
-      parts.add('Next: Confirm boarding');
-    } else if (role == _BookingRole.driver && booking.canDriverMarkDroppedOff) {
-      parts.add('Next: Confirm drop-off');
+    if (booking.canParticipantCompleteJourney &&
+        booking.dropoffWalkingTime != null) {
+      parts.add('Final walk ${(booking.dropoffWalkingTime! / 60).ceil()}m');
+    }
+    if (role == _BookingRole.driver) {
+      parts.add('Next: ${booking.nextDriverActionLabel}');
+    } else if (role == _BookingRole.passenger &&
+        booking.canParticipantCompleteJourney) {
+      parts.add('Next: Finish final walk');
     }
     return parts.join(' | ');
   }

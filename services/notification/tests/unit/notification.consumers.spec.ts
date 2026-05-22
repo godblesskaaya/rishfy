@@ -17,7 +17,9 @@ vi.mock('../../src/config.js', () => ({
     NOTIF_QUEUE_ATTEMPTS: 4,
     NOTIF_QUEUE_BACKOFF_MS: 15000,
   },
-  isProduction: false, isDevelopment: false, isTest: true,
+  isProduction: false,
+  isDevelopment: false,
+  isTest: true,
 }));
 
 vi.mock('../../src/kafka.js', () => ({
@@ -43,10 +45,24 @@ beforeEach(() => {
 });
 
 describe('Notification consumers', () => {
+  it('subscribes to journey and telemetry topics', async () => {
+    await startNotificationConsumers({} as never);
+
+    expect(subscribeMock).toHaveBeenCalledWith(expect.objectContaining({
+      topics: expect.arrayContaining([
+        'booking.journey_started',
+        'passenger.boarded',
+        'booking.journey_completed',
+        'booking.no_show',
+        'driver.location.updated',
+        'driver.arrived',
+      ]),
+    }));
+    expect(eachMessageHandler).toBeTruthy();
+  });
+
   it('routes booking.emergency events into notification queue', async () => {
     await startNotificationConsumers({} as never);
-    expect(subscribeMock).toHaveBeenCalledTimes(1);
-    expect(eachMessageHandler).toBeTruthy();
 
     await eachMessageHandler!({
       topic: 'booking.emergency',
@@ -71,5 +87,100 @@ describe('Notification consumers', () => {
         templateKey: 'booking.emergency',
       }),
     );
+  });
+
+  it('parses driver.arrived envelope payloads for push fan-out', async () => {
+    await startNotificationConsumers({} as never);
+
+    await eachMessageHandler!({
+      topic: 'driver.arrived',
+      message: {
+        value: Buffer.from(JSON.stringify({
+          event_id: 'evt-1',
+          event_type: 'driver.arrived',
+          event_version: '1.1',
+          timestamp: '2026-05-22T12:00:00.000Z',
+          data: {
+            trip_id: 'trip-1',
+            booking_id: 'booking-1',
+            passenger_id: 'passenger-1',
+            driver_id: 'driver-1',
+            arrival_lat: -6.79,
+            arrival_lng: 39.21,
+            pickup_lat: -6.78,
+            pickup_lng: 39.2,
+            arrived_at: '2026-05-22T12:00:00.000Z',
+          },
+        })),
+      },
+    });
+
+    expect(enqueueMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        userId: 'passenger-1',
+        templateKey: 'driver.arrived',
+        sourceEventType: 'driver.arrived',
+        sourceEventId: 'booking-1',
+        vars: expect.objectContaining({
+          pickup_address: 'your pickup point',
+        }),
+        data: expect.objectContaining({
+          tripId: 'trip-1',
+          driverId: 'driver-1',
+        }),
+      }),
+    );
+  });
+
+  it('routes passenger.boarded to the trip.started notification template', async () => {
+    await startNotificationConsumers({} as never);
+
+    await eachMessageHandler!({
+      topic: 'passenger.boarded',
+      message: {
+        value: Buffer.from(JSON.stringify({
+          bookingId: 'booking-1',
+          routeId: 'route-1',
+          passengerId: 'passenger-1',
+          driverId: 'driver-1',
+          tripId: 'trip-1',
+          timestamp: '2026-05-22T12:00:00.000Z',
+        })),
+      },
+    });
+
+    expect(enqueueMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        userId: 'passenger-1',
+        templateKey: 'trip.started',
+        sourceEventType: 'passenger.boarded',
+        sourceEventId: 'booking-1',
+      }),
+    );
+  });
+
+  it('parses driver.location.updated envelopes without enqueueing notifications', async () => {
+    await startNotificationConsumers({} as never);
+
+    await eachMessageHandler!({
+      topic: 'driver.location.updated',
+      message: {
+        value: Buffer.from(JSON.stringify({
+          event_id: 'evt-2',
+          event_type: 'driver.location.updated',
+          data: {
+            trip_id: 'trip-1',
+            booking_id: 'booking-1',
+            driver_id: 'driver-1',
+            proximity_state: 'approaching_pickup',
+            active_stop_type: 'pickup',
+          },
+        })),
+      },
+    });
+
+    expect(enqueueMock).not.toHaveBeenCalled();
   });
 });

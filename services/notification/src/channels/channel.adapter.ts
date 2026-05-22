@@ -9,8 +9,9 @@ export interface SendParams {
 
 export interface SendResult {
   providerMessageId?: string;
-  success: boolean;
+  status: 'sent' | 'failed' | 'skipped';
   error?: string;
+  code?: string;
 }
 
 export interface ChannelAdapter {

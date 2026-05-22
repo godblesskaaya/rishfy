@@ -87,6 +87,13 @@ export class NotificationRepository {
     );
   }
 
+  async markSkipped(id: string, reason: string): Promise<void> {
+    await this.pool.query(
+      `UPDATE notifications SET status='skipped', failure_reason=$2, updated_at=now() WHERE id=$1`,
+      [id, reason],
+    );
+  }
+
   async markRead(id: string, userId: string): Promise<void> {
     await this.pool.query(
       `UPDATE notifications SET is_read=true, read_at=now(), updated_at=now() WHERE id=$1 AND user_id=$2`,
