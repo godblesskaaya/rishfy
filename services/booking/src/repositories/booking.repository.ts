@@ -66,6 +66,21 @@ export interface BookingRow {
   no_show_at: Date | null;
 }
 
+function normalizeJourneyState(journeyState: JourneyState | null): JourneyState | null {
+  return journeyState === 'boarded' ? 'in_transit' : journeyState;
+}
+
+function normalizeBookingRow<T extends BookingRow | null>(booking: T): T {
+  if (!booking || booking.journey_state !== 'boarded') {
+    return booking;
+  }
+
+  return {
+    ...booking,
+    journey_state: normalizeJourneyState(booking.journey_state),
+  };
+}
+
 export class BookingRepository {
   constructor(private readonly pool: Pool) {}
 
@@ -132,7 +147,7 @@ export class BookingRepository {
         code, data.idempotencyKey, data.expiresAt,
       ],
     );
-    return rows[0]!;
+    return normalizeBookingRow(rows[0]!)!;
   }
 
   async decline(bookingId: string, driverId: string, reason: string): Promise<BookingRow | null> {
@@ -145,17 +160,17 @@ export class BookingRepository {
        RETURNING *`,
       [bookingId, driverId, reason],
     );
-    return rows[0] ?? null;
+    return normalizeBookingRow(rows[0] ?? null);
   }
 
   async findById(id: string): Promise<BookingRow | null> {
     const { rows } = await this.pool.query<BookingRow>('SELECT * FROM bookings WHERE id=$1', [id]);
-    return rows[0] ?? null;
+    return normalizeBookingRow(rows[0] ?? null);
   }
 
   async findByCode(code: string): Promise<BookingRow | null> {
     const { rows } = await this.pool.query<BookingRow>('SELECT * FROM bookings WHERE confirmation_code=$1', [code]);
-    return rows[0] ?? null;
+    return normalizeBookingRow(rows[0] ?? null);
   }
 
   async listByPassenger(passengerId: string, limit = 20, offset = 0): Promise<BookingRow[]> {
@@ -163,7 +178,7 @@ export class BookingRepository {
       'SELECT * FROM bookings WHERE passenger_id=$1 ORDER BY created_at DESC LIMIT $2 OFFSET $3',
       [passengerId, limit, offset],
     );
-    return rows;
+    return rows.map((row) => normalizeBookingRow(row)!);
   }
 
   async listByDriver(driverId: string, limit = 20, offset = 0): Promise<BookingRow[]> {
@@ -171,7 +186,7 @@ export class BookingRepository {
       'SELECT * FROM bookings WHERE driver_id=$1 ORDER BY created_at DESC LIMIT $2 OFFSET $3',
       [driverId, limit, offset],
     );
-    return rows;
+    return rows.map((row) => normalizeBookingRow(row)!);
   }
 
   async listByRoute(routeId: string): Promise<BookingRow[]> {
@@ -179,7 +194,7 @@ export class BookingRepository {
       'SELECT * FROM bookings WHERE route_id=$1 AND status NOT IN (\'driver_cancelled\',\'passenger_cancelled\')',
       [routeId],
     );
-    return rows;
+    return rows.map((row) => normalizeBookingRow(row)!);
   }
 
   async confirm(id: string, paymentId: string): Promise<BookingRow> {
@@ -188,26 +203,42 @@ export class BookingRepository {
        confirmed_at=now(), journey_state='confirmed', updated_at=now() WHERE id=$1 RETURNING *`,
       [id, paymentId],
     );
-    return rows[0]!;
+    return normalizeBookingRow(rows[0]!)!;
   }
 
   async cancelByPassenger(id: string, reason: string): Promise<BookingRow | null> {
     const { rows } = await this.pool.query<BookingRow>(
       `UPDATE bookings SET status='passenger_cancelled', cancellation_reason=$2,
        cancelled_at=now(), journey_state='cancelled', updated_at=now()
-       WHERE id=$1 AND status IN ('pending','confirmed') RETURNING *`,
+       WHERE id=$1
+         AND (
+           status='pending'
+           OR (
+             status='confirmed'
+             AND (journey_state IS NULL OR journey_state IN ('confirmed', 'driver_approaching', 'driver_arrived'))
+           )
+         )
+       RETURNING *`,
       [id, reason],
     );
-    return rows[0] ?? null;
+    return normalizeBookingRow(rows[0] ?? null);
   }
 
   async cancelByDriver(routeId: string): Promise<BookingRow[]> {
     const { rows } = await this.pool.query<BookingRow>(
       `UPDATE bookings SET status='driver_cancelled', cancelled_at=now(), journey_state='cancelled', updated_at=now()
-       WHERE route_id=$1 AND status IN ('pending','confirmed') RETURNING *`,
+       WHERE route_id=$1
+         AND (
+           status='pending'
+           OR (
+             status='confirmed'
+             AND (journey_state IS NULL OR journey_state IN ('confirmed', 'driver_approaching', 'driver_arrived'))
+           )
+         )
+       RETURNING *`,
       [routeId],
     );
-    return rows;
+    return rows.map((row) => normalizeBookingRow(row)!);
   }
 
   async markExpired(id: string): Promise<void> {
@@ -228,7 +259,7 @@ export class BookingRepository {
        RETURNING *`,
       [id],
     );
-    return rows[0] ?? null;
+    return normalizeBookingRow(rows[0] ?? null);
   }
 
   async boardPassenger(id: string, tripId: string): Promise<BookingRow | null> {
@@ -241,11 +272,11 @@ export class BookingRepository {
            updated_at=now()
        WHERE id=$1
          AND status='confirmed'
-         AND (journey_state IS NULL OR journey_state IN ('confirmed', 'driver_approaching', 'driver_arrived'))
-       RETURNING *`,
+          AND journey_state='driver_arrived'
+        RETURNING *`,
       [id, tripId],
     );
-    return rows[0] ?? null;
+    return normalizeBookingRow(rows[0] ?? null);
   }
 
   async dropoffPassenger(id: string): Promise<BookingRow | null> {
@@ -261,7 +292,7 @@ export class BookingRepository {
        RETURNING *`,
       [id],
     );
-    return rows[0] ?? null;
+    return normalizeBookingRow(rows[0] ?? null);
   }
 
   async completeJourney(id: string): Promise<BookingRow | null> {
@@ -280,7 +311,7 @@ export class BookingRepository {
        RETURNING *`,
       [id],
     );
-    return rows[0] ?? null;
+    return normalizeBookingRow(rows[0] ?? null);
   }
 
   async completeLegacyTrip(id: string): Promise<BookingRow | null> {
@@ -299,7 +330,7 @@ export class BookingRepository {
        RETURNING *`,
       [id],
     );
-    return rows[0] ?? null;
+    return normalizeBookingRow(rows[0] ?? null);
   }
 
   async markNoShow(id: string, reason: string): Promise<BookingRow | null> {
@@ -313,11 +344,11 @@ export class BookingRepository {
            updated_at=now()
        WHERE id=$1
          AND status='confirmed'
-         AND (journey_state IS NULL OR journey_state IN ('confirmed', 'driver_approaching', 'driver_arrived'))
-       RETURNING *`,
+          AND journey_state='driver_arrived'
+        RETURNING *`,
       [id, reason],
     );
-    return rows[0] ?? null;
+    return normalizeBookingRow(rows[0] ?? null);
   }
 
   async submitRating(id: string, raterIsPassenger: boolean, rating: number, review: string): Promise<BookingRow | null> {
@@ -328,7 +359,7 @@ export class BookingRepository {
        WHERE id=$1 AND status='completed' RETURNING *`,
       [id, rating, review],
     );
-    return rows[0] ?? null;
+    return normalizeBookingRow(rows[0] ?? null);
   }
 
   async appendEvent(bookingId: string, eventType: string, payload: unknown): Promise<void> {
@@ -345,6 +376,6 @@ export class BookingRepository {
        WHERE id=$1 RETURNING *`,
       [id, policy],
     );
-    return rows[0]!;
+    return normalizeBookingRow(rows[0]!)!;
   }
 }

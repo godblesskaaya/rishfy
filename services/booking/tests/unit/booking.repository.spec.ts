@@ -3,6 +3,40 @@ import { describe, expect, it, vi } from 'vitest';
 import { BookingRepository } from '../../src/repositories/booking.repository.js';
 
 describe('BookingRepository journey transitions', () => {
+  it('only cancels passenger bookings before boarding begins', async () => {
+    const pool = {
+      query: vi.fn().mockResolvedValue({
+        rows: [{ id: 'booking-1', status: 'passenger_cancelled', journey_state: 'cancelled' }],
+      }),
+    };
+    const repo = new BookingRepository(pool as never);
+
+    const result = await repo.cancelByPassenger('booking-1', 'PASSENGER_CANCELLED');
+
+    expect(result).toEqual({ id: 'booking-1', status: 'passenger_cancelled', journey_state: 'cancelled' });
+    expect(pool.query).toHaveBeenCalledWith(
+      expect.stringContaining("journey_state IN ('confirmed', 'driver_approaching', 'driver_arrived')"),
+      ['booking-1', 'PASSENGER_CANCELLED'],
+    );
+  });
+
+  it('only route-cancels driver bookings before boarding begins', async () => {
+    const pool = {
+      query: vi.fn().mockResolvedValue({
+        rows: [{ id: 'booking-1', status: 'driver_cancelled', journey_state: 'cancelled' }],
+      }),
+    };
+    const repo = new BookingRepository(pool as never);
+
+    const result = await repo.cancelByDriver('route-1');
+
+    expect(result).toEqual([{ id: 'booking-1', status: 'driver_cancelled', journey_state: 'cancelled' }]);
+    expect(pool.query).toHaveBeenCalledWith(
+      expect.stringContaining("journey_state IN ('confirmed', 'driver_approaching', 'driver_arrived')"),
+      ['route-1'],
+    );
+  });
+
   it('marks pickup arrival for a confirmed booking', async () => {
     const pool = {
       query: vi.fn().mockResolvedValue({
@@ -32,7 +66,7 @@ describe('BookingRepository journey transitions', () => {
 
     expect(result).toEqual({ id: 'booking-1', journey_state: 'in_transit', trip_id: 'trip-1' });
     expect(pool.query).toHaveBeenCalledWith(
-      expect.stringContaining("trip_id=COALESCE(trip_id, $2)"),
+      expect.stringContaining("journey_state='driver_arrived'"),
       ['booking-1', 'trip-1'],
     );
   });
@@ -83,26 +117,39 @@ describe('BookingRepository journey transitions', () => {
 
     expect(result).toEqual({ id: 'booking-1', status: 'no_show', journey_state: 'no_show' });
     expect(pool.query).toHaveBeenCalledWith(
-      expect.stringContaining("status='no_show'"),
+      expect.stringContaining("journey_state='driver_arrived'"),
       ['booking-1', 'PASSENGER_ABSENT'],
     );
   });
-});
 
-describe('BookingRepository.completeTrip', () => {
-  it('only completes an in-progress booking', async () => {
+  it('normalizes legacy boarded rows to in_transit when reading by id', async () => {
     const pool = {
       query: vi.fn().mockResolvedValue({
-        rows: [{ id: 'booking-1', status: 'completed' }],
+        rows: [{ id: 'booking-1', journey_state: 'boarded' }],
       }),
     };
     const repo = new BookingRepository(pool as never);
 
-    const result = await repo.completeTrip('booking-1');
+    const result = await repo.findById('booking-1');
 
-    expect(result).toEqual({ id: 'booking-1', status: 'completed' });
+    expect(result).toEqual({ id: 'booking-1', journey_state: 'in_transit' });
+  });
+});
+
+describe('BookingRepository legacy trip completion', () => {
+  it('completes the deprecated trip flow from active or walking states', async () => {
+    const pool = {
+      query: vi.fn().mockResolvedValue({
+        rows: [{ id: 'booking-1', status: 'completed', journey_state: 'completed' }],
+      }),
+    };
+    const repo = new BookingRepository(pool as never);
+
+    const result = await repo.completeLegacyTrip('booking-1');
+
+    expect(result).toEqual({ id: 'booking-1', status: 'completed', journey_state: 'completed' });
     expect(pool.query).toHaveBeenCalledWith(
-      expect.stringContaining("WHERE id=$1 AND status='in_progress'"),
+      expect.stringContaining("journey_state IN ('boarded', 'in_transit', 'walking_to_destination', 'dropped_off')"),
       ['booking-1'],
     );
   });

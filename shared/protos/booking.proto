@@ -39,26 +39,34 @@ service BookingService {
   // Confirm booking after payment success (called by payment-service).
   rpc ConfirmBooking(ConfirmBookingRequest) returns (ConfirmBookingResponse);
 
-  // Start the trip (driver action). Transitions booking to IN_PROGRESS.
-  rpc StartTrip(StartTripRequest) returns (StartTripResponse);
+  // Legacy alias for BoardPassenger. Requires DRIVER_ARRIVED, transitions
+  // booking to the canonical in_transit journey state, and starts location tracking.
+  rpc StartTrip(StartTripRequest) returns (StartTripResponse) {
+    option deprecated = true;
+  }
 
-  // Complete the trip (driver action). Transitions booking to COMPLETED,
-  // triggers driver earnings settlement.
-  rpc CompleteTrip(CompleteTripRequest) returns (CompleteTripResponse);
+  // Legacy alias used to close older trip flows without a separate
+  // complete-journey step.
+  rpc CompleteTrip(CompleteTripRequest) returns (CompleteTripResponse) {
+    option deprecated = true;
+  }
 
   // Driver marks arrival at the booking pickup point.
   rpc ArrivePickup(ArrivePickupRequest) returns (ArrivePickupResponse);
 
-  // Driver confirms the passenger boarded and begins the in-vehicle leg.
+  // Driver confirms the passenger boarded after arriving at pickup and begins
+  // the canonical in_transit in-vehicle leg. Legacy BOARDED rows are still accepted.
   rpc BoardPassenger(BoardPassengerRequest) returns (BoardPassengerResponse);
 
-  // Driver confirms the passenger has left the vehicle.
+  // Driver confirms the passenger has left the vehicle and starts the
+  // walking_to_destination leg. Legacy DROPPED_OFF rows remain readable.
   rpc DropoffPassenger(DropoffPassengerRequest) returns (DropoffPassengerResponse);
 
-  // Driver marks the booking as a no-show before boarding.
+  // Driver marks the booking as a no-show after arriving at pickup but before boarding.
   rpc MarkNoShow(MarkNoShowRequest) returns (MarkNoShowResponse);
 
   // Passenger or driver closes the final walking leg after dropoff.
+  // Requires WALKING_TO_DESTINATION or legacy DROPPED_OFF state.
   rpc CompleteJourney(CompleteJourneyRequest) returns (CompleteJourneyResponse);
 
   // Submit a rating for a completed booking (passenger or driver).
@@ -74,9 +82,9 @@ enum JourneyState {
   JOURNEY_STATE_CONFIRMED = 1;
   JOURNEY_STATE_DRIVER_APPROACHING = 2;
   JOURNEY_STATE_DRIVER_ARRIVED = 3;
-  JOURNEY_STATE_BOARDED = 4;
+  JOURNEY_STATE_BOARDED = 4 [deprecated = true];
   JOURNEY_STATE_IN_TRANSIT = 5;
-  JOURNEY_STATE_DROPPED_OFF = 6;
+  JOURNEY_STATE_DROPPED_OFF = 6 [deprecated = true];
   JOURNEY_STATE_WALKING_TO_DESTINATION = 7;
   JOURNEY_STATE_COMPLETED = 8;
   JOURNEY_STATE_CANCELLED = 9;
@@ -196,7 +204,7 @@ message ListRouteBookingsResponse { repeated Booking bookings = 1; }
 
 message CancelBookingRequest {
   string booking_id = 1;
-  string cancelling_user_id = 2;            // Could be passenger or driver
+  string cancelling_user_id = 2;            // Passenger user ID for booking-scoped cancellation
   string reason = 3;
 }
 message CancelBookingResponse {

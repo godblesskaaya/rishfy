@@ -51,7 +51,6 @@ function mapBookingStatus(status: BookingRow['status']): string {
 function mapTripStatus(booking: BookingRow): string {
   switch (booking.journey_state) {
     case 'boarded':
-      return 'TRIP_STATUS_STARTED';
     case 'in_transit':
     case 'dropped_off':
     case 'walking_to_destination':
@@ -75,7 +74,6 @@ function mapJourneyState(journeyState: BookingRow['journey_state']): string {
     case 'driver_arrived':
       return 'JOURNEY_STATE_DRIVER_ARRIVED';
     case 'boarded':
-      return 'JOURNEY_STATE_BOARDED';
     case 'in_transit':
       return 'JOURNEY_STATE_IN_TRANSIT';
     case 'dropped_off':
@@ -90,6 +88,21 @@ function mapJourneyState(journeyState: BookingRow['journey_state']): string {
       return 'JOURNEY_STATE_NO_SHOW';
     default:
       return 'JOURNEY_STATE_UNSPECIFIED';
+  }
+}
+
+function toServiceError(err: unknown): grpc.ServiceError {
+  const code = (err as { code?: string } | null)?.code;
+  switch (code) {
+    case 'NOT_FOUND':
+      return { code: grpc.status.NOT_FOUND, message: String(err) } as grpc.ServiceError;
+    case 'FORBIDDEN':
+      return { code: grpc.status.PERMISSION_DENIED, message: String(err) } as grpc.ServiceError;
+    case 'INVALID_STATE':
+    case 'CANNOT_DECLINE':
+      return { code: grpc.status.FAILED_PRECONDITION, message: String(err) } as grpc.ServiceError;
+    default:
+      return { code: grpc.status.INTERNAL, message: String(err) } as grpc.ServiceError;
   }
 }
 
@@ -232,7 +245,7 @@ const cancelBooking: Handler<CancelReq, unknown> = async (call, callback) => {
       refundReference: result.refund.refundReference,
     });
   } catch (err) {
-    callback({ code: grpc.status.INTERNAL, message: String(err) } as grpc.ServiceError);
+    callback(toServiceError(err));
   }
 };
 
@@ -241,7 +254,7 @@ const confirmBooking: Handler<ConfirmReq, unknown> = async (call, callback) => {
     const booking = await svc.confirmBooking(call.request.bookingId, call.request.paymentId);
     callback(null, { booking: rowToProto(booking) });
   } catch (err) {
-    callback({ code: grpc.status.INTERNAL, message: String(err) } as grpc.ServiceError);
+    callback(toServiceError(err));
   }
 };
 
@@ -254,7 +267,7 @@ const startTrip: Handler<StartTripReq, unknown> = async (call, callback) => {
     }
     callback(null, { booking: rowToProto(booking), tripId: booking.trip_id ?? '' });
   } catch (err) {
-    callback({ code: grpc.status.INTERNAL, message: String(err) } as grpc.ServiceError);
+    callback(toServiceError(err));
   }
 };
 
@@ -270,7 +283,7 @@ const completeTrip: Handler<CompleteTripReq, unknown> = async (call, callback) =
       settlementAmount: { amountTzs: String(booking.driver_earnings) },
     });
   } catch (err) {
-    callback({ code: grpc.status.INTERNAL, message: String(err) } as grpc.ServiceError);
+    callback(toServiceError(err));
   }
 };
 
@@ -279,7 +292,7 @@ const arrivePickup: Handler<ArrivePickupReq, unknown> = async (call, callback) =
     const booking = await svc.arrivePickup(call.request.bookingId, call.request.driverUserId);
     callback(null, { booking: rowToProto(booking) });
   } catch (err) {
-    callback({ code: grpc.status.INTERNAL, message: String(err) } as grpc.ServiceError);
+    callback(toServiceError(err));
   }
 };
 
@@ -288,7 +301,7 @@ const boardPassenger: Handler<BoardPassengerReq, unknown> = async (call, callbac
     const booking = await svc.boardPassenger(call.request.bookingId, call.request.driverUserId);
     callback(null, { booking: rowToProto(booking), tripId: booking.trip_id ?? '' });
   } catch (err) {
-    callback({ code: grpc.status.INTERNAL, message: String(err) } as grpc.ServiceError);
+    callback(toServiceError(err));
   }
 };
 
@@ -297,7 +310,7 @@ const dropoffPassenger: Handler<DropoffPassengerReq, unknown> = async (call, cal
     const booking = await svc.dropoffPassenger(call.request.bookingId, call.request.driverUserId);
     callback(null, { booking: rowToProto(booking), tripId: booking.trip_id ?? '' });
   } catch (err) {
-    callback({ code: grpc.status.INTERNAL, message: String(err) } as grpc.ServiceError);
+    callback(toServiceError(err));
   }
 };
 
@@ -306,7 +319,7 @@ const markNoShow: Handler<MarkNoShowReq, unknown> = async (call, callback) => {
     const booking = await svc.markNoShow(call.request.bookingId, call.request.driverUserId, call.request.reason);
     callback(null, { booking: rowToProto(booking) });
   } catch (err) {
-    callback({ code: grpc.status.INTERNAL, message: String(err) } as grpc.ServiceError);
+    callback(toServiceError(err));
   }
 };
 
@@ -315,7 +328,7 @@ const completeJourney: Handler<CompleteJourneyReq, unknown> = async (call, callb
     const booking = await svc.completeJourney(call.request.bookingId, call.request.actorUserId);
     callback(null, { booking: rowToProto(booking) });
   } catch (err) {
-    callback({ code: grpc.status.INTERNAL, message: String(err) } as grpc.ServiceError);
+    callback(toServiceError(err));
   }
 };
 
@@ -330,7 +343,7 @@ const submitRating: Handler<RatingReq, unknown> = async (call, callback) => {
     const ratingComplete = !!(booking.passenger_rating && booking.driver_rating);
     callback(null, { booking: rowToProto(booking), ratingComplete });
   } catch (err) {
-    callback({ code: grpc.status.INTERNAL, message: String(err) } as grpc.ServiceError);
+    callback(toServiceError(err));
   }
 };
 

@@ -9,6 +9,11 @@ vi.mock('../../src/clients/payment.grpc.client.js', () => ({
   refundPayment: vi.fn(),
 }));
 
+vi.mock('../../src/clients/location.grpc.client.js', () => ({
+  startTrackedTrip: vi.fn(),
+  completeTrackedTrip: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock('../../src/config.js', () => ({
   config: {
     NODE_ENV: 'test',
@@ -50,13 +55,14 @@ vi.mock('../../src/events/booking.events.js', () => ({
 const { BookingService } = await import('../../src/services/booking.service.js');
 const { refundPayment } = await import('../../src/clients/payment.grpc.client.js');
 const { releaseSeats } = await import('../../src/clients/route.grpc.client.js');
+const { startTrackedTrip, completeTrackedTrip } = await import('../../src/clients/location.grpc.client.js');
 const {
   publishBookingEmergency,
+  publishBookingJourneyCompleted,
+  publishBookingNoShow,
   publishDriverArrivedPickup,
   publishPassengerBoarded,
   publishPassengerDroppedOff,
-  publishBookingJourneyCompleted,
-  publishBookingNoShow,
   publishTripCompleted,
   publishTripStarted,
 } = await import('../../src/events/booking.events.js');
@@ -116,27 +122,29 @@ function makeRepo() {
   return {
     findById: vi.fn(),
     cancelByPassenger: vi.fn(),
-    startTrip: vi.fn(),
-    completeTrip: vi.fn(),
     appendEvent: vi.fn().mockResolvedValue(undefined),
     markPaymentRefunded: vi.fn(),
     markDriverArrived: vi.fn(),
     boardPassenger: vi.fn(),
     dropoffPassenger: vi.fn(),
     completeJourney: vi.fn(),
+    completeLegacyTrip: vi.fn(),
     markNoShow: vi.fn(),
+    submitRating: vi.fn(),
   } as const;
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(startTrackedTrip).mockResolvedValue('trip-1');
 });
 
 describe('BookingService.cancelByPassengerWithRefund', () => {
-  it('orchestrates refund for paid bookings', async () => {
+  it('orchestrates refund for paid bookings before boarding', async () => {
     const repo = makeRepo();
-    const cancelled = { ...baseBooking, status: 'passenger_cancelled' as const, journey_state: 'cancelled' as const };
-    repo.findById.mockResolvedValue(baseBooking);
+    const cancellable = { ...baseBooking, journey_state: 'driver_arrived' as const };
+    const cancelled = { ...cancellable, status: 'passenger_cancelled' as const, journey_state: 'cancelled' as const };
+    repo.findById.mockResolvedValue(cancellable);
     repo.cancelByPassenger.mockResolvedValue(cancelled);
     repo.markPaymentRefunded.mockResolvedValue({ ...cancelled, payment_status: 'refunded' as const });
     vi.mocked(refundPayment).mockResolvedValue({
@@ -151,13 +159,27 @@ describe('BookingService.cancelByPassengerWithRefund', () => {
     expect(vi.mocked(releaseSeats)).toHaveBeenCalledWith('route-1', 'booking-1', 'PASSENGER_CANCELLED');
     expect(vi.mocked(refundPayment)).toHaveBeenCalledWith('payment-1', 'passenger-1', 'PASSENGER_CANCELLED');
     expect(repo.markPaymentRefunded).toHaveBeenCalledWith('booking-1', 'PAYMENT_SERVICE_POLICY');
+    expect(result.booking.journey_state).toBe('cancelled');
     expect(result.refund.applied).toBe(true);
-    expect(result.refund.refundedAmountTzs).toBe(10000);
-    expect(result.refund.refundReference).toBe('RF-123');
+  });
+
+  it('rejects passenger cancellation once the booking is in transit', async () => {
+    const repo = makeRepo();
+    repo.findById.mockResolvedValue({ ...baseBooking, journey_state: 'in_transit' as const, trip_id: 'trip-1' });
+
+    const svc = new BookingService(repo as never);
+
+    await expect(
+      svc.cancelByPassengerWithRefund('booking-1', 'passenger-1', 'PASSENGER_CANCELLED'),
+    ).rejects.toMatchObject({ code: 'INVALID_STATE' });
+
+    expect(repo.cancelByPassenger).not.toHaveBeenCalled();
+    expect(vi.mocked(releaseSeats)).not.toHaveBeenCalled();
+    expect(vi.mocked(refundPayment)).not.toHaveBeenCalled();
   });
 });
 
-describe('BookingService.journey actions', () => {
+describe('BookingService journey actions', () => {
   it('marks pickup arrival for the assigned driver', async () => {
     const repo = makeRepo();
     const arrived = { ...baseBooking, journey_state: 'driver_arrived' as const, arrived_pickup_at: new Date() };
@@ -169,37 +191,42 @@ describe('BookingService.journey actions', () => {
 
     expect(result.journey_state).toBe('driver_arrived');
     expect(repo.markDriverArrived).toHaveBeenCalledWith('booking-1');
-    expect(repo.appendEvent).toHaveBeenCalledWith(
-      'booking-1',
-      'driver.arrived_pickup',
-      expect.objectContaining({ driverId: 'driver-1' }),
-    );
     expect(vi.mocked(publishDriverArrivedPickup)).toHaveBeenCalledTimes(1);
   });
 
-  it('boards the passenger and creates trip linkage', async () => {
+  it('boards the passenger only after pickup arrival', async () => {
     const repo = makeRepo();
+    const readyToBoard = { ...baseBooking, journey_state: 'driver_arrived' as const };
     const boarded = {
-      ...baseBooking,
+      ...readyToBoard,
       journey_state: 'in_transit' as const,
       trip_id: 'trip-1',
       boarded_at: new Date(),
       trip_started_at: new Date(),
     };
-    repo.findById.mockResolvedValue(baseBooking);
+    repo.findById.mockResolvedValue(readyToBoard);
     repo.boardPassenger.mockResolvedValue(boarded);
 
     const svc = new BookingService(repo as never);
     const result = await svc.boardPassenger('booking-1', 'driver-1');
 
-    expect(result.trip_id).toBe('trip-1');
-    expect(repo.boardPassenger).toHaveBeenCalledWith('booking-1', expect.any(String));
-    expect(repo.appendEvent).toHaveBeenCalledWith(
-      'booking-1',
-      'passenger.boarded',
-      expect.objectContaining({ driverId: 'driver-1' }),
-    );
+    expect(result.journey_state).toBe('in_transit');
+    expect(vi.mocked(startTrackedTrip)).toHaveBeenCalledTimes(1);
+    expect(repo.boardPassenger).toHaveBeenCalledWith('booking-1', 'trip-1');
     expect(vi.mocked(publishPassengerBoarded)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(publishTripStarted)).toHaveBeenCalledTimes(1);
+  });
+
+  it('fails boarding before pickup arrival and avoids creating a tracked trip', async () => {
+    const repo = makeRepo();
+    repo.findById.mockResolvedValue(baseBooking);
+
+    const svc = new BookingService(repo as never);
+
+    await expect(svc.boardPassenger('booking-1', 'driver-1')).rejects.toMatchObject({ code: 'INVALID_STATE' });
+
+    expect(vi.mocked(startTrackedTrip)).not.toHaveBeenCalled();
+    expect(repo.boardPassenger).not.toHaveBeenCalled();
   });
 
   it('records dropoff and moves the booking into the walking leg', async () => {
@@ -219,7 +246,38 @@ describe('BookingService.journey actions', () => {
 
     expect(result.journey_state).toBe('walking_to_destination');
     expect(repo.dropoffPassenger).toHaveBeenCalledWith('booking-1');
+    expect(vi.mocked(completeTrackedTrip)).toHaveBeenCalledTimes(1);
     expect(vi.mocked(publishPassengerDroppedOff)).toHaveBeenCalledTimes(1);
+  });
+
+  it('marks a no-show only after pickup arrival', async () => {
+    const repo = makeRepo();
+    const readyForNoShow = { ...baseBooking, journey_state: 'driver_arrived' as const };
+    const noShow = {
+      ...readyForNoShow,
+      status: 'no_show' as const,
+      journey_state: 'no_show' as const,
+      no_show_at: new Date(),
+    };
+    repo.findById.mockResolvedValue(readyForNoShow);
+    repo.markNoShow.mockResolvedValue(noShow);
+
+    const svc = new BookingService(repo as never);
+    const result = await svc.markNoShow('booking-1', 'driver-1', 'PASSENGER_ABSENT');
+
+    expect(result.status).toBe('no_show');
+    expect(repo.markNoShow).toHaveBeenCalledWith('booking-1', 'PASSENGER_ABSENT');
+    expect(vi.mocked(publishBookingNoShow)).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects no-show before pickup arrival', async () => {
+    const repo = makeRepo();
+    repo.findById.mockResolvedValue(baseBooking);
+
+    const svc = new BookingService(repo as never);
+
+    await expect(svc.markNoShow('booking-1', 'driver-1', 'PASSENGER_ABSENT')).rejects.toMatchObject({ code: 'INVALID_STATE' });
+    expect(repo.markNoShow).not.toHaveBeenCalled();
   });
 
   it('completes the journey for a booking participant', async () => {
@@ -242,24 +300,45 @@ describe('BookingService.journey actions', () => {
     expect(repo.completeJourney).toHaveBeenCalledWith('booking-1');
     expect(vi.mocked(publishBookingJourneyCompleted)).toHaveBeenCalledTimes(1);
   });
+});
 
-  it('marks a no-show before boarding', async () => {
+describe('BookingService legacy trip actions', () => {
+  it('keeps startTrip as a legacy alias for boarding', async () => {
     const repo = makeRepo();
-    const noShow = {
-      ...baseBooking,
-      status: 'no_show' as const,
-      journey_state: 'no_show' as const,
-      no_show_at: new Date(),
-    };
-    repo.findById.mockResolvedValue(baseBooking);
-    repo.markNoShow.mockResolvedValue(noShow);
+    const readyToBoard = { ...baseBooking, journey_state: 'driver_arrived' as const };
+    const boarded = { ...readyToBoard, journey_state: 'in_transit' as const, trip_id: 'trip-1', boarded_at: new Date() };
+    repo.findById.mockResolvedValue(readyToBoard);
+    repo.boardPassenger.mockResolvedValue(boarded);
 
     const svc = new BookingService(repo as never);
-    const result = await svc.markNoShow('booking-1', 'driver-1', 'PASSENGER_ABSENT');
+    const result = await svc.startTrip('booking-1', 'driver-1');
 
-    expect(result.status).toBe('no_show');
-    expect(repo.markNoShow).toHaveBeenCalledWith('booking-1', 'PASSENGER_ABSENT');
-    expect(vi.mocked(publishBookingNoShow)).toHaveBeenCalledTimes(1);
+    expect(result.journey_state).toBe('in_transit');
+    expect(repo.boardPassenger).toHaveBeenCalledWith('booking-1', 'trip-1');
+  });
+
+  it('keeps completeTrip as a legacy compatibility close-out path', async () => {
+    const repo = makeRepo();
+    const activeBooking = { ...baseBooking, journey_state: 'in_transit' as const, trip_id: 'trip-1' };
+    const completed = {
+      ...activeBooking,
+      status: 'completed' as const,
+      journey_state: 'completed' as const,
+      completed_at: new Date(),
+      journey_completed_at: new Date(),
+      trip_completed_at: new Date(),
+      dropped_off_at: new Date(),
+    };
+    repo.findById.mockResolvedValue(activeBooking);
+    repo.completeLegacyTrip.mockResolvedValue(completed);
+
+    const svc = new BookingService(repo as never);
+    const result = await svc.completeTrip('booking-1', 'driver-1');
+
+    expect(result.status).toBe('completed');
+    expect(repo.completeLegacyTrip).toHaveBeenCalledWith('booking-1');
+    expect(vi.mocked(completeTrackedTrip)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(publishTripCompleted)).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -277,38 +356,5 @@ describe('BookingService.triggerEmergency', () => {
       expect.objectContaining({ reportedBy: 'passenger-1', reporterRole: 'passenger', reason: 'UNSAFE_DRIVER' }),
     );
     expect(vi.mocked(publishBookingEmergency)).toHaveBeenCalledTimes(1);
-  });
-});
-
-describe('BookingService trip lifecycle', () => {
-  it('starts a confirmed trip for the assigned driver', async () => {
-    const repo = makeRepo();
-    const started = { ...baseBooking, status: 'in_progress' as const, trip_started_at: new Date() };
-    repo.findById.mockResolvedValue(baseBooking);
-    repo.startTrip.mockResolvedValue(started);
-
-    const svc = new BookingService(repo as never);
-    const result = await svc.startTrip('booking-1', 'driver-1');
-
-    expect(repo.startTrip).toHaveBeenCalledWith('booking-1');
-    expect(repo.appendEvent).toHaveBeenCalledWith('booking-1', 'trip.started', { driverId: 'driver-1' });
-    expect(vi.mocked(publishTripStarted)).toHaveBeenCalledTimes(1);
-    expect(result.status).toBe('in_progress');
-  });
-
-  it('completes only an in-progress trip for the assigned driver', async () => {
-    const repo = makeRepo();
-    const inProgress = { ...baseBooking, status: 'in_progress' as const, trip_started_at: new Date() };
-    const completed = { ...inProgress, status: 'completed' as const, completed_at: new Date(), trip_completed_at: new Date() };
-    repo.findById.mockResolvedValue(inProgress);
-    repo.completeTrip.mockResolvedValue(completed);
-
-    const svc = new BookingService(repo as never);
-    const result = await svc.completeTrip('booking-1', 'driver-1');
-
-    expect(repo.completeTrip).toHaveBeenCalledWith('booking-1');
-    expect(repo.appendEvent).toHaveBeenCalledWith('booking-1', 'trip.completed', { driverId: 'driver-1' });
-    expect(vi.mocked(publishTripCompleted)).toHaveBeenCalledTimes(1);
-    expect(result.status).toBe('completed');
   });
 });

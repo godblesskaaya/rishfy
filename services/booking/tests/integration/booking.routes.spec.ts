@@ -207,6 +207,47 @@ describe('booking routes integration', () => {
     expect(serviceMock.triggerEmergency).toHaveBeenCalledWith('booking-2', 'passenger-2', 'SOS');
   });
 
+  it('POST /bookings/:id/cancel returns 409 when the booking is no longer cancellable', async () => {
+    const err = Object.assign(new Error('Cannot cancel booking in current state'), { code: 'INVALID_STATE' });
+    serviceMock.cancelByPassengerWithRefund.mockRejectedValue(err);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/bookings/booking-1/cancel',
+      headers: { 'x-user-id': 'passenger-1' },
+      payload: { reason: 'PASSENGER_CANCELLED' },
+    });
+
+    expect(res.statusCode).toBe(409);
+    expect(res.json()).toMatchObject({ error: 'INVALID_STATE' });
+  });
+
+  it('POST /bookings/:id/start-trip preserves the legacy alias for boarding', async () => {
+    serviceMock.startTrip.mockResolvedValue({ id: 'booking-1', journey_state: 'in_transit', trip_id: 'trip-1' });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/bookings/booking-1/start-trip',
+      headers: { 'x-user-id': 'driver-1' },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(serviceMock.startTrip).toHaveBeenCalledWith('booking-1', 'driver-1');
+  });
+
+  it('POST /bookings/:id/complete-trip preserves the legacy completion alias', async () => {
+    serviceMock.completeTrip.mockResolvedValue({ id: 'booking-1', status: 'completed', journey_state: 'completed' });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/bookings/booking-1/complete-trip',
+      headers: { 'x-user-id': 'driver-1' },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(serviceMock.completeTrip).toHaveBeenCalledWith('booking-1', 'driver-1');
+  });
+
   it('POST /bookings/:id/arrive-pickup returns 200 for the assigned driver', async () => {
     serviceMock.arrivePickup.mockResolvedValue({ id: 'booking-1', journey_state: 'driver_arrived' });
 
@@ -231,6 +272,20 @@ describe('booking routes integration', () => {
 
     expect(res.statusCode).toBe(200);
     expect(serviceMock.boardPassenger).toHaveBeenCalledWith('booking-1', 'driver-1');
+  });
+
+  it('POST /bookings/:id/board-passenger returns 409 when the journey is past boarding', async () => {
+    const err = Object.assign(new Error('Cannot board passenger in current state'), { code: 'INVALID_STATE' });
+    serviceMock.boardPassenger.mockRejectedValue(err);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/bookings/booking-1/board-passenger',
+      headers: { 'x-user-id': 'driver-1' },
+    });
+
+    expect(res.statusCode).toBe(409);
+    expect(res.json()).toMatchObject({ error: 'INVALID_STATE' });
   });
 
   it('POST /bookings/:id/dropoff-passenger returns 200 and forwards to service', async () => {

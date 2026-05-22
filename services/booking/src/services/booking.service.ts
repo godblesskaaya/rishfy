@@ -19,6 +19,18 @@ import {
 } from '../events/booking.events.js';
 import type { BookingRow } from '../repositories/booking.repository.js';
 
+type ActionJourneyState = BookingRow['journey_state'];
+
+const LEGACY_BOARDED_STATE: ActionJourneyState = 'boarded';
+const NORMALIZED_IN_TRANSIT_STATE: ActionJourneyState = 'in_transit';
+const PASSENGER_CANCELLABLE_STATES: readonly ActionJourneyState[] = [null, 'confirmed', 'driver_approaching', 'driver_arrived'];
+const ARRIVE_PICKUP_STATES: readonly ActionJourneyState[] = [null, 'confirmed', 'driver_approaching'];
+const BOARD_PASSENGER_STATES: readonly ActionJourneyState[] = ['driver_arrived'];
+const NO_SHOW_STATES: readonly ActionJourneyState[] = ['driver_arrived'];
+const IN_VEHICLE_STATES: readonly ActionJourneyState[] = [LEGACY_BOARDED_STATE, NORMALIZED_IN_TRANSIT_STATE];
+const LEGACY_COMPLETABLE_STATES: readonly ActionJourneyState[] = ['boarded', 'in_transit', 'walking_to_destination', 'dropped_off'];
+const JOURNEY_COMPLETION_STATES: readonly ActionJourneyState[] = ['walking_to_destination', 'dropped_off'];
+
 export interface CreateBookingParams {
   routeId: string;
   passengerId: string;
@@ -57,11 +69,35 @@ export interface CancelBookingResult {
 export class BookingService {
   constructor(private readonly repo: BookingRepository) {}
 
+  private normalizeJourneyState(journeyState: ActionJourneyState): ActionJourneyState {
+    return journeyState === LEGACY_BOARDED_STATE ? NORMALIZED_IN_TRANSIT_STATE : journeyState;
+  }
+
+  private normalizeBooking<T extends BookingRow | null>(booking: T): T {
+    if (!booking || booking.journey_state !== LEGACY_BOARDED_STATE) {
+      return booking;
+    }
+
+    return {
+      ...booking,
+      journey_state: this.normalizeJourneyState(booking.journey_state),
+    };
+  }
+
+  private ensureJourneyState(
+    booking: BookingRow,
+    allowedStates: readonly ActionJourneyState[],
+    errorMessage: string,
+  ): void {
+    if (allowedStates.includes(this.normalizeJourneyState(booking.journey_state))) return;
+    throw Object.assign(new Error(errorMessage), { code: 'INVALID_STATE' });
+  }
+
   private async getBookingForDriverAction(bookingId: string, driverId: string): Promise<BookingRow> {
     const booking = await this.repo.findById(bookingId);
     if (!booking) throw Object.assign(new Error('Booking not found'), { code: 'NOT_FOUND' });
     if (booking.driver_id !== driverId) throw Object.assign(new Error('Forbidden'), { code: 'FORBIDDEN' });
-    return booking;
+    return this.normalizeBooking(booking)!;
   }
 
   private async getBookingForParticipantAction(bookingId: string, actorId: string): Promise<BookingRow> {
@@ -70,7 +106,7 @@ export class BookingService {
     if (booking.driver_id !== actorId && booking.passenger_id !== actorId) {
       throw Object.assign(new Error('Forbidden'), { code: 'FORBIDDEN' });
     }
-    return booking;
+    return this.normalizeBooking(booking)!;
   }
 
   async createBooking(params: CreateBookingParams): Promise<BookingRow> {
@@ -139,7 +175,7 @@ export class BookingService {
       estimatedPickupTime: params.estimatedPickupTime?.toISOString(),
     });
 
-    return booking;
+    return this.normalizeBooking(booking)!;
   }
 
   async confirmBooking(bookingId: string, paymentId: string): Promise<BookingRow> {
@@ -165,13 +201,14 @@ export class BookingService {
       dropoffName: booking.dropoff_name ?? '',
       timestamp: new Date().toISOString(),
     });
-    return booking;
+    return this.normalizeBooking(booking)!;
   }
 
   async cancelByPassengerWithRefund(bookingId: string, passengerId: string, reason: string): Promise<CancelBookingResult> {
     const booking = await this.repo.findById(bookingId);
     if (!booking) throw Object.assign(new Error('Booking not found'), { code: 'NOT_FOUND' });
     if (booking.passenger_id !== passengerId) throw Object.assign(new Error('Forbidden'), { code: 'FORBIDDEN' });
+    this.ensureJourneyState(booking, PASSENGER_CANCELLABLE_STATES, 'Cannot cancel booking in current state');
 
     const updated = await this.repo.cancelByPassenger(bookingId, reason);
     if (!updated) throw Object.assign(new Error('Cannot cancel booking in current state'), { code: 'INVALID_STATE' });
@@ -212,7 +249,7 @@ export class BookingService {
       }
     }
 
-    return { booking: updated, refund };
+    return { booking: this.normalizeBooking(updated)!, refund };
   }
 
   async cancelByPassenger(bookingId: string, passengerId: string, reason: string): Promise<BookingRow> {
@@ -236,7 +273,7 @@ export class BookingService {
       reason, timestamp: new Date().toISOString(),
     });
 
-    return updated;
+    return this.normalizeBooking(updated)!;
   }
 
   async handleDriverCancelledRoute(routeId: string): Promise<void> {
@@ -269,6 +306,7 @@ export class BookingService {
 
   async completeTrip(bookingId: string, driverId: string): Promise<BookingRow> {
     const booking = await this.getBookingForDriverAction(bookingId, driverId);
+    this.ensureJourneyState(booking, LEGACY_COMPLETABLE_STATES, 'Cannot complete trip in current state');
     const updated = await this.repo.completeLegacyTrip(bookingId);
     if (!updated) throw Object.assign(new Error('Cannot complete trip in current state'), { code: 'INVALID_STATE' });
 
@@ -320,11 +358,12 @@ export class BookingService {
       });
     }
 
-    return updated;
+    return this.normalizeBooking(updated)!;
   }
 
   async arrivePickup(bookingId: string, driverId: string): Promise<BookingRow> {
-    await this.getBookingForDriverAction(bookingId, driverId);
+    const booking = await this.getBookingForDriverAction(bookingId, driverId);
+    this.ensureJourneyState(booking, ARRIVE_PICKUP_STATES, 'Cannot mark arrival in current state');
     const updated = await this.repo.markDriverArrived(bookingId);
     if (!updated) throw Object.assign(new Error('Cannot mark arrival in current state'), { code: 'INVALID_STATE' });
 
@@ -338,11 +377,12 @@ export class BookingService {
       tripId: updated.trip_id ?? '',
       timestamp,
     });
-    return updated;
+    return this.normalizeBooking(updated)!;
   }
 
   async boardPassenger(bookingId: string, driverId: string): Promise<BookingRow> {
     const booking = await this.getBookingForDriverAction(bookingId, driverId);
+    this.ensureJourneyState(booking, BOARD_PASSENGER_STATES, 'Cannot board passenger in current state');
     const tripId = booking.trip_id
       ?? await startTrackedTrip({
         bookingId,
@@ -367,11 +407,12 @@ export class BookingService {
       timestamp,
     });
     await publishTripStarted({ bookingId, driverId, passengerId: updated.passenger_id, timestamp });
-    return updated;
+    return this.normalizeBooking(updated)!;
   }
 
   async dropoffPassenger(bookingId: string, driverId: string): Promise<BookingRow> {
     const booking = await this.getBookingForDriverAction(bookingId, driverId);
+    this.ensureJourneyState(booking, IN_VEHICLE_STATES, 'Cannot drop off passenger in current state');
     const updated = await this.repo.dropoffPassenger(bookingId);
     if (!updated) throw Object.assign(new Error('Cannot drop off passenger in current state'), { code: 'INVALID_STATE' });
 
@@ -408,11 +449,12 @@ export class BookingService {
         endLng: updated.dropoff_lng ?? updated.pickup_lng ?? 0,
       });
     }
-    return updated;
+    return this.normalizeBooking(updated)!;
   }
 
   async markNoShow(bookingId: string, driverId: string, reason: string): Promise<BookingRow> {
-    await this.getBookingForDriverAction(bookingId, driverId);
+    const booking = await this.getBookingForDriverAction(bookingId, driverId);
+    this.ensureJourneyState(booking, NO_SHOW_STATES, 'Cannot mark no-show in current state');
     const updated = await this.repo.markNoShow(bookingId, reason);
     if (!updated) throw Object.assign(new Error('Cannot mark no-show in current state'), { code: 'INVALID_STATE' });
 
@@ -427,11 +469,12 @@ export class BookingService {
       reason,
       timestamp,
     });
-    return updated;
+    return this.normalizeBooking(updated)!;
   }
 
   async completeJourney(bookingId: string, actorId: string): Promise<BookingRow> {
     const booking = await this.getBookingForParticipantAction(bookingId, actorId);
+    this.ensureJourneyState(booking, JOURNEY_COMPLETION_STATES, 'Cannot complete journey in current state');
     const updated = await this.repo.completeJourney(bookingId);
     if (!updated) throw Object.assign(new Error('Cannot complete journey in current state'), { code: 'INVALID_STATE' });
 
@@ -454,7 +497,7 @@ export class BookingService {
       driverEarnings: parseFloat(updated.driver_earnings),
       timestamp,
     });
-    return updated;
+    return this.normalizeBooking(updated)!;
   }
 
   async submitRating(bookingId: string, raterId: string, rating: number, review: string): Promise<BookingRow> {
@@ -471,7 +514,7 @@ export class BookingService {
       bookingId, raterId, ratedId, rating, raterRole: isPassenger ? 'passenger' : 'driver',
       timestamp: new Date().toISOString(),
     });
-    return updated;
+    return this.normalizeBooking(updated)!;
   }
 
   async triggerEmergency(bookingId: string, reporterId: string, reason: string): Promise<BookingRow> {
@@ -496,15 +539,15 @@ export class BookingService {
       timestamp: new Date().toISOString(),
     });
 
-    return booking;
+    return this.normalizeBooking(booking)!;
   }
 
   async getBooking(id: string): Promise<BookingRow | null> {
-    return this.repo.findById(id);
+    return this.normalizeBooking(await this.repo.findById(id));
   }
 
   async getByCode(code: string): Promise<BookingRow | null> {
-    return this.repo.findByCode(code);
+    return this.normalizeBooking(await this.repo.findByCode(code));
   }
 
   async listMyBookings(userId: string, role: 'passenger' | 'driver', limit = 20, offset = 0): Promise<BookingRow[]> {
