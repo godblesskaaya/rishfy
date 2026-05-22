@@ -54,6 +54,8 @@ describe('deriveTripLiveState', () => {
     expect(state.activeStopType).toBe('pickup');
     expect(state.proximityState).toMatch(/pickup/);
     expect(state.etaSeconds).toBeGreaterThan(0);
+    expect(state.activeStopRouteFraction).toBe(0);
+    expect(state.routeGeometrySource).toBe('trip_endpoints_linear_fallback');
   });
 
   it('switches to dropoff after pickup arrival', () => {
@@ -64,6 +66,9 @@ describe('deriveTripLiveState', () => {
     );
     expect(state.activeStopType).toBe('dropoff');
     expect(state.proximityState).toMatch(/dropoff/);
+    expect(state.currentRouteFraction).toBeGreaterThanOrEqual(0);
+    expect(state.activeStopRouteFraction).toBe(1);
+    expect(state.remainingRouteFraction).toBeGreaterThanOrEqual(0);
   });
 
   it('marks completed trips as completed', () => {

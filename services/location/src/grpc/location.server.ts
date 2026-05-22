@@ -14,6 +14,7 @@ import {
 } from '../services/live-trip.service.js';
 import { pgPool } from '../db.js';
 import type { TripRow } from '../repositories/location.repository.js';
+import type { DriverLocation } from '../services/geo.service.js';
 
 const PROTO_PATH = path.resolve(process.cwd(), 'shared/protos/location.proto');
 
@@ -56,7 +57,64 @@ function tripToProto(trip: TripRow): Record<string, unknown> {
     endTime: toTimestamp(trip.completed_at),
     distanceMeters: trip.total_distance_meters ?? 0,
     durationSeconds: trip.total_duration_seconds ?? 0,
+    passengerUserId: trip.passenger_id,
   };
+}
+
+function buildDriverLocationResponse(args: {
+  driverUserId: string;
+  point: {
+    lat: number;
+    lng: number;
+    speedKmh?: number | null;
+    bearing?: number | null;
+    accuracyMeters?: number | null;
+    timestampIso?: string;
+  };
+  trip: TripRow | null;
+  liveState: ReturnType<typeof deriveTripLiveState>;
+  ageSeconds: number;
+  isStale: boolean;
+  tripId?: string | null;
+}): Record<string, unknown> {
+  const { driverUserId, point, trip, liveState, ageSeconds, isStale, tripId } = args;
+  return {
+    point: {
+      coordinates: { latitude: point.lat, longitude: point.lng },
+      speedMps: (point.speedKmh ?? 0) / 3.6,
+      headingDegrees: point.bearing ?? 0,
+      accuracyMeters: point.accuracyMeters ?? 0,
+    },
+    isStale,
+    ageSeconds,
+    driverUserId,
+    tripId: trip?.id ?? tripId ?? '',
+    bookingId: trip?.booking_id ?? '',
+    passengerUserId: trip?.passenger_id ?? '',
+    etaSeconds: liveState.etaSeconds ?? 0,
+    etaSource: liveState.etaSource,
+    distanceToActiveStopMeters: liveState.distanceToActiveStopMeters ?? 0,
+    proximityState: liveState.proximityState,
+    activeStopType: liveState.activeStopType ?? '',
+    activeStopLat: liveState.activeStopLat ?? 0,
+    activeStopLng: liveState.activeStopLng ?? 0,
+    currentRouteFraction: liveState.currentRouteFraction ?? 0,
+    activeStopRouteFraction: liveState.activeStopRouteFraction ?? 0,
+    remainingRouteFraction: liveState.remainingRouteFraction ?? 0,
+    routeGeometrySource: liveState.routeGeometrySource,
+    tripStatus: trip?.status ?? '',
+    timestamp: point.timestampIso ?? '',
+    speedKmh: point.speedKmh ?? 0,
+    bearingDegrees: point.bearing ?? 0,
+    accuracyMeters: point.accuracyMeters ?? 0,
+  };
+}
+
+async function getTripContextForCachedLocation(loc: DriverLocation | null): Promise<TripRow | null> {
+  if (!loc?.tripId) {
+    return null;
+  }
+  return repo.getTripById(loc.tripId);
 }
 
 interface StartTripReq {
@@ -267,26 +325,52 @@ const getDriverLocation: Handler<GetDriverLocationReq, unknown> = async (call, c
         return;
       }
       const ageSeconds = Math.floor((Date.now() - dbLoc.time.getTime()) / 1000);
-      callback(null, {
+      const trip = dbLoc.tripId ? await repo.getTripById(dbLoc.tripId) : null;
+      const liveState = deriveTripLiveState(
+        trip,
+        { lat: dbLoc.lat, lng: dbLoc.lng, speedKmh: dbLoc.speedKmh },
+        config.ARRIVAL_RADIUS_METERS,
+      );
+      callback(null, buildDriverLocationResponse({
+        driverUserId,
         point: {
-          coordinates: { latitude: dbLoc.lat, longitude: dbLoc.lng },
-          speedMps: (dbLoc.speedKmh ?? 0) / 3.6,
-          headingDegrees: dbLoc.bearing ?? 0,
+          lat: dbLoc.lat,
+          lng: dbLoc.lng,
+          speedKmh: dbLoc.speedKmh,
+          bearing: dbLoc.bearing,
+          accuracyMeters: dbLoc.accuracyMeters,
+          timestampIso: dbLoc.time.toISOString(),
         },
-        isStale: ageSeconds > threshold,
+        trip,
+        liveState,
         ageSeconds,
-      });
+        isStale: ageSeconds > threshold,
+        tripId: dbLoc.tripId ?? null,
+      }));
       return;
     }
-    callback(null, {
+    const trip = await getTripContextForCachedLocation(loc);
+    const liveState = deriveTripLiveState(
+      trip,
+      { lat: loc.lat, lng: loc.lng, speedKmh: loc.speedKmh },
+      config.ARRIVAL_RADIUS_METERS,
+    );
+    callback(null, buildDriverLocationResponse({
+      driverUserId,
       point: {
-        coordinates: { latitude: loc.lat, longitude: loc.lng },
-        speedMps: (loc.speedKmh ?? 0) / 3.6,
-        headingDegrees: loc.bearing ?? 0,
+        lat: loc.lat,
+        lng: loc.lng,
+        speedKmh: loc.speedKmh,
+        bearing: loc.bearing,
+        accuracyMeters: loc.accuracyMeters,
+        timestampIso: loc.timestamp,
       },
-      isStale: false,
+      trip,
+      liveState,
       ageSeconds: 0,
-    });
+      isStale: false,
+      tripId: loc.tripId ?? null,
+    }));
   } catch (err) {
     callback({ code: grpc.status.INTERNAL, message: String(err) } as grpc.ServiceError);
   }
@@ -297,6 +381,14 @@ const getDriversLocations: Handler<GetDriversLocationsReq, unknown> = async (cal
     const locations = await Promise.all(
       (call.request.driverUserIds ?? []).map(async (id: string) => {
         const loc = await geoSvc.getDriverLocation(id);
+        const trip = await getTripContextForCachedLocation(loc);
+        const liveState = loc
+          ? deriveTripLiveState(
+              trip,
+              { lat: loc.lat, lng: loc.lng, speedKmh: loc.speedKmh },
+              config.ARRIVAL_RADIUS_METERS,
+            )
+          : null;
         return {
           driverUserId: id,
           point: loc
@@ -304,9 +396,25 @@ const getDriversLocations: Handler<GetDriversLocationsReq, unknown> = async (cal
                 coordinates: { latitude: loc.lat, longitude: loc.lng },
                 speedMps: (loc.speedKmh ?? 0) / 3.6,
                 headingDegrees: loc.bearing ?? 0,
+                accuracyMeters: loc.accuracyMeters ?? 0,
               }
             : null,
           isOnline: !!loc,
+          tripId: trip?.id ?? loc?.tripId ?? '',
+          bookingId: trip?.booking_id ?? loc?.bookingId ?? '',
+          passengerUserId: trip?.passenger_id ?? loc?.passengerId ?? '',
+          proximityState: liveState?.proximityState ?? '',
+          activeStopType: liveState?.activeStopType ?? '',
+          distanceToActiveStopMeters: liveState?.distanceToActiveStopMeters ?? 0,
+          etaSeconds: liveState?.etaSeconds ?? 0,
+          etaSource: liveState?.etaSource ?? 'none',
+          activeStopLat: liveState?.activeStopLat ?? 0,
+          activeStopLng: liveState?.activeStopLng ?? 0,
+          currentRouteFraction: liveState?.currentRouteFraction ?? 0,
+          activeStopRouteFraction: liveState?.activeStopRouteFraction ?? 0,
+          remainingRouteFraction: liveState?.remainingRouteFraction ?? 0,
+          routeGeometrySource: liveState?.routeGeometrySource ?? 'none',
+          tripStatus: trip?.status ?? '',
         };
       }),
     );

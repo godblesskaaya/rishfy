@@ -123,6 +123,15 @@ message GetDriverLocationResponse {
   double speed_kmh = 12;
   double bearing_degrees = 13;
   double accuracy_meters = 14;
+  string eta_source = 15;
+  double active_stop_lat = 16;
+  double active_stop_lng = 17;
+  double current_route_fraction = 18;
+  double active_stop_route_fraction = 19;
+  double remaining_route_fraction = 20;
+  string route_geometry_source = 21;
+  string trip_status = 22;
+  string passenger_user_id = 23;
 }
 
 message GetDriversLocationsRequest { repeated string driver_user_ids = 1; }
@@ -135,6 +144,17 @@ message GetDriversLocationsResponse {
     string booking_id = 5;
     string proximity_state = 6;
     string active_stop_type = 7;
+    int32 distance_to_active_stop_meters = 8;
+    int32 eta_seconds = 9;
+    string eta_source = 10;
+    double active_stop_lat = 11;
+    double active_stop_lng = 12;
+    double current_route_fraction = 13;
+    double active_stop_route_fraction = 14;
+    double remaining_route_fraction = 15;
+    string route_geometry_source = 16;
+    string trip_status = 17;
+    string passenger_user_id = 18;
   }
   repeated DriverLocation locations = 1;
 }

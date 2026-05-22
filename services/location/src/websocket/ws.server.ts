@@ -1,6 +1,7 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import type { IncomingMessage } from 'http';
 import { createServer } from 'http';
+import { randomUUID } from 'crypto';
 import IORedis from 'ioredis';
 import { GeoService } from '../services/geo.service.js';
 import { LocationRepository, type TripRow } from '../repositories/location.repository.js';
@@ -189,9 +190,10 @@ function emitToSubscribers(tripId: string | null, driverId: string | null, paylo
   }
 }
 
-function buildLivePayload(args: {
+function buildLocationEventData(args: {
   driverId: string;
   trip: TripRow | null;
+  tripId: string | null;
   lat: number;
   lng: number;
   heading?: number;
@@ -200,15 +202,25 @@ function buildLivePayload(args: {
   timestampIso: string;
   liveState: ReturnType<typeof deriveTripLiveState>;
 }): Record<string, unknown> {
-  const { driverId, trip, lat, lng, heading, speedKmh, accuracyMeters, timestampIso, liveState } = args;
+  const {
+    driverId,
+    trip,
+    tripId,
+    lat,
+    lng,
+    heading,
+    speedKmh,
+    accuracyMeters,
+    timestampIso,
+    liveState,
+  } = args;
   return {
-    type: 'location_update',
-    event: 'driver.location.updated',
-    trip_id: trip?.id ?? null,
+    trip_id: trip?.id ?? tripId,
     booking_id: trip?.booking_id ?? null,
     driver_id: driverId,
     driver_user_id: driverId,
     passenger_id: trip?.passenger_id ?? null,
+    trip_status: trip?.status ?? null,
     lat,
     lng,
     bearing: heading ?? null,
@@ -223,6 +235,18 @@ function buildLivePayload(args: {
     proximity_state: liveState.proximityState,
     eta_seconds: liveState.etaSeconds,
     eta_source: liveState.etaSource,
+    current_route_fraction: liveState.currentRouteFraction,
+    active_stop_route_fraction: liveState.activeStopRouteFraction,
+    remaining_route_fraction: liveState.remainingRouteFraction,
+    route_geometry_source: liveState.routeGeometrySource,
+  };
+}
+
+function buildLivePayload(args: Parameters<typeof buildLocationEventData>[0]): Record<string, unknown> {
+  return {
+    type: 'location_update',
+    event: 'driver.location.updated',
+    ...buildLocationEventData(args),
   };
 }
 
@@ -249,6 +273,26 @@ function buildArrivalPayload(args: {
     pickup_lng: trip.origin_lng,
     distance_to_pickup_m: distanceMeters,
     arrived_at: timestampIso,
+  };
+}
+
+function buildEventEnvelope(
+  eventType: string,
+  eventVersion: string,
+  data: Record<string, unknown>,
+  timestampIso: string,
+): Record<string, unknown> {
+  return {
+    event_id: randomUUID(),
+    event_type: eventType,
+    event_version: eventVersion,
+    timestamp: timestampIso,
+    source: {
+      service: config.SERVICE_NAME,
+      instance_id: process.env['HOSTNAME'] ?? 'unknown',
+      version: process.env['npm_package_version'] ?? 'unknown',
+    },
+    data,
   };
 }
 
@@ -314,6 +358,18 @@ function handleDriverConnection(
       const persistedTripId = trip?.id ?? driverMsg.tripId ?? driverMsg.trip_id ?? boundTripId ?? undefined;
       const throttleKeyBase = persistedTripId ?? effectiveDriverId;
       const now = Date.now();
+      const locationEventData = buildLocationEventData({
+        driverId: effectiveDriverId,
+        trip,
+        tripId: persistedTripId ?? null,
+        lat: driverMsg.lat,
+        lng: driverMsg.lng,
+        heading,
+        speedKmh,
+        accuracyMeters,
+        timestampIso,
+        liveState,
+      });
 
       if (!shouldThrottle(`db:${throttleKeyBase}`, now, config.LOCATION_KAFKA_THROTTLE_MS)) {
         await repo.insertDriverLocation({
@@ -330,29 +386,12 @@ function handleDriverConnection(
         try {
           const producer = await getProducer();
           await producer.send({
-            topic: 'driver.location_updated',
+            topic: 'driver.location.updated',
             messages: [{
               key: throttleKeyBase,
-              value: JSON.stringify({
-                event_type: 'driver.location.updated',
-                event_version: '1.1',
-                data: {
-                  driver_id: effectiveDriverId,
-                  trip_id: trip?.id ?? null,
-                  booking_id: trip?.booking_id ?? null,
-                  passenger_id: trip?.passenger_id ?? null,
-                  lat: driverMsg.lat,
-                  lng: driverMsg.lng,
-                  bearing: heading ?? null,
-                  speed_kmh: speedKmh ?? null,
-                  accuracy_meters: accuracyMeters ?? null,
-                  timestamp: timestampIso,
-                  active_stop_type: liveState.activeStopType,
-                  distance_to_active_stop_meters: liveState.distanceToActiveStopMeters,
-                  proximity_state: liveState.proximityState,
-                  eta_seconds: liveState.etaSeconds,
-                },
-              }),
+              value: JSON.stringify(
+                buildEventEnvelope('driver.location.updated', '1.2', locationEventData, timestampIso),
+              ),
             }],
           });
         } catch (err) {
@@ -387,6 +426,7 @@ function handleDriverConnection(
         buildLivePayload({
           driverId: effectiveDriverId,
           trip,
+          tripId: persistedTripId ?? null,
           lat: driverMsg.lat,
           lng: driverMsg.lng,
           heading,
@@ -419,22 +459,25 @@ function handleDriverConnection(
             topic: 'driver.arrived',
             messages: [{
               key: trip.id,
-              value: JSON.stringify({
-                event_type: 'driver.arrived',
-                event_version: '1.1',
-                data: {
-                  driver_id: effectiveDriverId,
-                  trip_id: trip.id,
-                  booking_id: trip.booking_id,
-                  passenger_id: trip.passenger_id,
-                  arrival_lat: driverMsg.lat,
-                  arrival_lng: driverMsg.lng,
-                  pickup_lat: trip.origin_lat,
-                  pickup_lng: trip.origin_lng,
-                  distance_to_pickup_m: liveState.distanceToActiveStopMeters,
-                  arrived_at: timestampIso,
-                },
-              }),
+              value: JSON.stringify(
+                buildEventEnvelope(
+                  'driver.arrived',
+                  '1.1',
+                  {
+                    driver_id: effectiveDriverId,
+                    trip_id: trip.id,
+                    booking_id: trip.booking_id,
+                    passenger_id: trip.passenger_id,
+                    arrival_lat: driverMsg.lat,
+                    arrival_lng: driverMsg.lng,
+                    pickup_lat: trip.origin_lat,
+                    pickup_lng: trip.origin_lng,
+                    distance_to_pickup_m: liveState.distanceToActiveStopMeters,
+                    arrived_at: timestampIso,
+                  },
+                  timestampIso,
+                ),
+              ),
             }],
           });
         } catch (err) {
