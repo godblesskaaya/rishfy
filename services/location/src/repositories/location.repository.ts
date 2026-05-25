@@ -4,6 +4,7 @@ export interface DriverLocationPoint {
   time: Date;
   driverId: string;
   tripId?: string;
+  routeRunId?: string;
   lat: number;
   lng: number;
   bearing?: number;
@@ -13,9 +14,11 @@ export interface DriverLocationPoint {
 
 export interface TripRow {
   id: string;
-  booking_id: string;
+  booking_id: string | null;
+  route_id: string | null;
+  route_run_id: string | null;
   driver_id: string;
-  passenger_id: string;
+  passenger_id: string | null;
   status: 'pending' | 'in_progress' | 'completed' | 'cancelled';
   origin_lat: number;
   origin_lng: number;
@@ -36,10 +39,10 @@ export class LocationRepository {
 
   async insertDriverLocation(point: DriverLocationPoint): Promise<void> {
     await this.pool.query(
-      `INSERT INTO driver_locations (time, driver_id, trip_id, lat, lng, bearing, speed_kmh, accuracy_meters)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      `INSERT INTO driver_locations (time, driver_id, trip_id, route_run_id, lat, lng, bearing, speed_kmh, accuracy_meters)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
       [
-        point.time, point.driverId, point.tripId ?? null,
+        point.time, point.driverId, point.tripId ?? null, point.routeRunId ?? null,
         point.lat, point.lng, point.bearing ?? null,
         point.speedKmh ?? null, point.accuracyMeters ?? null,
       ],
@@ -48,7 +51,7 @@ export class LocationRepository {
 
   async getLastKnownLocation(driverId: string): Promise<DriverLocationPoint | null> {
     const { rows } = await this.pool.query<DriverLocationPoint>(
-      `SELECT time, driver_id as "driverId", trip_id as "tripId", lat, lng, bearing, speed_kmh as "speedKmh", accuracy_meters as "accuracyMeters"
+      `SELECT time, driver_id as "driverId", trip_id as "tripId", route_run_id as "routeRunId", lat, lng, bearing, speed_kmh as "speedKmh", accuracy_meters as "accuracyMeters"
        FROM driver_locations WHERE driver_id=$1 ORDER BY time DESC LIMIT 1`,
       [driverId],
     );
@@ -56,13 +59,27 @@ export class LocationRepository {
   }
 
   async createTrip(data: {
-    bookingId: string; driverId: string; passengerId: string;
+    bookingId?: string | null;
+    routeId?: string | null;
+    routeRunId?: string | null;
+    driverId: string;
+    passengerId?: string | null;
     originLat: number; originLng: number; destinationLat: number; destinationLng: number;
   }): Promise<TripRow> {
     const { rows } = await this.pool.query<TripRow>(
-      `INSERT INTO trips (booking_id, driver_id, passenger_id, origin_lat, origin_lng, destination_lat, destination_lng)
-       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-      [data.bookingId, data.driverId, data.passengerId, data.originLat, data.originLng, data.destinationLat, data.destinationLng],
+      `INSERT INTO trips (booking_id, route_id, route_run_id, driver_id, passenger_id, origin_lat, origin_lng, destination_lat, destination_lng)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      [
+        data.bookingId ?? null,
+        data.routeId ?? null,
+        data.routeRunId ?? null,
+        data.driverId,
+        data.passengerId ?? null,
+        data.originLat,
+        data.originLng,
+        data.destinationLat,
+        data.destinationLng,
+      ],
     );
     return rows[0]!;
   }
@@ -79,6 +96,14 @@ export class LocationRepository {
     const { rows } = await this.pool.query<TripRow>(
       'SELECT * FROM trips WHERE booking_id=$1',
       [bookingId],
+    );
+    return rows[0] ?? null;
+  }
+
+  async getTripByRouteRunId(routeRunId: string): Promise<TripRow | null> {
+    const { rows } = await this.pool.query<TripRow>(
+      'SELECT * FROM trips WHERE route_run_id=$1',
+      [routeRunId],
     );
     return rows[0] ?? null;
   }

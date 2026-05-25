@@ -55,6 +55,7 @@ const searchSchema = z.object({
   max_walking_distance: z.coerce.number().int().min(100).max(5000).default(1000),
   seats_needed: z.coerce.number().int().min(1).default(1),
 });
+const idParamSchema = z.object({ id: z.string().uuid() });
 
 export async function routeRoutes(app: FastifyInstance, { svc }: { svc: RouteService }) {
   // POST /routes/preview — compute route path without persisting
@@ -112,8 +113,64 @@ export async function routeRoutes(app: FastifyInstance, { svc }: { svc: RouteSer
   // GET /routes/:id
   app.get<{ Params: { id: string } }>('/:id', async (req, reply) => {
     try {
-      const route = await svc.getRoute(req.params.id);
+      const params = idParamSchema.parse(req.params);
+      const route = await svc.getRoute(params.id);
       return reply.send(route);
+    } catch (err) { return handleError(err, reply); }
+  });
+
+  // GET /routes/:id/operations — driver route workspace
+  app.get<{ Params: { id: string } }>('/:id/operations', async (req, reply) => {
+    try {
+      const driverId = req.headers['x-user-id'] as string;
+      if (!driverId) return reply.code(401).send({ error: 'UNAUTHENTICATED' });
+      const params = idParamSchema.parse(req.params);
+      const operations = await svc.getDriverRouteOperations(driverId, params.id);
+      return reply.send(operations);
+    } catch (err) { return handleError(err, reply); }
+  });
+
+  // POST /routes/:id/start-run — persistent driver route session
+  app.post<{ Params: { id: string } }>('/:id/start-run', async (req, reply) => {
+    try {
+      const driverId = req.headers['x-user-id'] as string;
+      if (!driverId) return reply.code(401).send({ error: 'UNAUTHENTICATED' });
+      const params = idParamSchema.parse(req.params);
+      const workspace = await svc.startRouteRun(driverId, params.id);
+      return reply.send(workspace);
+    } catch (err) { return handleError(err, reply); }
+  });
+
+  // POST /routes/:id/advance-stop — activate the current actionable stop
+  app.post<{ Params: { id: string } }>('/:id/advance-stop', async (req, reply) => {
+    try {
+      const driverId = req.headers['x-user-id'] as string;
+      if (!driverId) return reply.code(401).send({ error: 'UNAUTHENTICATED' });
+      const params = idParamSchema.parse(req.params);
+      const workspace = await svc.advanceRouteRun(driverId, params.id);
+      return reply.send(workspace);
+    } catch (err) { return handleError(err, reply); }
+  });
+
+  // POST /routes/:id/complete-stop — complete the current stop and advance the run
+  app.post<{ Params: { id: string } }>('/:id/complete-stop', async (req, reply) => {
+    try {
+      const driverId = req.headers['x-user-id'] as string;
+      if (!driverId) return reply.code(401).send({ error: 'UNAUTHENTICATED' });
+      const params = idParamSchema.parse(req.params);
+      const workspace = await svc.completeCurrentRouteRunStop(driverId, params.id);
+      return reply.send(workspace);
+    } catch (err) { return handleError(err, reply); }
+  });
+
+  // POST /routes/:id/complete-run — finalize the active route run
+  app.post<{ Params: { id: string } }>('/:id/complete-run', async (req, reply) => {
+    try {
+      const driverId = req.headers['x-user-id'] as string;
+      if (!driverId) return reply.code(401).send({ error: 'UNAUTHENTICATED' });
+      const params = idParamSchema.parse(req.params);
+      const workspace = await svc.completeRouteRun(driverId, params.id);
+      return reply.send(workspace);
     } catch (err) { return handleError(err, reply); }
   });
 
@@ -122,7 +179,8 @@ export async function routeRoutes(app: FastifyInstance, { svc }: { svc: RouteSer
     try {
       const driverId = req.headers['x-user-id'] as string;
       if (!driverId) return reply.code(401).send({ error: 'UNAUTHENTICATED' });
-      const route = await svc.updateRoute(driverId, req.params.id, req.body as Record<string, unknown>);
+      const params = idParamSchema.parse(req.params);
+      const route = await svc.updateRoute(driverId, params.id, req.body as Record<string, unknown>);
       return reply.send(route);
     } catch (err) { return handleError(err, reply); }
   });
@@ -132,7 +190,8 @@ export async function routeRoutes(app: FastifyInstance, { svc }: { svc: RouteSer
     try {
       const driverId = req.headers['x-user-id'] as string;
       if (!driverId) return reply.code(401).send({ error: 'UNAUTHENTICATED' });
-      await svc.cancelRoute(driverId, req.params.id);
+      const params = idParamSchema.parse(req.params);
+      await svc.cancelRoute(driverId, params.id);
       return reply.code(204).send();
     } catch (err) { return handleError(err, reply); }
   });

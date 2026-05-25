@@ -53,6 +53,33 @@ export interface SearchCandidate extends RouteRow {
   closest_dropoff_geojson: string;
 }
 
+export interface RouteRunRow {
+  id: string;
+  route_id: string;
+  driver_id: string;
+  status: 'scheduled' | 'active' | 'completed' | 'cancelled';
+  started_at: Date | null;
+  completed_at: Date | null;
+  cancelled_at: Date | null;
+  current_stop_index: number;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface RouteRunStopRow {
+  id: string;
+  route_run_id: string;
+  booking_id: string;
+  stop_kind: 'pickup' | 'dropoff';
+  sequence: number;
+  status: 'pending' | 'active' | 'completed' | 'skipped';
+  stop_name: string | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export type RouteRunStopStatus = RouteRunStopRow['status'];
+
 export class RouteRepository {
   constructor(private readonly pool: Pool) {}
 
@@ -265,5 +292,152 @@ export class RouteRepository {
     if (!rows[0]) return { success: false, seatsRemaining: 0 };
     const r = rows[0];
     return { success: true, seatsRemaining: r.available_seats - r.booked_seats };
+  }
+
+  async findOpenRunByRoute(routeId: string): Promise<RouteRunRow | null> {
+    const { rows } = await this.pool.query<RouteRunRow>(
+      `SELECT * FROM route_runs
+       WHERE route_id = $1 AND status IN ('scheduled', 'active')
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [routeId],
+    );
+    return rows[0] ?? null;
+  }
+
+  async createRouteRun(routeId: string, driverId: string): Promise<RouteRunRow> {
+    const { rows } = await this.pool.query<RouteRunRow>(
+      `INSERT INTO route_runs (route_id, driver_id, status, started_at)
+       VALUES ($1, $2, 'active', now())
+       ON CONFLICT (route_id) WHERE status IN ('scheduled', 'active')
+       DO UPDATE SET status='active', started_at=COALESCE(route_runs.started_at, now()), updated_at=now()
+       RETURNING *`,
+      [routeId, driverId],
+    );
+    return rows[0]!;
+  }
+
+  async completeRouteRun(routeId: string, driverId: string): Promise<RouteRunRow | null> {
+    const { rows } = await this.pool.query<RouteRunRow>(
+      `UPDATE route_runs
+       SET status='completed', completed_at=now(), updated_at=now()
+       WHERE route_id=$1 AND driver_id=$2 AND status IN ('scheduled','active')
+       RETURNING *`,
+      [routeId, driverId],
+    );
+    return rows[0] ?? null;
+  }
+
+  async updateRouteRunCurrentStopIndex(routeRunId: string, currentStopIndex: number): Promise<RouteRunRow | null> {
+    const { rows } = await this.pool.query<RouteRunRow>(
+      `UPDATE route_runs
+       SET current_stop_index=$2, updated_at=now()
+       WHERE id=$1
+       RETURNING *`,
+      [routeRunId, currentStopIndex],
+    );
+    return rows[0] ?? null;
+  }
+
+  async listRouteRunStops(routeRunId: string): Promise<RouteRunStopRow[]> {
+    const { rows } = await this.pool.query<RouteRunStopRow>(
+      `SELECT * FROM route_run_stops
+       WHERE route_run_id=$1
+       ORDER BY sequence ASC`,
+      [routeRunId],
+    );
+    return rows;
+  }
+
+  async findRouteRunStopById(routeRunId: string, stopId: string): Promise<RouteRunStopRow | null> {
+    const { rows } = await this.pool.query<RouteRunStopRow>(
+      `SELECT * FROM route_run_stops
+       WHERE route_run_id=$1 AND id=$2`,
+      [routeRunId, stopId],
+    );
+    return rows[0] ?? null;
+  }
+
+  async updateRouteRunStopStatus(
+    routeRunId: string,
+    stopId: string,
+    status: RouteRunStopRow['status'],
+  ): Promise<RouteRunStopRow | null> {
+    const { rows } = await this.pool.query<RouteRunStopRow>(
+      `UPDATE route_run_stops
+       SET status=$3, updated_at=now()
+       WHERE route_run_id=$1 AND id=$2
+       RETURNING *`,
+      [routeRunId, stopId, status],
+    );
+    return rows[0] ?? null;
+  }
+
+  async setRouteRunStopStatus(
+    routeRunId: string,
+    sequence: number,
+    status: RouteRunStopStatus,
+  ): Promise<RouteRunStopRow | null> {
+    const { rows } = await this.pool.query<RouteRunStopRow>(
+      `UPDATE route_run_stops
+       SET status=$3, updated_at=now()
+       WHERE route_run_id=$1 AND sequence=$2
+       RETURNING *`,
+      [routeRunId, sequence, status],
+    );
+    return rows[0] ?? null;
+  }
+
+  async clearActiveRouteRunStops(routeRunId: string): Promise<void> {
+    await this.pool.query(
+      `UPDATE route_run_stops
+       SET status='pending', updated_at=now()
+       WHERE route_run_id=$1 AND status='active'`,
+      [routeRunId],
+    );
+  }
+
+  async skipOpenRouteRunStops(routeRunId: string): Promise<void> {
+    await this.pool.query(
+      `UPDATE route_run_stops
+       SET status='skipped', updated_at=now()
+       WHERE route_run_id=$1 AND status IN ('pending', 'active')`,
+      [routeRunId],
+    );
+  }
+
+  async replaceRouteRunStops(routeRunId: string, stops: Array<{
+    booking_id: string;
+    stop_kind: 'pickup' | 'dropoff';
+    sequence: number;
+    status: 'pending' | 'active' | 'completed' | 'skipped';
+    stop_name?: string | null;
+  }>): Promise<void> {
+    await this.pool.query('DELETE FROM route_run_stops WHERE route_run_id=$1', [routeRunId]);
+    for (const stop of stops) {
+      await this.pool.query(
+        `INSERT INTO route_run_stops (route_run_id, booking_id, stop_kind, sequence, status, stop_name)
+         VALUES ($1,$2,$3,$4,$5,$6)`,
+        [
+          routeRunId,
+          stop.booking_id,
+          stop.stop_kind,
+          stop.sequence,
+          stop.status,
+          stop.stop_name ?? null,
+        ],
+      );
+    }
+  }
+
+  async completeRoute(routeId: string, driverId: string): Promise<RouteRow | null> {
+    const { rows } = await this.pool.query<RouteRow>(
+      `UPDATE routes
+       SET status='completed', updated_at=now()
+       WHERE id=$1 AND driver_id=$2 AND status <> 'cancelled'
+       RETURNING *, ST_AsGeoJSON(route_geometry) AS route_geometry_geojson`,
+      [routeId, driverId],
+    );
+    return rows[0] ?? null;
   }
 }

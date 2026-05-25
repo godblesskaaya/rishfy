@@ -59,6 +59,7 @@ message Trip {
   string booking_id = 2;
   string route_id = 3;
   string driver_user_id = 4;
+  string route_run_id = 13;
 
   rishfy.common.TripStatus status = 5;
 
@@ -80,6 +81,9 @@ message StartTripRequest {
   string route_id = 2;
   string driver_user_id = 3;
   rishfy.common.Coordinates start_location = 4;
+  string route_run_id = 5;
+  string passenger_user_id = 6;
+  rishfy.common.Coordinates destination_location = 7;
 }
 message StartTripResponse { Trip trip = 1; }
 
@@ -87,6 +91,7 @@ message RecordLocationRequest {
   string trip_id = 1;
   string driver_user_id = 2;
   LocationPoint point = 3;
+  string route_run_id = 4;
 }
 message RecordLocationResponse {
   bool accepted = 1;
@@ -97,6 +102,7 @@ message RecordLocationBatchRequest {
   string trip_id = 1;
   string driver_user_id = 2;
   repeated LocationPoint points = 3;
+  string route_run_id = 4;
 }
 message RecordLocationBatchResponse {
   int32 accepted_count = 1;
@@ -132,6 +138,7 @@ message GetDriverLocationResponse {
   string route_geometry_source = 21;
   string trip_status = 22;
   string passenger_user_id = 23;
+  string route_run_id = 24;
 }
 
 message GetDriversLocationsRequest { repeated string driver_user_ids = 1; }
@@ -155,6 +162,7 @@ message GetDriversLocationsResponse {
     string route_geometry_source = 16;
     string trip_status = 17;
     string passenger_user_id = 18;
+    string route_run_id = 19;
   }
   repeated DriverLocation locations = 1;
 }
@@ -162,6 +170,7 @@ message GetDriversLocationsResponse {
 message GetTripTraceRequest {
   string trip_id = 1;
   int32 simplify_tolerance_meters = 2;      // Douglas-Peucker tolerance, 0=no simplify
+  string route_run_id = 3;
 }
 message GetTripTraceResponse {
   Trip trip = 1;
@@ -173,6 +182,7 @@ message CompleteTripRequest {
   string trip_id = 1;
   rishfy.common.Coordinates end_location = 2;
   rishfy.common.Timestamp end_time = 3;
+  string route_run_id = 4;
 }
 message CompleteTripResponse {
   Trip trip = 1;

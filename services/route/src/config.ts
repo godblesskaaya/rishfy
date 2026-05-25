@@ -16,6 +16,8 @@ const configSchema = z.object({
 
   GOOGLE_MAPS_API_KEY: z.string().default(''),
   USER_SERVICE_GRPC_URL: z.string().default('user-service:50052'),
+  BOOKING_SERVICE_GRPC_URL: z.string().default('booking-service:50054'),
+  LOCATION_SERVICE_GRPC_URL: z.string().default('location-service:50056'),
   SEARCH_RADIUS_METERS: z.coerce.number().int().default(5000),
   COARSE_MATCH_RADIUS_METERS: z.coerce.number().int().default(3000),
   ROUTE_CACHE_TTL_SECONDS: z.coerce.number().int().default(300),

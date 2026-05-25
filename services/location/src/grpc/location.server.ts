@@ -13,7 +13,7 @@ import {
   encodePolyline,
 } from '../services/live-trip.service.js';
 import { pgPool } from '../db.js';
-import type { TripRow } from '../repositories/location.repository.js';
+import type { DriverLocationPoint, TripRow } from '../repositories/location.repository.js';
 import type { DriverLocation } from '../services/geo.service.js';
 
 const PROTO_PATH = path.resolve(process.cwd(), 'shared/protos/location.proto');
@@ -46,8 +46,10 @@ function toTimestamp(date: Date | null): Record<string, unknown> | null {
 function tripToProto(trip: TripRow): Record<string, unknown> {
   return {
     tripId: trip.id,
-    bookingId: trip.booking_id,
+    bookingId: trip.booking_id ?? '',
+    routeId: trip.route_id ?? '',
     driverUserId: trip.driver_id,
+    routeRunId: trip.route_run_id ?? '',
     status: (trip.status ?? 'pending').toUpperCase(),
     startLocation: { latitude: trip.origin_lat, longitude: trip.origin_lng },
     endLocation: trip.destination_lat
@@ -57,7 +59,7 @@ function tripToProto(trip: TripRow): Record<string, unknown> {
     endTime: toTimestamp(trip.completed_at),
     distanceMeters: trip.total_distance_meters ?? 0,
     durationSeconds: trip.total_duration_seconds ?? 0,
-    passengerUserId: trip.passenger_id,
+    passengerUserId: trip.passenger_id ?? '',
   };
 }
 
@@ -76,8 +78,9 @@ function buildDriverLocationResponse(args: {
   ageSeconds: number;
   isStale: boolean;
   tripId?: string | null;
+  routeRunId?: string | null;
 }): Record<string, unknown> {
-  const { driverUserId, point, trip, liveState, ageSeconds, isStale, tripId } = args;
+  const { driverUserId, point, trip, liveState, ageSeconds, isStale, tripId, routeRunId } = args;
   return {
     point: {
       coordinates: { latitude: point.lat, longitude: point.lng },
@@ -90,6 +93,7 @@ function buildDriverLocationResponse(args: {
     driverUserId,
     tripId: trip?.id ?? tripId ?? '',
     bookingId: trip?.booking_id ?? '',
+    routeRunId: trip?.route_run_id ?? routeRunId ?? '',
     passengerUserId: trip?.passenger_id ?? '',
     etaSeconds: liveState.etaSeconds ?? 0,
     etaSource: liveState.etaSource,
@@ -111,21 +115,38 @@ function buildDriverLocationResponse(args: {
 }
 
 async function getTripContextForCachedLocation(loc: DriverLocation | null): Promise<TripRow | null> {
-  if (!loc?.tripId) {
-    return null;
+  return resolveTripByIdentifiers(loc);
+}
+
+async function getTripContextForStoredLocation(point: DriverLocationPoint | null): Promise<TripRow | null> {
+  return resolveTripByIdentifiers(point);
+}
+
+async function resolveTripByIdentifiers(
+  ids: { tripId?: string | null; routeRunId?: string | null } | null | undefined,
+): Promise<TripRow | null> {
+  if (ids?.tripId) {
+    return repo.getTripById(ids.tripId);
   }
-  return repo.getTripById(loc.tripId);
+  if (ids?.routeRunId) {
+    return repo.getTripByRouteRunId(ids.routeRunId);
+  }
+  return null;
 }
 
 interface StartTripReq {
-  bookingId: string;
+  bookingId?: string;
   routeId: string;
   driverUserId: string;
   startLocation: { latitude: number; longitude: number };
+  routeRunId?: string;
+  passengerUserId?: string;
+  destinationLocation?: { latitude: number; longitude: number };
 }
 
 interface RecordLocationReq {
-  tripId: string;
+  tripId?: string;
+  routeRunId?: string;
   driverUserId: string;
   point: {
     coordinates: { latitude: number; longitude: number };
@@ -137,7 +158,8 @@ interface RecordLocationReq {
 }
 
 interface RecordBatchReq {
-  tripId: string;
+  tripId?: string;
+  routeRunId?: string;
   driverUserId: string;
   points: Array<{
     coordinates: { latitude: number; longitude: number };
@@ -158,11 +180,13 @@ interface GetDriversLocationsReq {
 }
 
 interface GetTripTraceReq {
-  tripId: string;
+  tripId?: string;
+  routeRunId?: string;
 }
 
 interface CompleteTripReq {
-  tripId: string;
+  tripId?: string;
+  routeRunId?: string;
   endLocation: { latitude: number; longitude: number };
   endTime: { seconds: string };
 }
@@ -174,17 +198,31 @@ interface EstimateETAReq {
 
 const startTrip: Handler<StartTripReq, unknown> = async (call, callback) => {
   try {
-    const { bookingId, driverUserId, startLocation } = call.request;
-    let trip = await repo.getTripByBookingId(bookingId);
+    const {
+      bookingId,
+      routeId,
+      driverUserId,
+      startLocation,
+      routeRunId,
+      passengerUserId,
+      destinationLocation,
+    } = call.request;
+    let trip = routeRunId
+      ? await repo.getTripByRouteRunId(routeRunId)
+      : bookingId
+          ? await repo.getTripByBookingId(bookingId)
+          : null;
     if (!trip) {
       trip = await repo.createTrip({
         bookingId,
+        routeId: routeId || null,
+        routeRunId: routeRunId || null,
         driverId: driverUserId,
-        passengerId: '',
+        passengerId: passengerUserId || null,
         originLat: startLocation.latitude,
         originLng: startLocation.longitude,
-        destinationLat: startLocation.latitude,
-        destinationLng: startLocation.longitude,
+        destinationLat: destinationLocation?.latitude ?? startLocation.latitude,
+        destinationLng: destinationLocation?.longitude ?? startLocation.longitude,
       });
     }
     const started = await repo.startTripById(trip.id);
@@ -197,7 +235,16 @@ const startTrip: Handler<StartTripReq, unknown> = async (call, callback) => {
 
 const recordLocation: Handler<RecordLocationReq, unknown> = async (call, callback) => {
   try {
-    const { driverUserId, tripId, point } = call.request;
+    const { driverUserId, tripId, routeRunId, point } = call.request;
+    const trip = await resolveTripByIdentifiers({ tripId, routeRunId });
+    if (!trip) {
+      callback({
+        code: grpc.status.NOT_FOUND,
+        message: 'trip not found for provided trip_id/route_run_id',
+      } as grpc.ServiceError);
+      return;
+    }
+
     const recordedAt = point?.recordedAt?.seconds
       ? new Date(parseInt(point.recordedAt.seconds, 10) * 1000)
       : new Date();
@@ -205,7 +252,8 @@ const recordLocation: Handler<RecordLocationReq, unknown> = async (call, callbac
     await repo.insertDriverLocation({
       time: recordedAt,
       driverId: driverUserId,
-      tripId: tripId || undefined,
+      tripId: trip.id,
+      routeRunId: trip.route_run_id ?? routeRunId ?? undefined,
       lat: point?.coordinates?.latitude ?? 0,
       lng: point?.coordinates?.longitude ?? 0,
       bearing: point?.headingDegrees,
@@ -213,7 +261,6 @@ const recordLocation: Handler<RecordLocationReq, unknown> = async (call, callbac
       accuracyMeters: point?.accuracyMeters,
     });
 
-    const trip = tripId ? await repo.getTripById(tripId) : null;
     const liveState = deriveTripLiveState(
       trip,
       {
@@ -227,8 +274,9 @@ const recordLocation: Handler<RecordLocationReq, unknown> = async (call, callbac
     await geoSvc.updateDriverLocation({
       driverId: driverUserId,
       tripId: trip?.id,
-      bookingId: trip?.booking_id,
-      passengerId: trip?.passenger_id,
+      routeRunId: trip?.route_run_id ?? undefined,
+      bookingId: trip?.booking_id ?? undefined,
+      passengerId: trip?.passenger_id ?? undefined,
       lat: point?.coordinates?.latitude ?? 0,
       lng: point?.coordinates?.longitude ?? 0,
       bearing: point?.headingDegrees,
@@ -253,7 +301,16 @@ const recordLocation: Handler<RecordLocationReq, unknown> = async (call, callbac
 
 const recordLocationBatch: Handler<RecordBatchReq, unknown> = async (call, callback) => {
   try {
-    const { driverUserId, tripId, points } = call.request;
+    const { driverUserId, tripId, routeRunId, points } = call.request;
+    const trip = await resolveTripByIdentifiers({ tripId, routeRunId });
+    if (!trip) {
+      callback({
+        code: grpc.status.NOT_FOUND,
+        message: 'trip not found for provided trip_id/route_run_id',
+      } as grpc.ServiceError);
+      return;
+    }
+
     let accepted = 0;
     for (const point of points ?? []) {
       const recordedAt = point?.recordedAt?.seconds
@@ -262,7 +319,8 @@ const recordLocationBatch: Handler<RecordBatchReq, unknown> = async (call, callb
       await repo.insertDriverLocation({
         time: recordedAt,
         driverId: driverUserId,
-        tripId: tripId || undefined,
+        tripId: trip.id,
+        routeRunId: trip.route_run_id ?? routeRunId ?? undefined,
         lat: point?.coordinates?.latitude ?? 0,
         lng: point?.coordinates?.longitude ?? 0,
         bearing: point?.headingDegrees,
@@ -273,7 +331,6 @@ const recordLocationBatch: Handler<RecordBatchReq, unknown> = async (call, callb
     }
 
     const last = points?.[points.length - 1];
-    const trip = tripId ? await repo.getTripById(tripId) : null;
     if (last?.coordinates) {
       const liveState = deriveTripLiveState(
         trip,
@@ -288,8 +345,9 @@ const recordLocationBatch: Handler<RecordBatchReq, unknown> = async (call, callb
       await geoSvc.updateDriverLocation({
         driverId: driverUserId,
         tripId: trip?.id,
-        bookingId: trip?.booking_id,
-        passengerId: trip?.passenger_id,
+        routeRunId: trip?.route_run_id ?? undefined,
+        bookingId: trip?.booking_id ?? undefined,
+        passengerId: trip?.passenger_id ?? undefined,
         lat: last.coordinates.latitude,
         lng: last.coordinates.longitude,
         bearing: last.headingDegrees,
@@ -325,7 +383,7 @@ const getDriverLocation: Handler<GetDriverLocationReq, unknown> = async (call, c
         return;
       }
       const ageSeconds = Math.floor((Date.now() - dbLoc.time.getTime()) / 1000);
-      const trip = dbLoc.tripId ? await repo.getTripById(dbLoc.tripId) : null;
+      const trip = await getTripContextForStoredLocation(dbLoc);
       const liveState = deriveTripLiveState(
         trip,
         { lat: dbLoc.lat, lng: dbLoc.lng, speedKmh: dbLoc.speedKmh },
@@ -346,6 +404,7 @@ const getDriverLocation: Handler<GetDriverLocationReq, unknown> = async (call, c
         ageSeconds,
         isStale: ageSeconds > threshold,
         tripId: dbLoc.tripId ?? null,
+        routeRunId: dbLoc.routeRunId ?? null,
       }));
       return;
     }
@@ -370,6 +429,7 @@ const getDriverLocation: Handler<GetDriverLocationReq, unknown> = async (call, c
       ageSeconds: 0,
       isStale: false,
       tripId: loc.tripId ?? null,
+      routeRunId: loc.routeRunId ?? null,
     }));
   } catch (err) {
     callback({ code: grpc.status.INTERNAL, message: String(err) } as grpc.ServiceError);
@@ -401,6 +461,7 @@ const getDriversLocations: Handler<GetDriversLocationsReq, unknown> = async (cal
             : null,
           isOnline: !!loc,
           tripId: trip?.id ?? loc?.tripId ?? '',
+          routeRunId: trip?.route_run_id ?? loc?.routeRunId ?? '',
           bookingId: trip?.booking_id ?? loc?.bookingId ?? '',
           passengerUserId: trip?.passenger_id ?? loc?.passengerId ?? '',
           proximityState: liveState?.proximityState ?? '',
@@ -426,11 +487,14 @@ const getDriversLocations: Handler<GetDriversLocationsReq, unknown> = async (cal
 
 const getTripTrace: Handler<GetTripTraceReq, unknown> = async (call, callback) => {
   try {
-    const { tripId } = call.request;
-    const trip = await repo.getTripById(tripId);
-    const points = await repo.getRecentPath(tripId);
+    const trip = await resolveTripByIdentifiers(call.request);
+    if (!trip) {
+      callback({ code: grpc.status.NOT_FOUND, message: 'trip not found for provided trip_id/route_run_id' } as grpc.ServiceError);
+      return;
+    }
+    const points = await repo.getRecentPath(trip.id);
     callback(null, {
-      trip: trip ? tripToProto(trip) : null,
+      trip: tripToProto(trip),
       points: points.map((point) => ({
         coordinates: { latitude: point.lat, longitude: point.lng },
         headingDegrees: point.bearing ?? 0,
@@ -447,22 +511,26 @@ const getTripTrace: Handler<GetTripTraceReq, unknown> = async (call, callback) =
 
 const completeTrip: Handler<CompleteTripReq, unknown> = async (call, callback) => {
   try {
-    const { tripId } = call.request;
-    const points = await repo.getRecentPath(tripId);
+    const trip = await resolveTripByIdentifiers(call.request);
+    if (!trip) {
+      callback({ code: grpc.status.NOT_FOUND, message: 'trip not found for provided trip_id/route_run_id' } as grpc.ServiceError);
+      return;
+    }
+    const points = await repo.getRecentPath(trip.id);
     const distanceMeters = calculatePathDistanceMeters(points);
     const pathEncoded = encodePolyline(points.map((point) => ({
       lat: point.lat,
       lng: point.lng,
     })));
-    const trip = await repo.completeTripById(tripId, pathEncoded, distanceMeters);
-    if (!trip) {
+    const completedTrip = await repo.completeTripById(trip.id, pathEncoded, distanceMeters);
+    if (!completedTrip) {
       callback({ code: grpc.status.NOT_FOUND, message: 'trip not found or not in_progress' } as grpc.ServiceError);
       return;
     }
     callback(null, {
-      trip: tripToProto(trip),
+      trip: tripToProto(completedTrip),
       totalDistanceMeters: distanceMeters,
-      totalDurationSeconds: trip.total_duration_seconds ?? 0,
+      totalDurationSeconds: completedTrip.total_duration_seconds ?? 0,
       locationPointsRecorded: points.length,
     });
   } catch (err) {

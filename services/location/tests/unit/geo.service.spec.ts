@@ -78,10 +78,13 @@ describe('GeoService.updateDriverLocation', () => {
       driverId: 'driver-1',
       lat: -6.7924,
       lng: 39.2083,
+      routeRunId: 'run-1',
       updatedAt: new Date().toISOString(),
     });
     expect(redis.geoadd).toHaveBeenCalledOnce();
     expect(redis.setex).toHaveBeenCalledOnce();
+    const [, , payload] = (redis.setex as ReturnType<typeof vi.fn>).mock.calls[0] as [string, number, string];
+    expect(JSON.parse(payload)).toMatchObject({ routeRunId: 'run-1' });
   });
 });
 

@@ -23,6 +23,8 @@ interface DriverMessage {
   accuracy_meters?: number;
   tripId?: string;
   trip_id?: string;
+  routeRunId?: string;
+  route_run_id?: string;
   driverId?: string;
   driverUserId?: string;
   driver_user_id?: string;
@@ -33,6 +35,8 @@ interface SubscribeMessage {
   type: 'subscribe';
   tripId?: string;
   trip_id?: string;
+  routeRunId?: string;
+  route_run_id?: string;
   bookingId?: string;
   booking_id?: string;
   driverId?: string;
@@ -43,6 +47,7 @@ type WsMessage = DriverMessage | SubscribeMessage;
 interface RequestContext {
   pathname: string;
   tripId: string | null;
+  routeRunId: string | null;
   bookingId: string | null;
   driverId: string | null;
 }
@@ -84,6 +89,7 @@ function parseRequestContext(req: IncomingMessage): RequestContext {
   return {
     pathname: url.pathname,
     tripId: url.searchParams.get('trip_id') ?? url.searchParams.get('tripId'),
+    routeRunId: url.searchParams.get('route_run_id') ?? url.searchParams.get('routeRunId'),
     bookingId: url.searchParams.get('booking_id') ?? url.searchParams.get('bookingId'),
     driverId: url.searchParams.get('driver_id')
       ?? url.searchParams.get('driverId')
@@ -94,10 +100,13 @@ function parseRequestContext(req: IncomingMessage): RequestContext {
 
 async function resolveTripContext(
   repo: LocationRepository,
-  identifiers: { tripId?: string | null; bookingId?: string | null },
+  identifiers: { tripId?: string | null; routeRunId?: string | null; bookingId?: string | null },
 ): Promise<TripRow | null> {
   if (identifiers.tripId) {
     return repo.getTripById(identifiers.tripId);
+  }
+  if (identifiers.routeRunId) {
+    return repo.getTripByRouteRunId(identifiers.routeRunId);
   }
   if (identifiers.bookingId) {
     return repo.getTripByBookingId(identifiers.bookingId);
@@ -146,7 +155,7 @@ function clearPassengerSubscription(ws: WebSocket): void {
 async function subscribePassenger(
   ws: WebSocket,
   repo: LocationRepository,
-  input: { tripId?: string | null; bookingId?: string | null; driverId?: string | null },
+  input: { tripId?: string | null; routeRunId?: string | null; bookingId?: string | null; driverId?: string | null },
 ): Promise<void> {
   clearPassengerSubscription(ws);
 
@@ -194,6 +203,7 @@ function buildLocationEventData(args: {
   driverId: string;
   trip: TripRow | null;
   tripId: string | null;
+  routeRunId?: string | null;
   lat: number;
   lng: number;
   heading?: number;
@@ -206,6 +216,7 @@ function buildLocationEventData(args: {
     driverId,
     trip,
     tripId,
+    routeRunId,
     lat,
     lng,
     heading,
@@ -214,13 +225,37 @@ function buildLocationEventData(args: {
     timestampIso,
     liveState,
   } = args;
+  const journeyState = (() => {
+    if (!trip) return null;
+    if (trip.status === 'completed') return 'completed';
+    switch (liveState.proximityState) {
+      case 'en_route_pickup':
+      case 'approaching_pickup':
+        return 'driver_approaching';
+      case 'arrived_pickup':
+        return 'driver_arrived';
+      case 'en_route_dropoff':
+        return 'in_transit';
+      case 'approaching_dropoff':
+        return 'approaching_dropoff';
+      case 'arrived_dropoff':
+        return 'dropped_off';
+      case 'trip_completed':
+        return 'completed';
+      default:
+        return trip.status;
+    }
+  })();
   return {
     trip_id: trip?.id ?? tripId,
+    route_run_id: trip?.route_run_id ?? routeRunId ?? null,
     booking_id: trip?.booking_id ?? null,
     driver_id: driverId,
     driver_user_id: driverId,
     passenger_id: trip?.passenger_id ?? null,
     trip_status: trip?.status ?? null,
+    route_status: trip?.status ?? null,
+    journey_state: journeyState,
     lat,
     lng,
     bearing: heading ?? null,
@@ -234,6 +269,12 @@ function buildLocationEventData(args: {
     distance_to_active_stop_meters: liveState.distanceToActiveStopMeters,
     proximity_state: liveState.proximityState,
     eta_seconds: liveState.etaSeconds,
+    eta_to_pickup_seconds:
+      liveState.activeStopType === 'pickup' ? liveState.etaSeconds : null,
+    eta_to_dropoff_seconds:
+      liveState.activeStopType === 'dropoff' ? liveState.etaSeconds : null,
+    eta_approximate: liveState.etaSource !== 'reported_speed',
+    eta_stale: false,
     eta_source: liveState.etaSource,
     current_route_fraction: liveState.currentRouteFraction,
     active_stop_route_fraction: liveState.activeStopRouteFraction,
@@ -311,6 +352,7 @@ function handleDriverConnection(
 ): void {
   let boundDriverId = initialContext.driverId;
   let boundTripId = initialContext.tripId;
+  let boundRouteRunId = initialContext.routeRunId;
 
   ws.on('message', async (raw) => {
     try {
@@ -320,11 +362,13 @@ function handleDriverConnection(
       const driverMsg = msg as DriverMessage;
       const trip = await resolveTripContext(repo, {
         tripId: driverMsg.tripId ?? driverMsg.trip_id ?? boundTripId,
+        routeRunId: driverMsg.routeRunId ?? driverMsg.route_run_id ?? boundRouteRunId,
         bookingId: initialContext.bookingId,
       });
 
       if (trip) {
         boundTripId = trip.id;
+        boundRouteRunId = trip.route_run_id;
       }
 
       const effectiveDriverId = trip?.driver_id
@@ -376,6 +420,7 @@ function handleDriverConnection(
           time: recordedAt,
           driverId: effectiveDriverId,
           tripId: persistedTripId,
+          routeRunId: trip?.route_run_id ?? boundRouteRunId ?? driverMsg.routeRunId ?? driverMsg.route_run_id ?? undefined,
           lat: driverMsg.lat,
           lng: driverMsg.lng,
           bearing: heading,
@@ -404,8 +449,9 @@ function handleDriverConnection(
         lat: driverMsg.lat,
         lng: driverMsg.lng,
         tripId: trip?.id,
-        bookingId: trip?.booking_id,
-        passengerId: trip?.passenger_id,
+        routeRunId: trip?.route_run_id ?? boundRouteRunId ?? undefined,
+        bookingId: trip?.booking_id ?? undefined,
+        passengerId: trip?.passenger_id ?? undefined,
         bearing: heading,
         speedKmh,
         accuracyMeters,
@@ -427,6 +473,7 @@ function handleDriverConnection(
           driverId: effectiveDriverId,
           trip,
           tripId: persistedTripId ?? null,
+          routeRunId: trip?.route_run_id ?? boundRouteRunId ?? driverMsg.routeRunId ?? driverMsg.route_run_id ?? null,
           lat: driverMsg.lat,
           lng: driverMsg.lng,
           heading,
@@ -503,7 +550,7 @@ function handlePassengerConnection(
   initialContext: RequestContext,
   repo: LocationRepository,
 ): void {
-  if (initialContext.tripId || initialContext.bookingId || initialContext.driverId) {
+  if (initialContext.tripId || initialContext.routeRunId || initialContext.bookingId || initialContext.driverId) {
     void subscribePassenger(ws, repo, initialContext).catch((err) => {
       logger.warn({ err, ...initialContext }, 'Initial passenger subscription failed');
     });
@@ -517,6 +564,7 @@ function handlePassengerConnection(
       const subscribeMsg = msg as SubscribeMessage;
       void subscribePassenger(ws, repo, {
         tripId: subscribeMsg.tripId ?? subscribeMsg.trip_id,
+        routeRunId: subscribeMsg.routeRunId ?? subscribeMsg.route_run_id ?? initialContext.routeRunId,
         bookingId: subscribeMsg.bookingId ?? subscribeMsg.booking_id ?? initialContext.bookingId,
         driverId: subscribeMsg.driverId,
       }).catch((err) => {

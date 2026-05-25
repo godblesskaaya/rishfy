@@ -3,8 +3,16 @@ import type { Redis } from 'ioredis';
 import type { Producer } from 'kafkajs';
 import polyline from '@mapbox/polyline';
 import ngeohash from 'ngeohash';
-import { RouteRepository, type SearchParams } from '../repositories/route.repository.js';
+import {
+  RouteRepository,
+  type RouteRunRow,
+  type RouteRunStopRow,
+  type RouteRunStopStatus,
+  type SearchParams,
+} from '../repositories/route.repository.js';
 import { getDirections, getWalkingDistance, reverseGeocode } from '../clients/googlemaps.client.js';
+import { listRouteBookings } from '../clients/booking.grpc.client.js';
+import { completeTrackedRouteRun, startTrackedRouteRun } from '../clients/location.grpc.client.js';
 import { checkDriverEligibility, getUserProfile } from '../clients/user.grpc.client.js';
 import { publishRouteCancelled } from '../events/route.events.js';
 import { AppError } from '../utils/errors.js';
@@ -54,6 +62,27 @@ export interface SearchResult {
   estimated_pickup_time: Date;
   available_seats: number;
   price_per_seat: string;
+}
+
+export interface DriverRouteOperation {
+  booking_id: string;
+  route_id: string;
+  passenger_user_id: string;
+  driver_user_id: string;
+  seat_count: number;
+  status: string;
+  trip_status: string;
+  journey_state: string;
+  payment_id: string;
+  trip_id: string;
+  operational_priority: number;
+}
+
+export interface DriverRouteWorkspace {
+  route: Awaited<ReturnType<RouteRepository['findById']>>;
+  active_run: RouteRunRow | null;
+  run_stops: RouteRunStopRow[];
+  bookings: DriverRouteOperation[];
 }
 
 export class RouteService {
@@ -178,6 +207,133 @@ export class RouteService {
 
   async getDriverRoutes(driverId: string, limit = 20, offset = 0) {
     return this.repo.findByDriver(driverId, limit, offset);
+  }
+
+  async getDriverRouteOperations(driverId: string, routeId: string) {
+    let route = await this.repo.findById(routeId);
+    if (!route || route.driver_id !== driverId) {
+      throw new AppError('ROUTE_NOT_FOUND', 404);
+    }
+    const bookings = await listRouteBookings(routeId);
+    const operations = bookings
+      .filter((booking) => booking.driver_user_id === driverId)
+      .map((booking) => ({
+        ...booking,
+        operational_priority: this.routeOperationPriority(booking.journey_state, booking.status),
+      }))
+      .sort((a, b) => a.operational_priority - b.operational_priority);
+    const activeRun = await this.repo.findOpenRunByRoute(routeId);
+    const syncedRun = activeRun
+      ? await this.syncActiveRouteRunLifecycle(activeRun, operations)
+      : null;
+    if (activeRun && !syncedRun) {
+      route = await this.repo.findById(routeId);
+    }
+    const runStops = syncedRun
+      ? await this.repo.listRouteRunStops(syncedRun.id)
+      : [];
+
+    return {
+      route,
+      active_run: syncedRun,
+      run_stops: runStops,
+      bookings: operations,
+    } satisfies DriverRouteWorkspace;
+  }
+
+  async startRouteRun(driverId: string, routeId: string) {
+    const route = await this.repo.findById(routeId);
+    if (!route || route.driver_id !== driverId) {
+      throw new AppError('ROUTE_NOT_FOUND', 404);
+    }
+    if (route.status === 'cancelled' || route.status === 'completed') {
+      throw new AppError('ROUTE_NOT_ACTIVE', 409, 'Cannot start a run for an inactive route');
+    }
+
+    const existingRun = await this.repo.findOpenRunByRoute(routeId);
+    if (existingRun) {
+      const existingStops = await this.repo.listRouteRunStops(existingRun.id);
+      if (existingStops.length > 0) {
+        return this.getDriverRouteOperations(driverId, routeId);
+      }
+    }
+
+    const run = existingRun ?? await this.repo.createRouteRun(routeId, driverId);
+    const bookings = await listRouteBookings(routeId);
+    const { stops: runStops, currentStopIndex } = this.normalizeRouteRunStops(
+      this.buildRouteRunStops(bookings),
+    );
+    await this.repo.replaceRouteRunStops(run.id, runStops);
+    await this.repo.updateRouteRunCurrentStopIndex(run.id, currentStopIndex);
+
+    if (!existingRun) {
+      await startTrackedRouteRun({
+        routeRunId: run.id,
+        routeId,
+        driverUserId: driverId,
+        originLat: route.origin_lat,
+        originLng: route.origin_lng,
+        destinationLat: route.destination_lat,
+        destinationLng: route.destination_lng,
+      });
+    }
+
+    return this.getDriverRouteOperations(driverId, routeId);
+  }
+
+  async advanceRouteRun(driverId: string, routeId: string) {
+    const { route, run, stops } = await this.getOwnedOpenRun(driverId, routeId);
+    const currentStop = this.selectCurrentStop(stops, run.current_stop_index);
+    if (!currentStop) {
+      await this.finalizeRouteRun(driverId, route, run, stops.length);
+      return this.getDriverRouteOperations(driverId, routeId);
+    }
+
+    if (currentStop.status !== 'active') {
+      await this.repo.clearActiveRouteRunStops(run.id);
+      await this.repo.setRouteRunStopStatus(run.id, currentStop.sequence, 'active');
+      await this.repo.updateRouteRunCurrentStopIndex(run.id, currentStop.sequence);
+    }
+
+    return this.getDriverRouteOperations(driverId, routeId);
+  }
+
+  async completeCurrentRouteRunStop(driverId: string, routeId: string) {
+    const { route, run, stops } = await this.getOwnedOpenRun(driverId, routeId);
+    const currentStop = this.selectCurrentStop(stops, run.current_stop_index);
+    if (!currentStop) {
+      await this.finalizeRouteRun(driverId, route, run, stops.length);
+      return this.getDriverRouteOperations(driverId, routeId);
+    }
+
+    if (currentStop.status === 'pending') {
+      await this.repo.clearActiveRouteRunStops(run.id);
+    }
+
+    await this.repo.setRouteRunStopStatus(run.id, currentStop.sequence, 'completed');
+
+    const nextStop = this.selectNextOpenStop(stops, currentStop.sequence);
+    if (!nextStop) {
+      await this.finalizeRouteRun(driverId, route, run, currentStop.sequence + 1);
+      return this.getDriverRouteOperations(driverId, routeId);
+    }
+
+    await this.repo.setRouteRunStopStatus(run.id, nextStop.sequence, 'active');
+    await this.repo.updateRouteRunCurrentStopIndex(run.id, nextStop.sequence);
+    return this.getDriverRouteOperations(driverId, routeId);
+  }
+
+  async completeRouteRun(driverId: string, routeId: string) {
+    const { route, run, stops } = await this.getOwnedOpenRun(driverId, routeId);
+    if (stops.some((stop) => stop.status === 'pending' || stop.status === 'active')) {
+      throw new AppError(
+        'ROUTE_RUN_NOT_FINISHED',
+        409,
+        'Complete or skip all remaining stops before finishing the route run',
+      );
+    }
+    await this.finalizeRouteRun(driverId, route, run, stops.length);
+    return this.getDriverRouteOperations(driverId, routeId);
   }
 
   async updateRoute(driverId: string, routeId: string, data: Partial<CreateRouteInput>) {
@@ -360,5 +516,280 @@ export class RouteService {
         // Best-effort; don't fail the parent creation
       }
     }
+  }
+
+  private routeOperationPriority(journeyState: string, status: string): number {
+    switch ((journeyState || '').toLowerCase()) {
+      case 'journey_state_driver_arrived':
+        return 0;
+      case 'journey_state_driver_approaching':
+        return 1;
+      case 'journey_state_confirmed':
+      case '':
+        return 2;
+      case 'journey_state_in_transit':
+      case 'journey_state_boarded':
+        return 3;
+      case 'journey_state_dropped_off':
+      case 'journey_state_walking_to_destination':
+        return 4;
+      case 'journey_state_completed':
+        return 5;
+      case 'journey_state_no_show':
+      case 'journey_state_cancelled':
+        return 6;
+      default:
+        return status.toLowerCase() == 'booking_status_completed' ? 5 : 7;
+    }
+  }
+
+  private async getOwnedOpenRun(driverId: string, routeId: string) {
+    const route = await this.repo.findById(routeId);
+    if (!route || route.driver_id !== driverId) {
+      throw new AppError('ROUTE_NOT_FOUND', 404);
+    }
+
+    const run = await this.repo.findOpenRunByRoute(routeId);
+    if (!run) {
+      throw new AppError('ROUTE_RUN_NOT_ACTIVE', 409, 'No active route run for this route');
+    }
+
+    const bookings = await listRouteBookings(routeId);
+    const driverBookings = bookings
+      .filter((booking) => booking.driver_user_id === driverId)
+      .map((booking) => ({
+        ...booking,
+        operational_priority: this.routeOperationPriority(booking.journey_state, booking.status),
+      }))
+      .sort((a, b) => a.operational_priority - b.operational_priority);
+    const syncedRun = await this.syncActiveRouteRunLifecycle(run, driverBookings);
+    if (!syncedRun) {
+      throw new AppError('ROUTE_RUN_NOT_ACTIVE', 409, 'No active route run for this route');
+    }
+
+    const stops = await this.repo.listRouteRunStops(syncedRun.id);
+    return { route, run: syncedRun, stops };
+  }
+
+  private selectCurrentStop(stops: RouteRunStopRow[], currentStopIndex: number): RouteRunStopRow | null {
+    const activeStop = stops.find((stop) => stop.status === 'active');
+    if (activeStop) {
+      return activeStop;
+    }
+
+    const nextPending = stops.find(
+      (stop) => stop.sequence >= currentStopIndex && stop.status === 'pending',
+    );
+    if (nextPending) {
+      return nextPending;
+    }
+
+    return stops.find((stop) => stop.status === 'pending') ?? null;
+  }
+
+  private selectNextOpenStop(stops: RouteRunStopRow[], completedSequence: number): RouteRunStopRow | null {
+    return stops.find(
+      (stop) => stop.sequence > completedSequence && stop.status !== 'completed' && stop.status !== 'skipped',
+    ) ?? null;
+  }
+
+  private normalizeRouteRunStops<T extends {
+    sequence: number;
+    status: RouteRunStopStatus;
+  }>(stops: T[]) {
+    const firstNonTerminal = stops.find((stop) => !this.isTerminalRouteRunStopStatus(stop.status));
+    const currentStopIndex = firstNonTerminal?.sequence ?? stops.length;
+
+    let activeAssigned = false;
+    const normalizedStops = stops.map((stop) => {
+      if (this.isTerminalRouteRunStopStatus(stop.status)) {
+        return stop;
+      }
+
+      if (!activeAssigned && stop.sequence === currentStopIndex) {
+        activeAssigned = true;
+        return { ...stop, status: 'active' as const };
+      }
+
+      return { ...stop, status: 'pending' as const };
+    });
+
+    return { stops: normalizedStops, currentStopIndex };
+  }
+
+  private async syncActiveRouteRunLifecycle(
+    run: RouteRunRow,
+    bookings: DriverRouteOperation[],
+  ): Promise<RouteRunRow | null> {
+    const currentStops = await this.repo.listRouteRunStops(run.id);
+    if (currentStops.length === 0) {
+      return run;
+    }
+
+    const bookingDerivedStops = this.buildRouteRunStops(bookings);
+    const derivedByKey = new Map(
+      bookingDerivedStops.map((stop) => [`${stop.booking_id}:${stop.stop_kind}`, stop]),
+    );
+
+    const mergedStops = currentStops.map((stop) => {
+      const derived = derivedByKey.get(`${stop.booking_id}:${stop.stop_kind}`);
+      if (!derived) {
+        return stop;
+      }
+      return {
+        ...stop,
+        stop_name: stop.stop_name ?? derived.stop_name ?? null,
+        status: this.mergeRouteRunStopStatus(stop.status, derived.status),
+      };
+    });
+
+    const { stops: normalizedStops, currentStopIndex } = this.normalizeRouteRunStops(mergedStops);
+
+    for (const stop of normalizedStops) {
+      const previous = currentStops.find((candidate) => candidate.id === stop.id);
+      if (!previous || previous.status === stop.status) {
+        continue;
+      }
+      await this.repo.updateRouteRunStopStatus(run.id, stop.id, stop.status);
+    }
+
+    let latestRun = run;
+    if (run.current_stop_index !== currentStopIndex) {
+      latestRun = await this.repo.updateRouteRunCurrentStopIndex(run.id, currentStopIndex) ?? latestRun;
+    }
+
+    if (!normalizedStops.some((stop) => this.isOpenRouteRunStopStatus(stop.status))) {
+      const route = await this.repo.findById(run.route_id);
+      if (route) {
+        await this.finalizeRouteRun(run.driver_id, route, run, normalizedStops.length);
+      }
+      return null;
+    }
+
+    return latestRun;
+  }
+
+  private mergeRouteRunStopStatus(
+    currentStatus: RouteRunStopStatus,
+    derivedStatus: RouteRunStopStatus,
+  ): RouteRunStopStatus {
+    if (this.isTerminalRouteRunStopStatus(currentStatus)) {
+      return currentStatus;
+    }
+    if (this.isTerminalRouteRunStopStatus(derivedStatus)) {
+      return derivedStatus;
+    }
+    if (currentStatus === 'active') {
+      return 'active';
+    }
+    return derivedStatus === 'active' ? 'active' : 'pending';
+  }
+
+  private isTerminalRouteRunStopStatus(status: RouteRunStopStatus): boolean {
+    return status === 'completed' || status === 'skipped';
+  }
+
+  private isOpenRouteRunStopStatus(status: RouteRunStopStatus): boolean {
+    return status === 'pending' || status === 'active';
+  }
+
+  private async finalizeRouteRun(
+    driverId: string,
+    route: NonNullable<Awaited<ReturnType<RouteRepository['findById']>>>,
+    run: RouteRunRow,
+    finalStopIndex: number,
+  ): Promise<void> {
+    await this.repo.updateRouteRunCurrentStopIndex(run.id, finalStopIndex);
+    await completeTrackedRouteRun({
+      routeRunId: run.id,
+      endLat: route.destination_lat,
+      endLng: route.destination_lng,
+    });
+    await this.repo.completeRouteRun(route.id, driverId);
+    await this.repo.completeRoute(route.id, driverId);
+    await this.redis.del(this.cacheKey(route.id));
+  }
+
+  private buildRouteRunStops(bookings: Array<{
+    booking_id: string;
+    pickup_address?: string;
+    dropoff_address?: string;
+    journey_state: string;
+    status: string;
+  }>): Array<{
+    booking_id: string;
+    stop_kind: 'pickup' | 'dropoff';
+    sequence: number;
+    status: 'pending' | 'active' | 'completed' | 'skipped';
+    stop_name?: string | null;
+  }> {
+    const ranked = [...bookings].sort(
+      (a, b) => this.routeOperationPriority(a.journey_state, a.status) -
+          this.routeOperationPriority(b.journey_state, b.status),
+    );
+
+    const stops: Array<{
+      booking_id: string;
+      stop_kind: 'pickup' | 'dropoff';
+      sequence: number;
+      status: 'pending' | 'active' | 'completed' | 'skipped';
+      stop_name?: string | null;
+    }> = [];
+
+    const pickupStopStatus = (journeyState: string): 'pending' | 'active' | 'completed' | 'skipped' => {
+      switch (journeyState) {
+        case 'JOURNEY_STATE_DRIVER_ARRIVED':
+          return 'active';
+        case 'JOURNEY_STATE_DRIVER_APPROACHING':
+        case 'JOURNEY_STATE_CONFIRMED':
+          return 'pending';
+        case 'JOURNEY_STATE_IN_TRANSIT':
+        case 'JOURNEY_STATE_DROPPED_OFF':
+        case 'JOURNEY_STATE_WALKING_TO_DESTINATION':
+        case 'JOURNEY_STATE_COMPLETED':
+          return 'completed';
+        case 'JOURNEY_STATE_CANCELLED':
+        case 'JOURNEY_STATE_NO_SHOW':
+          return 'skipped';
+        default:
+          return 'pending';
+      }
+    };
+
+    const dropoffStopStatus = (journeyState: string): 'pending' | 'active' | 'completed' | 'skipped' => {
+      switch (journeyState) {
+        case 'JOURNEY_STATE_IN_TRANSIT':
+          return 'active';
+        case 'JOURNEY_STATE_DROPPED_OFF':
+        case 'JOURNEY_STATE_WALKING_TO_DESTINATION':
+        case 'JOURNEY_STATE_COMPLETED':
+          return 'completed';
+        case 'JOURNEY_STATE_CANCELLED':
+        case 'JOURNEY_STATE_NO_SHOW':
+          return 'skipped';
+        default:
+          return 'pending';
+      }
+    };
+
+    let sequence = 0;
+    for (const booking of ranked) {
+      stops.push({
+        booking_id: booking.booking_id,
+        stop_kind: 'pickup',
+        sequence: sequence++,
+        status: pickupStopStatus(booking.journey_state),
+        stop_name: booking.pickup_address ?? null,
+      });
+      stops.push({
+        booking_id: booking.booking_id,
+        stop_kind: 'dropoff',
+        sequence: sequence++,
+        status: dropoffStopStatus(booking.journey_state),
+        stop_name: booking.dropoff_address ?? null,
+      });
+    }
+
+    return stops;
   }
 }

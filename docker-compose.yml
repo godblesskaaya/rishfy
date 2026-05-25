@@ -376,7 +376,9 @@ services:
       REDIS_URL: redis://redis:6379/6
       KAFKA_BROKERS: kafka:9092
       USER_GRPC_URL: user-service:50052
-      FCM_SERVICE_ACCOUNT_PATH: /run/secrets/fcm_service_account
+      FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-}
+      FIREBASE_SERVICE_ACCOUNT_PATH: /run/secrets/fcm_service_account
+      FIREBASE_SERVICE_ACCOUNT_JSON: ${FIREBASE_SERVICE_ACCOUNT_JSON:-}
       AFRICASTALKING_API_KEY: ${AFRICASTALKING_API_KEY:-sandbox_key}
       AFRICASTALKING_USERNAME: ${AFRICASTALKING_USERNAME:-sandbox}
       SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
@@ -386,7 +388,7 @@ services:
       - ./services/notification:/app
       - /app/node_modules
       - ./shared:/app/shared:ro
-      - ./infrastructure/secrets/fcm_service_account.json:/run/secrets/fcm_service_account:ro
+      - ./rishfy-a452c-firebase-adminsdk-fbsvc-c12a11f5d3.json:/run/secrets/fcm_service_account:ro
     ports:
       - "8087:8087"
       - "50057:50057"

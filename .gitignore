@@ -16,6 +16,7 @@ build/
 infrastructure/secrets/*.pem
 infrastructure/secrets/*.json
 !infrastructure/secrets/.gitkeep
+*-firebase-adminsdk-*.json
 
 # Logs
 logs/

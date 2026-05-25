@@ -9,6 +9,7 @@ export interface DriverLocation {
   lat: number;
   lng: number;
   tripId?: string;
+  routeRunId?: string;
   bookingId?: string;
   passengerId?: string;
   bearing?: number;
