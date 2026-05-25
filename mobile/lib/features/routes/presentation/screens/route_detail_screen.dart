@@ -63,6 +63,7 @@ class _RouteDetailBody extends ConsumerStatefulWidget {
 class _RouteDetailBodyState extends ConsumerState<_RouteDetailBody> {
   RouteEntity get route => widget.route;
   Position? _myPosition;
+  GoogleMapController? _mapController;
 
   @override
   void initState() {
@@ -89,6 +90,7 @@ class _RouteDetailBodyState extends ConsumerState<_RouteDetailBody> {
   }
 
   Set<Polyline> _buildPolylines() {
+    final DriverRouteOperations? operations = widget.routeOperationsAsync.valueOrNull;
     if (route.encodedPolyline == null || route.encodedPolyline!.isEmpty) {
       return <Polyline>{};
     }
@@ -96,18 +98,64 @@ class _RouteDetailBodyState extends ConsumerState<_RouteDetailBody> {
     final List<LatLng> points = coords
         .map((List<num> point) => LatLng(point[0].toDouble(), point[1].toDouble()))
         .toList();
-    return <Polyline>{
+    final Set<Polyline> polylines = <Polyline>{
       Polyline(
-        polylineId: const PolylineId('route'),
+        polylineId: const PolylineId('route_base'),
         points: points,
-        color: Colors.blue,
-        width: 4,
+        color: Colors.blueGrey.withOpacity(0.45),
+        width: 5,
       ),
     };
+    final DriverRouteRunStop? activeStop = operations?.activeStop;
+    if (activeStop != null) {
+      final BookingEntity? booking = _bookingForStop(operations, activeStop);
+      final double? stopLat = activeStop.isPickup
+          ? booking?.resolvedPickupLat
+          : booking?.resolvedDropoffLat;
+      final double? stopLng = activeStop.isPickup
+          ? booking?.resolvedPickupLng
+          : booking?.resolvedDropoffLng;
+      if (_myPosition != null && stopLat != null && stopLng != null) {
+        polylines.add(
+          Polyline(
+            polylineId: const PolylineId('active_guidance'),
+            points: <LatLng>[
+              LatLng(_myPosition!.latitude, _myPosition!.longitude),
+              LatLng(stopLat, stopLng),
+            ],
+            color: Colors.blue,
+            width: 6,
+            patterns: const <PatternItem>[
+              PatternItem.dash(20),
+              PatternItem.gap(10),
+            ],
+          ),
+        );
+      }
+    }
+    return polylines;
+  }
+
+  BookingEntity? _bookingForStop(
+    DriverRouteOperations? operations,
+    DriverRouteRunStop stop,
+  ) {
+    if (operations == null) return null;
+    for (final BookingEntity booking in operations.bookings) {
+      if (booking.bookingId == stop.bookingId) {
+        return booking;
+      }
+    }
+    return null;
   }
 
   Set<Marker> _buildMarkers() {
-    return <Marker>{
+    final DriverRouteOperations? operations = widget.routeOperationsAsync.valueOrNull;
+    final Map<String, BookingEntity> bookingsById = <String, BookingEntity>{
+      for (final BookingEntity booking in operations?.bookings ?? <BookingEntity>[])
+        booking.bookingId: booking,
+    };
+    final Set<Marker> markers = <Marker>{
       Marker(
         markerId: const MarkerId('origin'),
         position: LatLng(route.originLat, route.originLng),
@@ -138,11 +186,80 @@ class _RouteDetailBodyState extends ConsumerState<_RouteDetailBody> {
           icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
         ),
     };
+
+    for (final DriverRouteRunStop stop in operations?.runStops ?? <DriverRouteRunStop>[]) {
+      final BookingEntity? booking = bookingsById[stop.bookingId];
+      final double? lat = stop.isPickup
+          ? booking?.resolvedPickupLat
+          : booking?.resolvedDropoffLat;
+      final double? lng = stop.isPickup
+          ? booking?.resolvedPickupLng
+          : booking?.resolvedDropoffLng;
+      if (lat == null || lng == null) {
+        continue;
+      }
+      final double hue = stop.isCompleted
+          ? BitmapDescriptor.hueGreen
+          : stop.isSkipped
+              ? BitmapDescriptor.hueRose
+              : stop.isActive
+                  ? BitmapDescriptor.hueBlue
+                  : stop.isPickup
+                      ? BitmapDescriptor.hueYellow
+                      : BitmapDescriptor.hueOrange;
+      markers.add(
+        Marker(
+          markerId: MarkerId('run_stop_${stop.stopId}'),
+          position: LatLng(lat, lng),
+          zIndex: stop.isCurrentWorkItem ? 3 : 1,
+          icon: BitmapDescriptor.defaultMarkerWithHue(hue),
+          infoWindow: InfoWindow(
+            title: _taskLabel(stop, booking),
+            snippet: _stopSubtitle(stop, booking),
+          ),
+        ),
+      );
+    }
+
+    return markers;
   }
 
   LatLngBounds _bounds() {
     final List<double> lats = <double>[route.originLat, route.destinationLat];
     final List<double> lngs = <double>[route.originLng, route.destinationLng];
+    if (_myPosition != null) {
+      lats.add(_myPosition!.latitude);
+      lngs.add(_myPosition!.longitude);
+    }
+    return LatLngBounds(
+      southwest: LatLng(
+        lats.reduce((double a, double b) => a < b ? a : b) - 0.01,
+        lngs.reduce((double a, double b) => a < b ? a : b) - 0.01,
+      ),
+      northeast: LatLng(
+        lats.reduce((double a, double b) => a > b ? a : b) + 0.01,
+        lngs.reduce((double a, double b) => a > b ? a : b) + 0.01,
+      ),
+    );
+  }
+
+  LatLngBounds _operationsBounds(DriverRouteOperations? operations) {
+    final List<double> lats = <double>[route.originLat, route.destinationLat];
+    final List<double> lngs = <double>[route.originLng, route.destinationLng];
+    final DriverRouteRunStop? activeStop = operations?.activeStop;
+    if (activeStop != null) {
+      final BookingEntity? booking = _bookingForStop(operations, activeStop);
+      final double? stopLat = activeStop.isPickup
+          ? booking?.resolvedPickupLat
+          : booking?.resolvedDropoffLat;
+      final double? stopLng = activeStop.isPickup
+          ? booking?.resolvedPickupLng
+          : booking?.resolvedDropoffLng;
+      if (stopLat != null && stopLng != null) {
+        lats.add(stopLat);
+        lngs.add(stopLng);
+      }
+    }
     if (_myPosition != null) {
       lats.add(_myPosition!.latitude);
       lngs.add(_myPosition!.longitude);
@@ -200,12 +317,12 @@ class _RouteDetailBodyState extends ConsumerState<_RouteDetailBody> {
   }
 
   Future<void> _startRouteRun(BuildContext context) async {
-    await ref.read(startRouteRunProvider.notifier).start(route.routeId);
-    final StartRouteRunState result = ref.read(startRouteRunProvider);
+    await ref.read(routeRunActionProvider.notifier).startRun(route.routeId);
+    final RouteRunActionState result = ref.read(routeRunActionProvider);
     if (!context.mounted) {
       return;
     }
-    if (result.status == StartRouteRunStatus.failed) {
+    if (result.error != null) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(result.error ?? 'Could not start route run.')),
       );
@@ -217,6 +334,60 @@ class _RouteDetailBodyState extends ConsumerState<_RouteDetailBody> {
     );
   }
 
+  Future<void> _advanceStop(BuildContext context) async {
+    await ref.read(routeRunActionProvider.notifier).advanceStop(route.routeId);
+    final RouteRunActionState result = ref.read(routeRunActionProvider);
+    if (!context.mounted) {
+      return;
+    }
+    if (result.error != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(result.error ?? 'Could not activate stop.')),
+      );
+      return;
+    }
+    ref.invalidate(driverRouteOperationsProvider(route.routeId));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Stop activated.')),
+    );
+  }
+
+  Future<void> _completeStop(BuildContext context) async {
+    await ref.read(routeRunActionProvider.notifier).completeStop(route.routeId);
+    final RouteRunActionState result = ref.read(routeRunActionProvider);
+    if (!context.mounted) {
+      return;
+    }
+    if (result.error != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(result.error ?? 'Could not complete stop.')),
+      );
+      return;
+    }
+    ref.invalidate(driverRouteOperationsProvider(route.routeId));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Stop completed.')),
+    );
+  }
+
+  Future<void> _completeRun(BuildContext context) async {
+    await ref.read(routeRunActionProvider.notifier).completeRun(route.routeId);
+    final RouteRunActionState result = ref.read(routeRunActionProvider);
+    if (!context.mounted) {
+      return;
+    }
+    if (result.error != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(result.error ?? 'Could not complete route run.')),
+      );
+      return;
+    }
+    ref.invalidate(driverRouteOperationsProvider(route.routeId));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Route run completed.')),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final String? currentUserId = ref.watch(currentUserProvider)?.userId;
@@ -225,7 +396,8 @@ class _RouteDetailBodyState extends ConsumerState<_RouteDetailBody> {
     final DriverRouteOperations? operations =
         isOwnRoute ? widget.routeOperationsAsync.valueOrNull : null;
     final DriverRouteRun? activeRun = operations?.activeRun;
-    final StartRouteRunState startRunState = ref.watch(startRouteRunProvider);
+    final RouteRunActionState routeRunActionState =
+        ref.watch(routeRunActionProvider);
     final String price =
         'TZS ${NumberFormat('#,###').format(route.pricePerSeatTzs)}';
     final String depTime =
@@ -237,25 +409,48 @@ class _RouteDetailBodyState extends ConsumerState<_RouteDetailBody> {
         children: <Widget>[
           SizedBox(
             height: 240,
-            child: GoogleMap(
-              initialCameraPosition: CameraPosition(
-                target: LatLng(
-                  (route.originLat + route.destinationLat) / 2,
-                  (route.originLng + route.destinationLng) / 2,
+            child: Stack(
+              children: <Widget>[
+                GoogleMap(
+                  initialCameraPosition: CameraPosition(
+                    target: LatLng(
+                      (route.originLat + route.destinationLat) / 2,
+                      (route.originLng + route.destinationLng) / 2,
+                    ),
+                    zoom: 8,
+                  ),
+                  markers: _buildMarkers(),
+                  polylines: _buildPolylines(),
+                  onMapCreated: (GoogleMapController controller) {
+                    _mapController = controller;
+                    Future<void>.delayed(const Duration(milliseconds: 300), () {
+                      controller.animateCamera(
+                        CameraUpdate.newLatLngBounds(
+                          _operationsBounds(
+                            isOwnRoute ? widget.routeOperationsAsync.valueOrNull : null,
+                          ),
+                          40,
+                        ),
+                      );
+                    });
+                  },
+                  zoomControlsEnabled: false,
+                  myLocationButtonEnabled: false,
                 ),
-                zoom: 8,
-              ),
-              markers: _buildMarkers(),
-              polylines: _buildPolylines(),
-              onMapCreated: (GoogleMapController controller) {
-                Future<void>.delayed(const Duration(milliseconds: 300), () {
-                  controller.animateCamera(
-                    CameraUpdate.newLatLngBounds(_bounds(), 40),
-                  );
-                });
-              },
-              zoomControlsEnabled: false,
-              myLocationButtonEnabled: false,
+                if (isOwnRoute && operations?.activeStop != null)
+                  Positioned(
+                    top: 12,
+                    left: 12,
+                    right: 12,
+                    child: _RouteMapOverlay(
+                      stop: operations!.activeStop!,
+                      booking: operations.bookings
+                          .where((BookingEntity item) =>
+                              item.bookingId == operations.activeStop!.bookingId)
+                          .first,
+                    ),
+                  ),
+              ],
             ),
           ),
           Expanded(
@@ -326,6 +521,11 @@ class _RouteDetailBodyState extends ConsumerState<_RouteDetailBody> {
                   ],
                   if (isOwnRoute) ...<Widget>[
                     const SizedBox(height: 20),
+                    _RouteRunSummaryCard(
+                      route: route,
+                      operations: operations,
+                    ),
+                    const SizedBox(height: 16),
                     Text(
                       'Route operations',
                       style: Theme.of(context).textTheme.titleMedium,
@@ -333,6 +533,10 @@ class _RouteDetailBodyState extends ConsumerState<_RouteDetailBody> {
                     const SizedBox(height: 8),
                     _RouteOperationsSection(
                       operationsAsync: widget.routeOperationsAsync,
+                      actionState: routeRunActionState,
+                      onAdvanceStop: () => unawaited(_advanceStop(context)),
+                      onCompleteStop: () => unawaited(_completeStop(context)),
+                      onCompleteRun: () => unawaited(_completeRun(context)),
                     ),
                   ],
                 ],
@@ -366,8 +570,9 @@ class _RouteDetailBodyState extends ConsumerState<_RouteDetailBody> {
                         label: activeRun == null
                             ? 'Start route run'
                             : 'Route run active',
-                        loading:
-                            startRunState.status == StartRouteRunStatus.loading,
+                        loading: routeRunActionState.isLoading &&
+                            routeRunActionState.lastAction ==
+                                RouteRunActionType.startRun,
                         onPressed: activeRun == null
                             ? () => unawaited(_startRouteRun(context))
                             : null,
@@ -395,9 +600,17 @@ class _RouteDetailBodyState extends ConsumerState<_RouteDetailBody> {
 class _RouteOperationsSection extends StatelessWidget {
   const _RouteOperationsSection({
     required this.operationsAsync,
+    required this.actionState,
+    required this.onAdvanceStop,
+    required this.onCompleteStop,
+    required this.onCompleteRun,
   });
 
   final AsyncValue<DriverRouteOperations> operationsAsync;
+  final RouteRunActionState actionState;
+  final VoidCallback onAdvanceStop;
+  final VoidCallback onCompleteStop;
+  final VoidCallback onCompleteRun;
 
   @override
   Widget build(BuildContext context) {
@@ -463,6 +676,9 @@ class _RouteOperationsSection extends StatelessWidget {
               _RouteRunActiveTaskCard(
                 stop: activeStop,
                 booking: bookingsById[activeStop.bookingId],
+                actionState: actionState,
+                onAdvanceStop: onAdvanceStop,
+                onCompleteStop: onCompleteStop,
               ),
               const SizedBox(height: 12),
             ],
@@ -478,6 +694,21 @@ class _RouteOperationsSection extends StatelessWidget {
                 isCurrentStop: activeStop?.stopId == stop.stopId,
               ),
             ),
+            if (operations.activeRun != null &&
+                runStops.isNotEmpty &&
+                runStops.every((DriverRouteRunStop stop) =>
+                    stop.isCompleted || stop.isSkipped)) ...<Widget>[
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: PrimaryButton(
+                  label: 'Complete route run',
+                  loading: actionState.isLoading &&
+                      actionState.lastAction == RouteRunActionType.completeRun,
+                  onPressed: actionState.isLoading ? null : onCompleteRun,
+                ),
+              ),
+            ],
           ],
         );
       },
@@ -489,10 +720,16 @@ class _RouteRunActiveTaskCard extends StatelessWidget {
   const _RouteRunActiveTaskCard({
     required this.stop,
     required this.booking,
+    required this.actionState,
+    required this.onAdvanceStop,
+    required this.onCompleteStop,
   });
 
   final DriverRouteRunStop stop;
   final BookingEntity? booking;
+  final RouteRunActionState actionState;
+  final VoidCallback onAdvanceStop;
+  final VoidCallback onCompleteStop;
 
   @override
   Widget build(BuildContext context) {
@@ -506,23 +743,43 @@ class _RouteRunActiveTaskCard extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(AppConstants.spaceMd),
       decoration: BoxDecoration(
-        color: scheme.primaryContainer.withOpacity(0.5),
+        gradient: LinearGradient(
+          colors: <Color>[
+            scheme.primaryContainer.withOpacity(0.9),
+            scheme.surface,
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
         borderRadius: BorderRadius.circular(AppConstants.radiusMd),
+        border: Border.all(color: scheme.primary.withOpacity(0.18)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Text(
-            'Current route task',
-            style: theme.textTheme.labelLarge?.copyWith(
-              color: scheme.onPrimaryContainer,
-            ),
+          Row(
+            children: <Widget>[
+              _StatusChip(
+                label: stop.isPickup ? 'Pickup live' : 'Drop-off live',
+                color: scheme.primary,
+              ),
+              const Spacer(),
+              if (booking != null)
+                Text(
+                  booking!.journeyLabel,
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+            ],
           ),
           const SizedBox(height: 6),
           Text(
             _taskLabel(stop, booking),
             style: theme.textTheme.titleMedium?.copyWith(
               color: scheme.onPrimaryContainer,
+              fontWeight: FontWeight.w800,
             ),
           ),
           const SizedBox(height: 6),
@@ -534,11 +791,25 @@ class _RouteRunActiveTaskCard extends StatelessWidget {
           ),
           if (eta != null) ...<Widget>[
             const SizedBox(height: 6),
-            Text(
-              'ETA ${_formatEta(eta)}${booking?.etaApproximate == true ? ' approx.' : ''}',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: scheme.onPrimaryContainer,
-              ),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: <Widget>[
+                _KpiPill(
+                  icon: Icons.schedule,
+                  label: 'ETA',
+                  value:
+                      '${_formatEta(eta)}${booking?.etaApproximate == true ? ' approx.' : ''}',
+                ),
+                if (booking != null &&
+                    (booking!.etaToPickupSeconds != null ||
+                        booking!.etaToDropoffSeconds != null))
+                  _KpiPill(
+                    icon: Icons.person_outline,
+                    label: 'Rider',
+                    value: booking!.passengerDisplayName,
+                  ),
+              ],
             ),
           ],
           if (booking != null) ...<Widget>[
@@ -558,6 +829,25 @@ class _RouteRunActiveTaskCard extends StatelessWidget {
               ),
             ),
           ],
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            child: PrimaryButton(
+              label: stop.isActive
+                  ? (stop.isPickup ? 'Complete pickup' : 'Complete drop-off')
+                  : 'Make current stop live',
+              loading: actionState.isLoading &&
+                  ((stop.isActive &&
+                          actionState.lastAction ==
+                              RouteRunActionType.completeStop) ||
+                      (!stop.isActive &&
+                          actionState.lastAction ==
+                              RouteRunActionType.advanceStop)),
+              onPressed: actionState.isLoading
+                  ? null
+                  : (stop.isActive ? onCompleteStop : onAdvanceStop),
+            ),
+          ),
         ],
       ),
     );
@@ -588,6 +878,9 @@ class _RouteRunStopTile extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(AppConstants.spaceMd),
       decoration: BoxDecoration(
+        color: isCurrentStop
+            ? scheme.primaryContainer.withOpacity(0.18)
+            : scheme.surface,
         border: Border.all(
           color: isCurrentStop ? scheme.primary : scheme.outlineVariant,
           width: isCurrentStop ? 1.5 : 1,
@@ -682,6 +975,216 @@ class _RouteRunStopTile extends StatelessWidget {
       return scheme.primary;
     }
     return scheme.outline;
+  }
+}
+
+class _RouteRunSummaryCard extends StatelessWidget {
+  const _RouteRunSummaryCard({
+    required this.route,
+    required this.operations,
+  });
+
+  final RouteEntity route;
+  final DriverRouteOperations? operations;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+    final DriverRouteRun? run = operations?.activeRun;
+    final DriverRouteRunStop? activeStop = operations?.activeStop;
+    final List<DriverRouteRunStop> stops = operations?.runStops ?? <DriverRouteRunStop>[];
+    final int completedStops = stops
+        .where((DriverRouteRunStop stop) => stop.isCompleted || stop.isSkipped)
+        .length;
+    final int totalStops = stops.length;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(AppConstants.spaceLg),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: <Color>[
+            scheme.secondaryContainer,
+            scheme.surface,
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(AppConstants.radiusLg),
+        border: Border.all(color: scheme.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Icon(Icons.alt_route, color: scheme.primary),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  run == null ? 'Route ready to launch' : 'Route run in progress',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              _StatusChip(
+                label: run == null ? 'Not started' : run.status,
+                color: run == null ? scheme.outline : scheme.primary,
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            activeStop == null
+                ? 'Start the run when you are ready to move toward the first pickup.'
+                : '${activeStop.isPickup ? 'Next pickup' : 'Next drop-off'}: ${activeStop.stopName ?? 'Stop ${activeStop.sequence + 1}'}',
+            style: theme.textTheme.bodyMedium,
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: <Widget>[
+              _KpiPill(
+                icon: Icons.timeline,
+                label: 'Stops',
+                value: totalStops == 0 ? 'None yet' : '$completedStops / $totalStops complete',
+              ),
+              _KpiPill(
+                icon: Icons.event_seat,
+                label: 'Seats open',
+                value: '${route.availableSeats}/${route.totalSeats}',
+              ),
+              _KpiPill(
+                icon: Icons.schedule,
+                label: 'Departure',
+                value: DateFormat('HH:mm').format(route.departureDatetime.toLocal()),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RouteMapOverlay extends StatelessWidget {
+  const _RouteMapOverlay({
+    required this.stop,
+    required this.booking,
+  });
+
+  final DriverRouteRunStop stop;
+  final BookingEntity booking;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+    final int? eta =
+        stop.isPickup ? booking.etaToPickupSeconds : booking.etaToDropoffSeconds;
+
+    return Material(
+      elevation: 3,
+      borderRadius: BorderRadius.circular(AppConstants.radiusMd),
+      color: scheme.surface.withOpacity(0.96),
+      child: Padding(
+        padding: const EdgeInsets.all(AppConstants.spaceMd),
+        child: Row(
+          children: <Widget>[
+            Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                color: scheme.primaryContainer,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(
+                stop.isPickup ? Icons.login : Icons.logout,
+                color: scheme.primary,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    stop.isPickup ? 'Current pickup' : 'Current drop-off',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    stop.stopName ?? _stopSubtitle(stop, booking),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (eta != null)
+              Text(
+                _formatEta(eta),
+                style: theme.textTheme.titleSmall?.copyWith(
+                  color: scheme.primary,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _KpiPill extends StatelessWidget {
+  const _KpiPill({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: scheme.surface.withOpacity(0.75),
+        borderRadius: BorderRadius.circular(AppConstants.radiusMd),
+        border: Border.all(color: scheme.outlineVariant),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Icon(icon, size: 16, color: scheme.primary),
+          const SizedBox(width: 6),
+          Text(
+            '$label: ',
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
+          ),
+          Text(
+            value,
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+          ),
+        ],
+      ),
+    );
   }
 }
 

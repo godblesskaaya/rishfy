@@ -309,6 +309,11 @@ class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
                 const SizedBox(height: 16),
                 _BookingStatusTimeline(status: booking.effectiveJourneyState),
                 const SizedBox(height: 16),
+                _BookingActionCard(
+                  booking: booking,
+                  isDriver: isDriver,
+                ),
+                const SizedBox(height: 16),
                 if (declineWindowOpen) ...<Widget>[
                   Container(
                     padding: const EdgeInsets.all(AppConstants.spaceMd),
@@ -395,40 +400,62 @@ class _BookingSummaryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ColorScheme scheme = Theme.of(context).colorScheme;
     return Card(
+      elevation: 0,
       child: Padding(
         padding: const EdgeInsets.all(AppConstants.spaceMd),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: <Widget>[
+                _BookingPill(
+                  label: booking.journeyLabel,
+                  color: scheme.primary,
+                ),
+                _BookingPill(
+                  label: booking.effectiveRouteStatus,
+                  color: scheme.secondary,
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
             Text(
               '${booking.originName ?? 'Route'} -> '
               '${booking.destinationName ?? ''}',
               style: Theme.of(context).textTheme.titleMedium,
             ),
             const SizedBox(height: 8),
-            _DetailRow(label: 'Booking ID', value: booking.bookingId),
-            _DetailRow(
-              label: 'Created',
-              value: DateFormat('EEE, d MMM y | HH:mm')
-                  .format(booking.createdAt.toLocal()),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: <Widget>[
+                _BookingInfoChip(
+                  icon: Icons.access_time,
+                  label: booking.departureDatetime != null
+                      ? DateFormat('EEE, d MMM | HH:mm')
+                          .format(booking.departureDatetime!.toLocal())
+                      : DateFormat('EEE, d MMM | HH:mm')
+                          .format(booking.createdAt.toLocal()),
+                ),
+                _BookingInfoChip(
+                  icon: Icons.event_seat,
+                  label: '${booking.seatCount} seat${booking.seatCount == 1 ? '' : 's'}',
+                ),
+                _BookingInfoChip(
+                  icon: Icons.payments_outlined,
+                  label: 'TZS ${NumberFormat('#,###').format(booking.totalPriceTzs)}',
+                ),
+                _BookingInfoChip(
+                  icon: Icons.verified_outlined,
+                  label: booking.paymentStatus,
+                ),
+              ],
             ),
-            if (booking.departureDatetime != null)
-              _DetailRow(
-                label: 'Departure',
-                value: DateFormat('EEE, d MMM y | HH:mm')
-                    .format(booking.departureDatetime!.toLocal()),
-              ),
-            _DetailRow(label: 'Journey state', value: booking.journeyLabel),
-            _DetailRow(
-                label: 'Route state', value: booking.effectiveRouteStatus),
-            _DetailRow(label: 'Payment', value: booking.paymentStatus),
-            _DetailRow(label: 'Seats', value: '${booking.seatCount}'),
-            _DetailRow(
-              label: 'Total',
-              value:
-                  'TZS ${NumberFormat('#,###').format(booking.totalPriceTzs)}',
-            ),
+            const SizedBox(height: 12),
             if (booking.confirmationCode != null)
               _DetailRow(
                 label: 'Confirmation code',
@@ -457,6 +484,148 @@ class _BookingSummaryCard extends StatelessWidget {
       return '${seconds}s';
     }
     return '${(seconds / 60).ceil()}m';
+  }
+}
+
+class _BookingActionCard extends StatelessWidget {
+  const _BookingActionCard({
+    required this.booking,
+    required this.isDriver,
+  });
+
+  final BookingEntity booking;
+  final bool isDriver;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+    final String title = booking.isJourneyActive
+        ? 'Current trip focus'
+        : booking.canParticipantCompleteJourney
+            ? 'Final walk'
+            : 'Current status';
+    final String message = isDriver
+        ? _driverMessage(booking)
+        : _passengerMessage(booking);
+
+    return Container(
+      padding: const EdgeInsets.all(AppConstants.spaceMd),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(AppConstants.radiusMd),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(
+            title,
+            style: Theme.of(context).textTheme.titleSmall,
+          ),
+          const SizedBox(height: 6),
+          Text(
+            message,
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _driverMessage(BookingEntity booking) {
+    if (booking.canDriverStartTrip) {
+      return 'Start approaching the pickup point and keep the route workspace open.';
+    }
+    if (booking.canDriverMarkArrived) {
+      return 'Reach the pickup stop and confirm arrival when the rider can identify you.';
+    }
+    if (booking.canDriverMarkBoarded) {
+      return 'Board the rider and begin the in-vehicle leg.';
+    }
+    if (booking.canDriverMarkDroppedOff) {
+      return 'Stay on the route and complete the drop-off when the rider alights.';
+    }
+    if (booking.canParticipantCompleteJourney) {
+      return 'Your driving work is done. The rider is finishing the last walking segment.';
+    }
+    return 'Open the live trip if you need more operational detail.';
+  }
+
+  String _passengerMessage(BookingEntity booking) {
+    if (booking.isPrePickupJourney) {
+      return 'Head to pickup and keep your phone nearby for live driver updates.';
+    }
+    if (booking.isInVehicleJourney) {
+      return 'Track the ride progress and ETA to your drop-off stop.';
+    }
+    if (booking.canParticipantCompleteJourney) {
+      return 'Finish the final walk to your destination and close the journey when done.';
+    }
+    if (booking.isCompleted) {
+      return 'This trip is complete. You can review the booking summary and rate it.';
+    }
+    return 'Check this booking for the latest trip details.';
+  }
+}
+
+class _BookingPill extends StatelessWidget {
+  const _BookingPill({
+    required this.label,
+    required this.color,
+  });
+
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.14),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: color,
+              fontWeight: FontWeight.w700,
+            ),
+      ),
+    );
+  }
+}
+
+class _BookingInfoChip extends StatelessWidget {
+  const _BookingInfoChip({
+    required this.icon,
+    required this.label,
+  });
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: scheme.outlineVariant),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Icon(icon, size: 14, color: scheme.primary),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ],
+      ),
+    );
   }
 }
 

@@ -47,6 +47,39 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
     }
   }
 
+  void _frameTripContext(BookingEntity booking, DriverTrackingState tracking) {
+    if (!_followDriver) return;
+    final DriverLocationUpdate? update = tracking.latest;
+    if (_mapController == null || update == null) {
+      return;
+    }
+    final List<double> lats = <double>[update.lat];
+    final List<double> lngs = <double>[update.lng];
+    final double? targetLat = booking.isPrePickupJourney
+        ? booking.resolvedPickupLat
+        : booking.resolvedDropoffLat;
+    final double? targetLng = booking.isPrePickupJourney
+        ? booking.resolvedPickupLng
+        : booking.resolvedDropoffLng;
+    if (targetLat != null && targetLng != null) {
+      lats.add(targetLat);
+      lngs.add(targetLng);
+    }
+    final LatLngBounds bounds = LatLngBounds(
+      southwest: LatLng(
+        lats.reduce((double a, double b) => a < b ? a : b) - 0.005,
+        lngs.reduce((double a, double b) => a < b ? a : b) - 0.005,
+      ),
+      northeast: LatLng(
+        lats.reduce((double a, double b) => a > b ? a : b) + 0.005,
+        lngs.reduce((double a, double b) => a > b ? a : b) + 0.005,
+      ),
+    );
+    unawaited(_mapController!.animateCamera(
+      CameraUpdate.newLatLngBounds(bounds, 60),
+    ));
+  }
+
   @override
   Widget build(BuildContext context) {
     final String role = ref.watch(activeRoleProvider);
@@ -161,8 +194,10 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
         }
 
         if (tracking.latest != null) {
-          WidgetsBinding.instance
-              .addPostFrameCallback((_) => _panToDriver(tracking.latest!));
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _panToDriver(tracking.latest!);
+            _frameTripContext(booking, tracking);
+          });
         }
 
         return isDriver
@@ -224,6 +259,16 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
                   zoomControlsEnabled: false,
                   onCameraMoveStarted: () =>
                       setState(() => _followDriver = false),
+                ),
+                Positioned(
+                  top: 12,
+                  left: 12,
+                  right: 12,
+                  child: _TripMapOverlay(
+                    booking: booking,
+                    update: tracking.latest,
+                    isDriver: false,
+                  ),
                 ),
                 if (!_followDriver && driverUpdate != null)
                   Positioned(
@@ -313,6 +358,16 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
             zoomControlsEnabled: false,
             markers: _buildMarkers(booking, tracking, true),
             polylines: _buildPolylines(booking, tracking, route),
+          ),
+          Positioned(
+            top: 12,
+            left: 12,
+            right: 12,
+            child: _TripMapOverlay(
+              booking: booking,
+              update: tracking.latest,
+              isDriver: true,
+            ),
           ),
           Positioned(
             left: 0,
@@ -416,7 +471,8 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
           markerId: const MarkerId('driver'),
           position: LatLng(driverLat, driverLng),
           rotation: driverHeading,
-          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueBlue),
+          zIndex: 3,
+          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
           infoWindow: InfoWindow(
             title: isDriver ? 'Your vehicle' : 'Driver',
             snippet: booking.driverName ?? '',
@@ -427,6 +483,7 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
 
     if (booking.resolvedPickupLat != null &&
         booking.resolvedPickupLng != null) {
+      final bool isActivePickup = booking.isPrePickupJourney;
       markers.add(
         Marker(
           markerId: const MarkerId('pickup'),
@@ -434,8 +491,12 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
             booking.resolvedPickupLat!,
             booking.resolvedPickupLng!,
           ),
-          icon:
-              BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
+          zIndex: isActivePickup ? 2 : 1,
+          icon: BitmapDescriptor.defaultMarkerWithHue(
+            isActivePickup
+                ? BitmapDescriptor.hueGreen
+                : BitmapDescriptor.hueYellow,
+          ),
           infoWindow: InfoWindow(title: booking.pickupDisplayName),
         ),
       );
@@ -443,6 +504,7 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
 
     if (booking.resolvedDropoffLat != null &&
         booking.resolvedDropoffLng != null) {
+      final bool isActiveDropoff = !booking.isPrePickupJourney;
       markers.add(
         Marker(
           markerId: const MarkerId('dropoff'),
@@ -450,7 +512,12 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
             booking.resolvedDropoffLat!,
             booking.resolvedDropoffLng!,
           ),
-          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+          zIndex: isActiveDropoff ? 2 : 1,
+          icon: BitmapDescriptor.defaultMarkerWithHue(
+            isActiveDropoff
+                ? BitmapDescriptor.hueRed
+                : BitmapDescriptor.hueOrange,
+          ),
           infoWindow: InfoWindow(title: booking.dropoffDisplayName),
         ),
       );
@@ -511,10 +578,34 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
                   .map((List<num> point) =>
                       LatLng(point[0].toDouble(), point[1].toDouble()))
                   .toList(),
-              color: Colors.grey.withValues(alpha: 0.55),
-              width: 4,
+              color: Colors.blueGrey.withValues(alpha: 0.45),
+              width: 5,
             ),
           );
+          final double? targetLat = booking.isPrePickupJourney
+              ? booking.resolvedPickupLat
+              : booking.resolvedDropoffLat;
+          final double? targetLng = booking.isPrePickupJourney
+              ? booking.resolvedPickupLng
+              : booking.resolvedDropoffLng;
+          final DriverLocationUpdate? latest = tracking.latest;
+          if (latest != null && targetLat != null && targetLng != null) {
+            polylines.add(
+              Polyline(
+                polylineId: const PolylineId('active_leg'),
+                points: <LatLng>[
+                  LatLng(latest.lat, latest.lng),
+                  LatLng(targetLat, targetLng),
+                ],
+                color: Colors.blue,
+                width: 6,
+                patterns: const <PatternItem>[
+                  PatternItem.dash(20),
+                  PatternItem.gap(10),
+                ],
+              ),
+            );
+          }
         }
       } catch (_) {
         // Keep the trip screen usable even if the backend route polyline is malformed.
@@ -553,6 +644,11 @@ class _PassengerJourneyPanel extends StatelessWidget {
     final List<Widget> details = <Widget>[
       Row(
         children: <Widget>[
+          _StatusChip(
+            label: booking.journeyLabel,
+            color: scheme.primary,
+          ),
+          const SizedBox(width: 8),
           const Icon(Icons.directions_car, size: 18),
           const SizedBox(width: 8),
           Expanded(
@@ -577,7 +673,11 @@ class _PassengerJourneyPanel extends StatelessWidget {
       ),
       const SizedBox(height: 12),
       Text(
-        booking.journeyLabel,
+        booking.isPrePickupJourney
+            ? 'Pickup in progress'
+            : booking.isPostDropoffJourney
+                ? 'Arrival in progress'
+                : 'Ride in progress',
         style:
             theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
       ),
@@ -665,16 +765,30 @@ class _PassengerJourneyPanel extends StatelessWidget {
         : (update?.etaToDropoffSeconds ?? booking.etaToDropoffSeconds);
     if (eta != null) {
       details.add(
-        _InfoRow(
-          icon: Icons.schedule,
-          label: 'ETA',
-          value:
-              '${_formatEta(eta)}${booking.etaApproximate == true ? ' approx.' : ''}',
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: <Widget>[
+            _KpiPill(
+              icon: Icons.schedule,
+              label: 'ETA',
+              value:
+                  '${_formatEta(eta)}${booking.etaApproximate == true ? ' approx.' : ''}',
+            ),
+            if (update?.distanceToActiveStopMeters != null)
+              _KpiPill(
+                icon: Icons.route,
+                label: booking.isPrePickupJourney
+                    ? 'Distance'
+                    : 'Remaining',
+                value: _formatDistance(update!.distanceToActiveStopMeters!),
+              ),
+          ],
         ),
       );
     }
 
-    if (update?.distanceToActiveStopMeters != null) {
+    if (update?.distanceToActiveStopMeters != null && eta == null) {
       details.add(
         _InfoRow(
           icon: Icons.route,
@@ -688,7 +802,7 @@ class _PassengerJourneyPanel extends StatelessWidget {
 
     if (update?.remainingRouteFraction != null) {
       details.add(
-        _InfoRow(
+        _KpiPill(
           icon: Icons.timeline,
           label: 'Trip progress',
           value: _formatProgress(update!.remainingRouteFraction!),
@@ -756,10 +870,18 @@ class _PassengerJourneyPanel extends StatelessWidget {
     if (actionState.status == TripActionStatus.loading) {
       details.add(const SizedBox(height: 12));
       details.add(
-        Text(
-          'Updating trip state...',
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(AppConstants.spaceMd),
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(AppConstants.radiusMd),
+          ),
+          child: Text(
+            'Updating trip state...',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
           ),
         ),
       );
@@ -872,6 +994,86 @@ class _PassengerJourneyPanel extends StatelessWidget {
       return '${seconds}s ago';
     }
     return '${(seconds / 60).floor()}m ago';
+  }
+}
+
+class _TripMapOverlay extends StatelessWidget {
+  const _TripMapOverlay({
+    required this.booking,
+    required this.update,
+    required this.isDriver,
+  });
+
+  final BookingEntity booking;
+  final DriverLocationUpdate? update;
+  final bool isDriver;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+    final int? eta = booking.isPrePickupJourney
+        ? (update?.etaToPickupSeconds ?? booking.etaToPickupSeconds)
+        : (update?.etaToDropoffSeconds ?? booking.etaToDropoffSeconds);
+    final String stopLabel = booking.isPrePickupJourney
+        ? booking.pickupDisplayName
+        : booking.dropoffDisplayName;
+
+    return Material(
+      elevation: 3,
+      borderRadius: BorderRadius.circular(AppConstants.radiusMd),
+      color: scheme.surface.withOpacity(0.96),
+      child: Padding(
+        padding: const EdgeInsets.all(AppConstants.spaceMd),
+        child: Row(
+          children: <Widget>[
+            Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                color: scheme.primaryContainer,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(
+                booking.isPrePickupJourney ? Icons.pin_drop_outlined : Icons.flag_outlined,
+                color: scheme.primary,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    isDriver ? booking.nextDriverActionLabel : booking.journeyLabel,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    stopLabel,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (eta != null)
+              Text(
+                _formatEta(eta),
+                style: theme.textTheme.titleSmall?.copyWith(
+                  color: scheme.primary,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
@@ -1283,6 +1485,81 @@ class _JourneyPhaseStrip extends StatelessWidget {
       default:
         return 0;
     }
+  }
+}
+
+class _StatusChip extends StatelessWidget {
+  const _StatusChip({
+    required this.label,
+    required this.color,
+  });
+
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.14),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: color,
+              fontWeight: FontWeight.w700,
+            ),
+      ),
+    );
+  }
+}
+
+class _KpiPill extends StatelessWidget {
+  const _KpiPill({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: scheme.surface.withOpacity(0.75),
+        borderRadius: BorderRadius.circular(AppConstants.radiusMd),
+        border: Border.all(color: scheme.outlineVariant),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Icon(icon, size: 16, color: scheme.primary),
+          const SizedBox(width: 6),
+          Text(
+            '$label: ',
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
+          ),
+          Flexible(
+            child: Text(
+              value,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 

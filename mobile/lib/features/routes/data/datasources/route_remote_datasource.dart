@@ -127,6 +127,24 @@ class RouteRemoteDataSource {
     return RouteOperationsDto.fromJson(res.data ?? <String, dynamic>{});
   }
 
+  Future<RouteOperationsDto> advanceRouteStop(String routeId) async {
+    final Response<Map<String, dynamic>> res =
+        await _dio.post<Map<String, dynamic>>('/api/v1/routes/$routeId/advance-stop');
+    return RouteOperationsDto.fromJson(res.data ?? <String, dynamic>{});
+  }
+
+  Future<RouteOperationsDto> completeRouteStop(String routeId) async {
+    final Response<Map<String, dynamic>> res =
+        await _dio.post<Map<String, dynamic>>('/api/v1/routes/$routeId/complete-stop');
+    return RouteOperationsDto.fromJson(res.data ?? <String, dynamic>{});
+  }
+
+  Future<RouteOperationsDto> completeRouteRun(String routeId) async {
+    final Response<Map<String, dynamic>> res =
+        await _dio.post<Map<String, dynamic>>('/api/v1/routes/$routeId/complete-run');
+    return RouteOperationsDto.fromJson(res.data ?? <String, dynamic>{});
+  }
+
   Future<RouteDto> createRoute(CreateRouteRequest req) async {
     final Response<Map<String, dynamic>> res =
         await _dio.post<Map<String, dynamic>>(

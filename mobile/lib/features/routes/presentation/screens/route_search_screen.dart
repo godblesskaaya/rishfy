@@ -1086,8 +1086,10 @@ class _SearchResultCard extends StatelessWidget {
         DateFormat('HH:mm').format(result.estimatedPickupTime.toLocal());
     final String departureTime =
         DateFormat('HH:mm').format(result.driverDepartureTime.toLocal());
+    final ColorScheme scheme = Theme.of(context).colorScheme;
 
     return Card(
+      elevation: 0,
       child: InkWell(
         borderRadius: BorderRadius.circular(AppConstants.radiusMd),
         onTap: () => GoRouter.of(context).push(
@@ -1111,82 +1113,179 @@ class _SearchResultCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
                   Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Row(
+                          children: <Widget>[
+                            Text(
+                              result.driverName ?? 'Driver',
+                              style: Theme.of(context).textTheme.titleSmall,
+                            ),
+                            const SizedBox(width: 8),
+                            if (result.driverRating != null)
+                              _SearchStatChip(
+                                icon: Icons.star,
+                                iconColor: Colors.amber,
+                                label: result.driverRating!.toStringAsFixed(1),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        if (result.vehicleLabel.isNotEmpty)
+                          Text(
+                            result.vehicleLabel,
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  color: scheme.onSurfaceVariant,
+                                ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                    decoration: BoxDecoration(
+                      color: scheme.primaryContainer,
+                      borderRadius: BorderRadius.circular(14),
+                    ),
                     child: Text(
-                      result.driverName ?? 'Driver',
-                      style: Theme.of(context).textTheme.titleSmall,
-                    ),
-                  ),
-                  Text(
-                    price,
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.primary,
-                      fontWeight: FontWeight.bold,
+                      price,
+                      style: TextStyle(
+                        color: scheme.onPrimaryContainer,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 6),
+              const SizedBox(height: 12),
               Wrap(
-                spacing: 6,
-                runSpacing: 4,
+                spacing: 8,
+                runSpacing: 8,
                 children: <Widget>[
-                  Chip(
-                    avatar: const Icon(Icons.directions_walk, size: 14),
-                    label: Text(result.walkingDistanceLabel),
-                    visualDensity: VisualDensity.compact,
-                    padding: EdgeInsets.zero,
-                    labelStyle: Theme.of(context).textTheme.bodySmall,
+                  _SearchStatChip(
+                    icon: Icons.directions_walk,
+                    label: result.walkingDistanceLabel,
                   ),
-                  Chip(
-                    avatar: const Icon(Icons.event_seat, size: 14),
-                    label: Text('${result.availableSeats} seats'),
-                    visualDensity: VisualDensity.compact,
-                    padding: EdgeInsets.zero,
-                    labelStyle: Theme.of(context).textTheme.bodySmall,
+                  _SearchStatChip(
+                    icon: Icons.event_seat,
+                    label: '${result.availableSeats} seats',
                   ),
-                  if (result.driverRating != null)
-                    Chip(
-                      avatar: const Icon(Icons.star,
-                          size: 14, color: Colors.amber),
-                      label: Text(result.driverRating!.toStringAsFixed(1)),
-                      visualDensity: VisualDensity.compact,
-                      padding: EdgeInsets.zero,
-                      labelStyle: Theme.of(context).textTheme.bodySmall,
-                    ),
-                ],
-              ),
-              const SizedBox(height: 4),
-              Row(
-                children: <Widget>[
-                  const Icon(Icons.access_time, size: 14),
-                  const SizedBox(width: 4),
-                  Text(
-                    'Departs $departureTime · pickup ~$pickupTime',
-                    style: Theme.of(context).textTheme.bodySmall,
+                  _SearchStatChip(
+                    icon: Icons.login,
+                    label: 'Departs $departureTime',
+                  ),
+                  _SearchStatChip(
+                    icon: Icons.schedule,
+                    label: 'Pickup ~$pickupTime',
                   ),
                 ],
               ),
               if (result.suggestedPickupName != null) ...<Widget>[
-                const SizedBox(height: 4),
-                Row(
-                  children: <Widget>[
-                    const Icon(Icons.directions_walk, size: 14),
-                    const SizedBox(width: 4),
-                    Expanded(
-                      child: Text(
-                        result.suggestedPickupName!,
-                        style: Theme.of(context).textTheme.bodySmall,
-                        overflow: TextOverflow.ellipsis,
+                const SizedBox(height: 12),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(AppConstants.spaceMd),
+                  decoration: BoxDecoration(
+                    color: scheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(AppConstants.radiusMd),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Icon(Icons.pin_drop_outlined, size: 18, color: scheme.primary),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            Text(
+                              'Suggested pickup',
+                              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                    color: scheme.onSurfaceVariant,
+                                  ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              result.suggestedPickupName!,
+                              style: Theme.of(context).textTheme.bodyMedium,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ],
+              const SizedBox(height: 12),
+              Row(
+                children: <Widget>[
+                  Expanded(
+                    child: Text(
+                      'Best for quick pickup and fixed-route certainty.',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: scheme.onSurfaceVariant,
+                          ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'View ride',
+                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                          color: scheme.primary,
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+                  const SizedBox(width: 4),
+                  Icon(Icons.chevron_right, color: scheme.primary),
+                ],
+              ),
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _SearchStatChip extends StatelessWidget {
+  const _SearchStatChip({
+    required this.icon,
+    required this.label,
+    this.iconColor,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color? iconColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: scheme.outlineVariant),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Icon(icon, size: 14, color: iconColor ?? scheme.primary),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ],
       ),
     );
   }

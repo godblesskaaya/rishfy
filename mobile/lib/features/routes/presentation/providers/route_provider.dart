@@ -332,6 +332,130 @@ class StartRouteRunNotifier extends StateNotifier<StartRouteRunState> {
   }
 }
 
+enum RouteRunActionType {
+  startRun,
+  advanceStop,
+  completeStop,
+  completeRun,
+}
+
+class RouteRunActionState {
+  const RouteRunActionState({
+    this.isLoading = false,
+    this.workspace,
+    this.lastAction,
+    this.error,
+  });
+
+  final bool isLoading;
+  final DriverRouteOperations? workspace;
+  final RouteRunActionType? lastAction;
+  final String? error;
+
+  RouteRunActionState copyWith({
+    bool? isLoading,
+    DriverRouteOperations? workspace,
+    RouteRunActionType? lastAction,
+    String? error,
+  }) =>
+      RouteRunActionState(
+        isLoading: isLoading ?? this.isLoading,
+        workspace: workspace ?? this.workspace,
+        lastAction: lastAction ?? this.lastAction,
+        error: error,
+      );
+}
+
+final routeRunActionProvider = StateNotifierProvider.autoDispose<
+    RouteRunActionNotifier, RouteRunActionState>(
+  (Ref ref) => RouteRunActionNotifier(ref.read(routeDataSourceProvider), ref),
+);
+
+class RouteRunActionNotifier extends StateNotifier<RouteRunActionState> {
+  RouteRunActionNotifier(this._ds, this._ref)
+      : super(const RouteRunActionState());
+
+  final RouteRemoteDataSource _ds;
+  final Ref _ref;
+
+  Future<void> startRun(String routeId) => _run(
+        routeId: routeId,
+        action: RouteRunActionType.startRun,
+        operation: () => _ds.startRouteRun(routeId),
+      );
+
+  Future<void> advanceStop(String routeId) => _run(
+        routeId: routeId,
+        action: RouteRunActionType.advanceStop,
+        operation: () => _ds.advanceRouteStop(routeId),
+      );
+
+  Future<void> completeStop(String routeId) => _run(
+        routeId: routeId,
+        action: RouteRunActionType.completeStop,
+        operation: () => _ds.completeRouteStop(routeId),
+      );
+
+  Future<void> completeRun(String routeId) => _run(
+        routeId: routeId,
+        action: RouteRunActionType.completeRun,
+        operation: () => _ds.completeRouteRun(routeId),
+      );
+
+  Future<void> _run({
+    required String routeId,
+    required RouteRunActionType action,
+    required Future<RouteOperationsDto> Function() operation,
+  }) async {
+    state = state.copyWith(
+      isLoading: true,
+      lastAction: action,
+      error: null,
+    );
+    try {
+      final RouteOperationsDto dto = await operation();
+      _ref.invalidate(driverRouteOperationsProvider(routeId));
+      state = RouteRunActionState(
+        isLoading: false,
+        lastAction: action,
+        workspace: DriverRouteOperations(
+          route: dto.route.toDomain(),
+          activeRun: dto.activeRun == null
+              ? null
+              : DriverRouteRun(
+                  runId: dto.activeRun!.runId,
+                  routeId: dto.activeRun!.routeId,
+                  driverUserId: dto.activeRun!.driverUserId,
+                  status: dto.activeRun!.status,
+                  currentStopIndex: dto.activeRun!.currentStopIndex,
+                  startedAt: dto.activeRun!.startedAt,
+                ),
+          runStops: dto.runStops
+              .map(
+                (RouteRunStopDto stop) => DriverRouteRunStop(
+                  stopId: stop.stopId,
+                  routeRunId: stop.routeRunId,
+                  bookingId: stop.bookingId,
+                  stopKind: stop.stopKind,
+                  sequence: stop.sequence,
+                  status: stop.status,
+                  stopName: stop.stopName,
+                ),
+              )
+              .toList(),
+          bookings: dto.bookings.map((booking) => booking.toDomain()).toList(),
+        ),
+      );
+    } catch (e) {
+      state = state.copyWith(
+        isLoading: false,
+        lastAction: action,
+        error: _errorMessage(e, 'Could not update the route run.'),
+      );
+    }
+  }
+}
+
 // ---- Driver vehicles (for route posting) ----
 
 final myVehicleOptionsProvider =

@@ -279,11 +279,20 @@ class _PassengerJourneyCard extends StatelessWidget {
               children: <Widget>[
                 Row(
                   children: <Widget>[
+                    _PassengerStateChip(
+                      label: booking.journeyLabel,
+                      color: scheme.primary,
+                    ),
+                    const SizedBox(width: 8),
                     Icon(Icons.alt_route, color: scheme.primary),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        booking.journeyLabel,
+                        booking.isPrePickupJourney
+                            ? 'Pickup in progress'
+                            : booking.isPostDropoffJourney
+                                ? 'Arrival in progress'
+                                : 'Ride in progress',
                         style: Theme.of(context).textTheme.titleSmall?.copyWith(
                               fontWeight: FontWeight.bold,
                             ),
@@ -298,17 +307,33 @@ class _PassengerJourneyCard extends StatelessWidget {
                   '${booking.destinationName ?? ''}',
                   style: Theme.of(context).textTheme.bodyLarge,
                 ),
-                const SizedBox(height: 6),
-                Text(
-                  booking.isPrePickupJourney
-                      ? 'Pickup: ${booking.pickupDisplayName}'
-                      : 'Drop-off: ${booking.dropoffDisplayName}',
-                  style: Theme.of(context).textTheme.bodySmall,
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: <Widget>[
+                    _PassengerKpiChip(
+                      icon: booking.isPrePickupJourney
+                          ? Icons.pin_drop_outlined
+                          : Icons.flag_outlined,
+                      label: booking.isPrePickupJourney ? 'Pickup' : 'Drop-off',
+                      value: booking.isPrePickupJourney
+                          ? booking.pickupDisplayName
+                          : booking.dropoffDisplayName,
+                    ),
+                    if (etaSeconds != null)
+                      _PassengerKpiChip(
+                        icon: Icons.schedule,
+                        label: 'ETA',
+                        value:
+                            '${_formatEta(etaSeconds)}${booking.etaApproximate == true ? ' approx.' : ''}',
+                      ),
+                  ],
                 ),
-                const SizedBox(height: 6),
+                const SizedBox(height: 10),
                 Text(
                   phaseHint,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         color: scheme.onSurfaceVariant,
                       ),
                 ),
@@ -335,23 +360,21 @@ class _PassengerJourneyCard extends StatelessWidget {
                         ),
                   ),
                 ],
-                if (etaSeconds != null) ...<Widget>[
-                  const SizedBox(height: 6),
-                  Text(
-                    'ETA ${_formatEta(etaSeconds)}'
-                    '${booking.etaApproximate == true ? ' approx.' : ''}',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: scheme.onSurfaceVariant,
+                const SizedBox(height: 12),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(AppConstants.spaceMd),
+                  decoration: BoxDecoration(
+                    color: scheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(AppConstants.radiusMd),
+                  ),
+                  child: Text(
+                    actionLabel,
+                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                          color: scheme.primary,
+                          fontWeight: FontWeight.w700,
                         ),
                   ),
-                ],
-                const SizedBox(height: 12),
-                Text(
-                  actionLabel,
-                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                        color: scheme.primary,
-                        fontWeight: FontWeight.w700,
-                      ),
                 ),
               ],
             ),
@@ -402,6 +425,81 @@ class _PassengerJourneyCard extends StatelessWidget {
       parts.add('${(timeSeconds / 60).ceil()} min');
     }
     return parts.isEmpty ? 'details pending' : parts.join(' | ');
+  }
+}
+
+class _PassengerStateChip extends StatelessWidget {
+  const _PassengerStateChip({
+    required this.label,
+    required this.color,
+  });
+
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.14),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: color,
+              fontWeight: FontWeight.w700,
+            ),
+      ),
+    );
+  }
+}
+
+class _PassengerKpiChip extends StatelessWidget {
+  const _PassengerKpiChip({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: scheme.surface.withOpacity(0.75),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: scheme.outlineVariant),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Icon(icon, size: 16, color: scheme.primary),
+          const SizedBox(width: 6),
+          Text(
+            '$label: ',
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
+          ),
+          Flexible(
+            child: Text(
+              value,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
