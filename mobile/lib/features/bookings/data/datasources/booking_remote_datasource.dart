@@ -42,6 +42,18 @@ class BookingRemoteDataSource {
         .toList();
   }
 
+  Future<List<BookingDto>> listDriverRouteOperations(String routeId) async {
+    final Response<Map<String, dynamic>> res =
+        await _dio.get<Map<String, dynamic>>(
+      '/api/v1/bookings/routes/$routeId/operations',
+    );
+    final List<dynamic> data =
+        res.data?['bookings'] as List<dynamic>? ?? <dynamic>[];
+    return data
+        .map((dynamic e) => BookingDto.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
   Future<BookingDto> getBooking(String bookingId) async {
     final Response<Map<String, dynamic>> res =
         await _dio.get<Map<String, dynamic>>('/api/v1/bookings/$bookingId');

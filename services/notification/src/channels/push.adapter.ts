@@ -43,7 +43,8 @@ function getServiceAccount(): admin.ServiceAccount | null {
     return JSON.parse(serviceAccountJson) as admin.ServiceAccount;
   }
 
-  const credPath = process.env['FIREBASE_SERVICE_ACCOUNT_PATH'];
+  const credPath = process.env['FIREBASE_SERVICE_ACCOUNT_PATH']
+    ?? process.env['FCM_SERVICE_ACCOUNT_PATH'];
   if (!credPath) return null;
 
   const raw = readFileSync(credPath, 'utf8');
@@ -55,7 +56,9 @@ function resolveApp(): { app: admin.app.App | null; code?: string; reason?: stri
 
   const projectId = process.env['FIREBASE_PROJECT_ID'];
   const hasServiceAccount = Boolean(
-    process.env['FIREBASE_SERVICE_ACCOUNT_JSON'] || process.env['FIREBASE_SERVICE_ACCOUNT_PATH'],
+    process.env['FIREBASE_SERVICE_ACCOUNT_JSON']
+      || process.env['FIREBASE_SERVICE_ACCOUNT_PATH']
+      || process.env['FCM_SERVICE_ACCOUNT_PATH'],
   );
 
   if (!hasServiceAccount && !projectId) {

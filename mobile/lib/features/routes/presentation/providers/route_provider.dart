@@ -6,6 +6,7 @@ import '../../../../core/network/dio_client.dart';
 import '../../data/datasources/location_search_remote_datasource.dart';
 import '../../data/datasources/route_remote_datasource.dart';
 import '../../data/models/route_models.dart';
+import '../../../bookings/domain/entities/booking_entity.dart';
 import '../../domain/entities/route_entity.dart';
 
 String _errorMessage(Object e, String fallback) {
@@ -147,6 +148,189 @@ final FutureProviderFamily<RouteEntity, String> routeDetailProvider =
   final RouteDto dto = await ds.getRoute(routeId);
   return dto.toDomain();
 });
+
+class DriverRouteOperations {
+  const DriverRouteOperations({
+    required this.route,
+    required this.activeRun,
+    required this.runStops,
+    required this.bookings,
+  });
+
+  final RouteEntity route;
+  final DriverRouteRun? activeRun;
+  final List<DriverRouteRunStop> runStops;
+  final List<BookingEntity> bookings;
+
+  DriverRouteRunStop? get activeStop {
+    for (final DriverRouteRunStop stop in runStops) {
+      if (stop.isCurrentWorkItem) {
+        return stop;
+      }
+    }
+    return runStops.isEmpty ? null : runStops.first;
+  }
+}
+
+class DriverRouteRun {
+  const DriverRouteRun({
+    required this.runId,
+    required this.routeId,
+    required this.driverUserId,
+    required this.status,
+    required this.currentStopIndex,
+    this.startedAt,
+  });
+
+  final String runId;
+  final String routeId;
+  final String driverUserId;
+  final String status;
+  final int currentStopIndex;
+  final DateTime? startedAt;
+}
+
+class DriverRouteRunStop {
+  const DriverRouteRunStop({
+    required this.stopId,
+    required this.routeRunId,
+    required this.bookingId,
+    required this.stopKind,
+    required this.sequence,
+    required this.status,
+    this.stopName,
+  });
+
+  final String stopId;
+  final String routeRunId;
+  final String bookingId;
+  final String stopKind;
+  final int sequence;
+  final String status;
+  final String? stopName;
+
+  bool get isCompleted => status == 'completed';
+  bool get isSkipped => status == 'skipped';
+  bool get isActive => status == 'active';
+  bool get isCurrentWorkItem => isActive || status == 'pending';
+  bool get isPickup => stopKind == 'pickup';
+}
+
+final FutureProviderFamily<DriverRouteOperations, String>
+    driverRouteOperationsProvider =
+    FutureProviderFamily<DriverRouteOperations, String>(
+  (Ref ref, String routeId) async {
+    final RouteRemoteDataSource ds = ref.read(routeDataSourceProvider);
+    final RouteOperationsDto dto = await ds.getRouteOperations(routeId);
+    return DriverRouteOperations(
+      route: dto.route.toDomain(),
+      activeRun: dto.activeRun == null
+          ? null
+          : DriverRouteRun(
+              runId: dto.activeRun!.runId,
+              routeId: dto.activeRun!.routeId,
+              driverUserId: dto.activeRun!.driverUserId,
+              status: dto.activeRun!.status,
+              currentStopIndex: dto.activeRun!.currentStopIndex,
+              startedAt: dto.activeRun!.startedAt,
+            ),
+      runStops: dto.runStops
+          .map(
+            (RouteRunStopDto stop) => DriverRouteRunStop(
+              stopId: stop.stopId,
+              routeRunId: stop.routeRunId,
+              bookingId: stop.bookingId,
+              stopKind: stop.stopKind,
+              sequence: stop.sequence,
+              status: stop.status,
+              stopName: stop.stopName,
+            ),
+          )
+          .toList(),
+      bookings: dto.bookings.map((booking) => booking.toDomain()).toList(),
+    );
+  },
+);
+
+enum StartRouteRunStatus { idle, loading, success, failed }
+
+class StartRouteRunState {
+  const StartRouteRunState({
+    this.status = StartRouteRunStatus.idle,
+    this.workspace,
+    this.error,
+  });
+
+  final StartRouteRunStatus status;
+  final DriverRouteOperations? workspace;
+  final String? error;
+
+  StartRouteRunState copyWith({
+    StartRouteRunStatus? status,
+    DriverRouteOperations? workspace,
+    String? error,
+  }) =>
+      StartRouteRunState(
+        status: status ?? this.status,
+        workspace: workspace ?? this.workspace,
+        error: error,
+      );
+}
+
+final startRouteRunProvider = StateNotifierProvider.autoDispose<
+    StartRouteRunNotifier, StartRouteRunState>(
+  (Ref ref) => StartRouteRunNotifier(ref.read(routeDataSourceProvider), ref),
+);
+
+class StartRouteRunNotifier extends StateNotifier<StartRouteRunState> {
+  StartRouteRunNotifier(this._ds, this._ref) : super(const StartRouteRunState());
+
+  final RouteRemoteDataSource _ds;
+  final Ref _ref;
+
+  Future<void> start(String routeId) async {
+    state = state.copyWith(status: StartRouteRunStatus.loading, error: null);
+    try {
+      final RouteOperationsDto dto = await _ds.startRouteRun(routeId);
+      _ref.invalidate(driverRouteOperationsProvider(routeId));
+      state = StartRouteRunState(
+        status: StartRouteRunStatus.success,
+        workspace: DriverRouteOperations(
+          route: dto.route.toDomain(),
+          activeRun: dto.activeRun == null
+              ? null
+              : DriverRouteRun(
+                  runId: dto.activeRun!.runId,
+                  routeId: dto.activeRun!.routeId,
+                  driverUserId: dto.activeRun!.driverUserId,
+                  status: dto.activeRun!.status,
+                  currentStopIndex: dto.activeRun!.currentStopIndex,
+                  startedAt: dto.activeRun!.startedAt,
+                ),
+          runStops: dto.runStops
+              .map(
+                (RouteRunStopDto stop) => DriverRouteRunStop(
+                  stopId: stop.stopId,
+                  routeRunId: stop.routeRunId,
+                  bookingId: stop.bookingId,
+                  stopKind: stop.stopKind,
+                  sequence: stop.sequence,
+                  status: stop.status,
+                  stopName: stop.stopName,
+                ),
+              )
+              .toList(),
+          bookings: dto.bookings.map((booking) => booking.toDomain()).toList(),
+        ),
+      );
+    } catch (e) {
+      state = state.copyWith(
+        status: StartRouteRunStatus.failed,
+        error: _errorMessage(e, 'Could not start the route run.'),
+      );
+    }
+  }
+}
 
 // ---- Driver vehicles (for route posting) ----
 

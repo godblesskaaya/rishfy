@@ -220,13 +220,14 @@ class BookingEntity extends Equatable {
       }.contains(effectiveJourneyState);
 
   bool get canDriverMarkArrived => const <String>{
+        'driver_approaching',
+      }.contains(effectiveJourneyState);
+  bool get canDriverStartTrip => const <String>{
         'confirmed',
         'walking_to_pickup',
         'waiting_for_driver',
-        'driver_approaching',
       }.contains(effectiveJourneyState);
   bool get canDriverMarkBoarded => const <String>{
-        'confirmed',
         'driver_arrived',
       }.contains(effectiveJourneyState);
   bool get canDriverMarkDroppedOff => const <String>{
@@ -264,6 +265,9 @@ class BookingEntity extends Equatable {
       isPrePickupJourney ? pickupDisplayName : dropoffDisplayName;
 
   String get nextDriverActionLabel {
+    if (canDriverStartTrip) {
+      return 'Start drive to pickup';
+    }
     if (canDriverMarkArrived) {
       return 'Arrive at pickup';
     }
@@ -274,10 +278,10 @@ class BookingEntity extends Equatable {
       return 'Confirm drop-off';
     }
     if (canParticipantCompleteJourney) {
-      return 'Passenger finishing final walk';
+      return 'Driving complete';
     }
     if (isCompleted) {
-      return 'Trip completed';
+      return 'Journey completed';
     }
     return journeyLabel;
   }
@@ -287,17 +291,17 @@ class BookingEntity extends Equatable {
       case 'pending':
         return 'Awaiting payment';
       case 'confirmed':
-        return 'Confirmed';
+        return 'Ready for pickup';
       case 'walking_to_pickup':
         return 'Walk to pickup';
       case 'waiting_for_driver':
         return 'Waiting for driver';
       case 'driver_approaching':
-        return 'Driver approaching';
+        return 'Driving to pickup';
       case 'driver_arrived':
         return 'Driver arrived';
       case 'boarded':
-        return 'Boarded';
+        return 'Passenger onboard';
       case 'in_transit':
         return 'In transit';
       case 'approaching_dropoff':
@@ -307,7 +311,7 @@ class BookingEntity extends Equatable {
       case 'walking_to_destination':
         return 'Walk to destination';
       case 'completed':
-        return 'Completed';
+        return 'Journey completed';
       case 'no_show':
         return 'No show';
       case 'cancelled':

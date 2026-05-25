@@ -136,6 +136,16 @@ final Provider<AsyncValue<BookingEntity?>> activeDriverJourneyProvider =
   return asyncBookings.whenData(_selectDriverJourney);
 });
 
+final FutureProviderFamily<List<BookingEntity>, String>
+    driverRouteBookingsProvider =
+    FutureProviderFamily<List<BookingEntity>, String>(
+  (Ref ref, String routeId) async {
+    final BookingRemoteDataSource ds = ref.read(bookingDataSourceProvider);
+    final List<BookingDto> dtos = await ds.listDriverRouteOperations(routeId);
+    return dtos.map((BookingDto d) => d.toDomain()).toList();
+  },
+);
+
 /// Computed weekly stats for the driver from completed bookings.
 class DriverEarningsStats {
   const DriverEarningsStats({

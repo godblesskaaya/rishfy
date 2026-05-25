@@ -54,7 +54,7 @@ describe('Notification consumers', () => {
         'passenger.boarded',
         'booking.journey_completed',
         'booking.no_show',
-        'driver.location.updated',
+        'driver.location_updated',
         'driver.arrived',
       ]),
     }));
@@ -161,11 +161,11 @@ describe('Notification consumers', () => {
     );
   });
 
-  it('parses driver.location.updated envelopes without enqueueing notifications', async () => {
+  it('parses driver.location_updated envelopes without enqueueing notifications', async () => {
     await startNotificationConsumers({} as never);
 
     await eachMessageHandler!({
-      topic: 'driver.location.updated',
+      topic: 'driver.location_updated',
       message: {
         value: Buffer.from(JSON.stringify({
           event_id: 'evt-2',

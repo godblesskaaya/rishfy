@@ -24,6 +24,11 @@ cp .env.example .env
 npm run dev
 ```
 
+Push prerequisites:
+- Set either `FIREBASE_SERVICE_ACCOUNT_JSON` or `FIREBASE_SERVICE_ACCOUNT_PATH`
+- If the service account JSON does not include `project_id`, also set `FIREBASE_PROJECT_ID`
+- In repo-local docker compose, replace `infrastructure/secrets/fcm_service_account.json` with a real Firebase Admin SDK service account before testing push delivery
+
 ## Testing
 
 ```bash

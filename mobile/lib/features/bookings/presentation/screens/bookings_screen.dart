@@ -34,7 +34,7 @@ class _DriverBookingsView extends ConsumerWidget {
       length: 3,
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('Passenger trips'),
+          title: const Text('Driver operations'),
           bottom: const TabBar(
             tabs: <Tab>[
               Tab(text: 'Upcoming'),
@@ -72,23 +72,23 @@ class _DriverBookingsView extends ConsumerWidget {
                   bookings: upcoming,
                   role: _BookingRole.driver,
                   icon: Icons.directions_car_outlined,
-                  emptyTitle: 'No upcoming passengers',
+                  emptyTitle: 'No upcoming driving tasks',
                   emptySubtitle:
-                      'Post a route and passengers will book automatically',
+                      'Post a route and active rider operations will appear here',
                   onRefresh: () => ref.refresh(myDriverBookingsProvider.future),
                 ),
                 _BookingsTab(
                   bookings: past,
                   role: _BookingRole.driver,
                   icon: Icons.history,
-                  emptyTitle: 'No completed trips yet',
+                  emptyTitle: 'No completed driving tasks yet',
                   onRefresh: () => ref.refresh(myDriverBookingsProvider.future),
                 ),
                 _BookingsTab(
                   bookings: cancelled,
                   role: _BookingRole.driver,
                   icon: Icons.cancel_outlined,
-                  emptyTitle: 'No cancelled bookings',
+                  emptyTitle: 'No cancelled driving tasks',
                   onRefresh: () => ref.refresh(myDriverBookingsProvider.future),
                 ),
               ],

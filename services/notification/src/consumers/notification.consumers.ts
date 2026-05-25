@@ -128,7 +128,7 @@ const TOPICS = [
   'booking.rated',
   'payment.completed',
   'payment.failed',
-  'driver.location.updated',
+  'driver.location_updated',
   'driver.arrived',
 ];
 
@@ -515,7 +515,7 @@ async function routeEvent(topic: string, payload: EventPayload, redis: IORedis):
     return;
   }
 
-  if (topic === 'driver.location.updated') {
+  if (topic === 'driver.location_updated') {
     const d = unwrapEventData<DriverLocationPayload>(payload);
     logger.debug({
       eventType,

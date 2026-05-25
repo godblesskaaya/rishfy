@@ -194,7 +194,10 @@ class DriverBroadcastNotifier extends StateNotifier<DriverBroadcastState> {
     distanceFilter: 5,
   );
 
-  Future<void> startStreaming(String tripId) async {
+  Future<void> startStreaming({
+    required String bookingId,
+    String? tripId,
+  }) async {
     if (state.isStreaming) return;
 
     final LocationPermission perm = await Geolocator.checkPermission();
@@ -210,7 +213,8 @@ class DriverBroadcastNotifier extends StateNotifier<DriverBroadcastState> {
 
     final String? token = await _storage.readAccessToken();
     final Uri uri = Uri.parse(
-      '${Env.wsBaseUrl}/driver?trip_id=$tripId'
+      '${Env.wsBaseUrl}/driver?'
+      '${tripId != null ? 'trip_id=$tripId' : 'booking_id=$bookingId'}'
       '${token != null ? '&token=$token' : ''}',
     );
 
@@ -230,7 +234,7 @@ class DriverBroadcastNotifier extends StateNotifier<DriverBroadcastState> {
             'type': 'location',
             'driverId': _driverUserId,
             'driver_user_id': _driverUserId,
-            'trip_id': tripId,
+            if (tripId != null) 'trip_id': tripId,
             'lat': pos.latitude,
             'lng': pos.longitude,
             'bearing': pos.heading,

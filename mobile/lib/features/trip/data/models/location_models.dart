@@ -9,6 +9,7 @@ class DriverLocationUpdate {
     required this.speedKmh,
     required this.timestamp,
     this.tripId,
+    this.routeRunId,
     this.bookingId,
     this.journeyState,
     this.routeStatus,
@@ -18,6 +19,10 @@ class DriverLocationUpdate {
     this.etaToDropoffSeconds,
     this.etaApproximate,
     this.etaStale,
+    this.distanceToActiveStopMeters,
+    this.proximityState,
+    this.currentRouteFraction,
+    this.remainingRouteFraction,
   });
 
   final String driverUserId;
@@ -27,6 +32,7 @@ class DriverLocationUpdate {
   final double speedKmh;
   final DateTime timestamp;
   final String? tripId;
+  final String? routeRunId;
   final String? bookingId;
   final String? journeyState;
   final String? routeStatus;
@@ -36,6 +42,10 @@ class DriverLocationUpdate {
   final int? etaToDropoffSeconds;
   final bool? etaApproximate;
   final bool? etaStale;
+  final int? distanceToActiveStopMeters;
+  final String? proximityState;
+  final double? currentRouteFraction;
+  final double? remainingRouteFraction;
 
   factory DriverLocationUpdate.fromJson(Map<String, dynamic> j) =>
       DriverLocationUpdate(
@@ -48,19 +58,26 @@ class DriverLocationUpdate {
             ? _parseDateTime(j['timestamp'])
             : DateTime.now(),
         tripId: j['trip_id']?.toString() ?? j['tripId']?.toString(),
+        routeRunId: j['route_run_id']?.toString() ?? j['routeRunId']?.toString(),
         bookingId: j['booking_id']?.toString() ?? j['bookingId']?.toString(),
         journeyState: j['journey_state']?.toString() ?? j['state']?.toString(),
         routeStatus: j['route_status']?.toString(),
         stopLabel:
             j['stop_label']?.toString() ?? j['next_stop_label']?.toString(),
-        stopType: j['stop_type']?.toString() ?? j['next_stop_type']?.toString(),
-        etaToPickupSeconds: _toNullableInt(
-            j['eta_to_pickup_seconds'] ?? j['pickup_eta_seconds']),
-        etaToDropoffSeconds: _toNullableInt(
-          j['eta_to_dropoff_seconds'] ?? j['dropoff_eta_seconds'],
-        ),
+        stopType: j['stop_type']?.toString() ??
+            j['next_stop_type']?.toString() ??
+            j['active_stop_type']?.toString(),
+        etaToPickupSeconds: _resolvePickupEta(j),
+        etaToDropoffSeconds: _resolveDropoffEta(j),
         etaApproximate: _toBool(j['eta_approximate']),
         etaStale: _toBool(j['eta_stale']),
+        distanceToActiveStopMeters: _toNullableInt(
+          j['distance_to_active_stop_meters'],
+        ),
+        proximityState: j['proximity_state']?.toString(),
+        currentRouteFraction: _toNullableDouble(j['current_route_fraction']),
+        remainingRouteFraction:
+            _toNullableDouble(j['remaining_route_fraction']),
       );
 
   factory DriverLocationUpdate.fromBookingContext({
@@ -71,6 +88,7 @@ class DriverLocationUpdate {
     double heading = 0,
     double speedKmh = 0,
     String? tripId,
+    String? routeRunId,
     String? bookingId,
     String? journeyState,
     String? routeStatus,
@@ -80,6 +98,10 @@ class DriverLocationUpdate {
     int? etaToDropoffSeconds,
     bool? etaApproximate,
     bool? etaStale,
+    int? distanceToActiveStopMeters,
+    String? proximityState,
+    double? currentRouteFraction,
+    double? remainingRouteFraction,
   }) =>
       DriverLocationUpdate(
         driverUserId: driverUserId,
@@ -89,6 +111,7 @@ class DriverLocationUpdate {
         speedKmh: speedKmh,
         timestamp: timestamp,
         tripId: tripId,
+        routeRunId: routeRunId,
         bookingId: bookingId,
         journeyState: journeyState,
         routeStatus: routeStatus,
@@ -98,6 +121,10 @@ class DriverLocationUpdate {
         etaToDropoffSeconds: etaToDropoffSeconds,
         etaApproximate: etaApproximate,
         etaStale: etaStale,
+        distanceToActiveStopMeters: distanceToActiveStopMeters,
+        proximityState: proximityState,
+        currentRouteFraction: currentRouteFraction,
+        remainingRouteFraction: remainingRouteFraction,
       );
 
   static double _toDouble(dynamic value, {double fallback = 0.0}) {
@@ -119,6 +146,32 @@ class DriverLocationUpdate {
     if (value is int) return value;
     if (value is num) return value.toInt();
     if (value is String) return int.tryParse(value);
+    return null;
+  }
+
+  static int? _resolvePickupEta(Map<String, dynamic> json) {
+    final int? explicit = _toNullableInt(
+      json['eta_to_pickup_seconds'] ?? json['pickup_eta_seconds'],
+    );
+    if (explicit != null) {
+      return explicit;
+    }
+    if (json['active_stop_type']?.toString() == 'pickup') {
+      return _toNullableInt(json['eta_seconds']);
+    }
+    return null;
+  }
+
+  static int? _resolveDropoffEta(Map<String, dynamic> json) {
+    final int? explicit = _toNullableInt(
+      json['eta_to_dropoff_seconds'] ?? json['dropoff_eta_seconds'],
+    );
+    if (explicit != null) {
+      return explicit;
+    }
+    if (json['active_stop_type']?.toString() == 'dropoff') {
+      return _toNullableInt(json['eta_seconds']);
+    }
     return null;
   }
 
@@ -144,6 +197,7 @@ class DriverLocationUpdate {
 
   Map<String, dynamic> toJson() => <String, dynamic>{
         'tripId': tripId,
+        'routeRunId': routeRunId,
         'bookingId': bookingId,
         'lat': lat,
         'lng': lng,
@@ -158,5 +212,9 @@ class DriverLocationUpdate {
         'etaToDropoffSeconds': etaToDropoffSeconds,
         'etaApproximate': etaApproximate,
         'etaStale': etaStale,
+        'distanceToActiveStopMeters': distanceToActiveStopMeters,
+        'proximityState': proximityState,
+        'currentRouteFraction': currentRouteFraction,
+        'remainingRouteFraction': remainingRouteFraction,
       };
 }

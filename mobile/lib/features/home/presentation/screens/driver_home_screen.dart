@@ -110,13 +110,16 @@ class DriverHomeScreen extends ConsumerWidget {
               const SizedBox(height: 24),
 
               Text(
-                'Active passenger trip',
+                'Active driving task',
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.bold,
                     ),
               ),
               const SizedBox(height: 12),
-              _DriverJourneyCard(activeJourneyAsync: activeJourneyAsync),
+              _DriverJourneyCard(
+                activeJourneyAsync: activeJourneyAsync,
+                routesAsync: routesAsync,
+              ),
               const SizedBox(height: 24),
 
               // Post a route CTA
@@ -155,9 +158,13 @@ class DriverHomeScreen extends ConsumerWidget {
 }
 
 class _DriverJourneyCard extends StatelessWidget {
-  const _DriverJourneyCard({required this.activeJourneyAsync});
+  const _DriverJourneyCard({
+    required this.activeJourneyAsync,
+    required this.routesAsync,
+  });
 
   final AsyncValue<BookingEntity?> activeJourneyAsync;
+  final AsyncValue<List<RouteEntity>> routesAsync;
 
   @override
   Widget build(BuildContext context) {
@@ -196,20 +203,108 @@ class _DriverJourneyCard extends StatelessWidget {
     return activeJourneyAsync.when(
       loading: () => placeholder(
         icon: Icons.sync,
-        title: 'Checking active passenger trip',
-        subtitle: 'We are loading the next journey you need to manage.',
+        title: 'Checking active driving task',
+        subtitle: 'We are loading the next trip you need to operate.',
       ),
       error: (Object error, _) => placeholder(
         icon: Icons.error_outline,
-        title: 'Could not load passenger trip',
+        title: 'Could not load driving task',
         subtitle: error.toString(),
       ),
       data: (BookingEntity? booking) {
         if (booking == null) {
-          return placeholder(
-            icon: Icons.route,
-            title: 'No active passenger stop',
-            subtitle: 'Confirmed and live passenger journeys will appear here.',
+          final RouteEntity? nextRoute = routesAsync.maybeWhen(
+            data: (List<RouteEntity> routes) {
+              final List<RouteEntity> eligible = routes
+                  .where((RouteEntity route) =>
+                      route.status != 'cancelled' &&
+                      route.departureDatetime.isAfter(
+                        DateTime.now().subtract(const Duration(hours: 1)),
+                      ))
+                  .toList()
+                ..sort(
+                  (RouteEntity a, RouteEntity b) =>
+                      a.departureDatetime.compareTo(b.departureDatetime),
+                );
+              return eligible.isEmpty ? null : eligible.first;
+            },
+            orElse: () => null,
+          );
+
+          if (nextRoute == null) {
+            return placeholder(
+              icon: Icons.route,
+              title: 'No active driving task',
+              subtitle:
+                  'Confirmed pickup and live drop-off work will appear here.',
+            );
+          }
+
+          return InkWell(
+            borderRadius: BorderRadius.circular(AppConstants.radiusLg),
+            onTap: () => unawaited(context.push('/routes/${nextRoute.routeId}')),
+            child: Container(
+              padding: const EdgeInsets.all(AppConstants.spaceLg),
+              decoration: BoxDecoration(
+                border: Border.all(color: scheme.outlineVariant),
+                borderRadius: BorderRadius.circular(AppConstants.radiusLg),
+                gradient: LinearGradient(
+                  colors: <Color>[
+                    scheme.tertiaryContainer,
+                    scheme.surface,
+                  ],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Row(
+                    children: <Widget>[
+                      Icon(Icons.alt_route, color: scheme.primary),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Next route operation',
+                          style: Theme.of(context)
+                              .textTheme
+                              .titleSmall
+                              ?.copyWith(fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                      const Icon(Icons.chevron_right),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    '${nextRoute.originName} -> ${nextRoute.destinationName}',
+                    style: Theme.of(context).textTheme.bodyLarge,
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Departure ${DateFormat('d MMM | HH:mm').format(nextRoute.departureDatetime.toLocal())}',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    '${nextRoute.availableSeats}/${nextRoute.totalSeats} seats open • ${nextRoute.vehiclePlate}',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    'No rider is currently driving your live workspace. Open the route to manage departures and route details.',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
+                  ),
+                ],
+              ),
+            ),
           );
         }
 
@@ -219,6 +314,8 @@ class _DriverJourneyCard extends StatelessWidget {
             booking.etaToPickupSeconds ?? booking.etaToDropoffSeconds;
         final String stopLabel =
             booking.isPrePickupJourney ? 'Pickup stop' : 'Drop-off stop';
+        final String taskTitle = _driverTaskTitle(booking);
+        final String taskSubtitle = _driverTaskSubtitle(booking);
 
         return InkWell(
           borderRadius: BorderRadius.circular(AppConstants.radiusLg),
@@ -246,7 +343,7 @@ class _DriverJourneyCard extends StatelessWidget {
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        booking.journeyLabel,
+                        taskTitle,
                         style: Theme.of(context).textTheme.titleSmall?.copyWith(
                               fontWeight: FontWeight.bold,
                             ),
@@ -257,38 +354,50 @@ class _DriverJourneyCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 10),
                 Text(
-                  '${booking.originName ?? 'Route'} â†’ '
+                  '${booking.originName ?? 'Route'} -> '
                   '${booking.destinationName ?? ''}',
                   style: Theme.of(context).textTheme.bodyLarge,
                 ),
-                const SizedBox(height: 6),
+                const SizedBox(height: 8),
                 Text(
-                  booking.passengerDisplayName,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  '$stopLabel: $focusLabel',
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  'Next action: $nextAction',
+                  taskSubtitle,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: scheme.onSurfaceVariant,
                       ),
                 ),
-                if (eta != null) ...<Widget>[
-                  const SizedBox(height: 6),
-                  Text(
-                    'ETA ${_formatEta(eta)}${booking.etaApproximate == true ? ' approx.' : ''}',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: scheme.onSurfaceVariant,
-                        ),
-                  ),
-                ],
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: <Widget>[
+                    _JourneyBadge(
+                      icon: Icons.person_outline,
+                      label: 'Rider',
+                      value: booking.passengerDisplayName,
+                    ),
+                    _JourneyBadge(
+                      icon: booking.isPrePickupJourney
+                          ? Icons.place_outlined
+                          : Icons.flag_outlined,
+                      label: stopLabel,
+                      value: focusLabel,
+                    ),
+                    if (eta != null)
+                      _JourneyBadge(
+                        icon: Icons.schedule,
+                        label: 'ETA',
+                        value:
+                            '${_formatEta(eta)}${booking.etaApproximate == true ? ' approx.' : ''}',
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  'Next driver action: $nextAction',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
+                ),
                 const SizedBox(height: 10),
                 Text(
                   _driverHint(booking),
@@ -305,19 +414,69 @@ class _DriverJourneyCard extends StatelessWidget {
   }
 
   String _driverHint(BookingEntity booking) {
+    if (booking.canDriverStartTrip) {
+      return 'Begin the drive to ${booking.pickupDisplayName} and keep the pickup stop visible while you approach.';
+    }
     if (booking.canDriverMarkArrived) {
-      return 'Navigate to the pickup stop and confirm arrival when the passenger can see you.';
+      return 'Reach the pickup stop and confirm arrival once the rider can identify your vehicle.';
     }
     if (booking.canDriverMarkBoarded) {
-      return 'The pickup stop is active. Confirm boarding once the passenger is seated.';
+      return 'The pickup stop is active. Confirm boarding only after the rider is seated and ready to depart.';
     }
     if (booking.canDriverMarkDroppedOff) {
-      return 'Keep the fixed route visible and confirm drop-off at the passenger stop.';
+      return 'Stay on the live route to ${booking.dropoffDisplayName} and confirm drop-off when the rider alights.';
     }
     if (booking.canParticipantCompleteJourney) {
-      return 'Driving work is done. The passenger is finishing the final walking leg.';
+      return 'Your driving work is complete. The rider is finishing the last on-foot segment.';
     }
-    return 'Open the trip to review the latest booking context.';
+    if (booking.isCompleted) {
+      return 'This trip is complete. Open it if you need the final summary.';
+    }
+    return 'Open the trip workspace to review the latest operational context.';
+  }
+
+  String _driverTaskTitle(BookingEntity booking) {
+    if (booking.canDriverStartTrip) {
+      return 'Drive to pickup';
+    }
+    if (booking.canDriverMarkArrived) {
+      return 'Arrive at pickup';
+    }
+    if (booking.canDriverMarkBoarded) {
+      return 'Board rider';
+    }
+    if (booking.canDriverMarkDroppedOff) {
+      return 'Drive to drop-off';
+    }
+    if (booking.canParticipantCompleteJourney) {
+      return 'Drop-off complete';
+    }
+    if (booking.isCompleted) {
+      return 'Trip complete';
+    }
+    return 'Active driving task';
+  }
+
+  String _driverTaskSubtitle(BookingEntity booking) {
+    if (booking.canDriverStartTrip) {
+      return 'You have an assigned rider and can start approaching the pickup stop now.';
+    }
+    if (booking.canDriverMarkArrived) {
+      return 'Stay visible to the rider and confirm when you are at the meeting point.';
+    }
+    if (booking.canDriverMarkBoarded) {
+      return 'Pickup is live. Complete boarding before leaving the stop.';
+    }
+    if (booking.canDriverMarkDroppedOff) {
+      return 'The rider is onboard. Keep the route and ETA visible through drop-off.';
+    }
+    if (booking.canParticipantCompleteJourney) {
+      return 'The vehicle portion is done and the rider is finishing on foot.';
+    }
+    if (booking.isCompleted) {
+      return 'This booking has no remaining driver actions.';
+    }
+    return 'Open the task to check the latest trip state.';
   }
 
   String _formatEta(int seconds) {
@@ -325,6 +484,53 @@ class _DriverJourneyCard extends StatelessWidget {
       return '${seconds}s';
     }
     return '${(seconds / 60).ceil()}m';
+  }
+}
+
+class _JourneyBadge extends StatelessWidget {
+  const _JourneyBadge({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: scheme.surface.withValues(alpha: 0.7),
+        borderRadius: BorderRadius.circular(AppConstants.radiusMd),
+        border: Border.all(color: scheme.outlineVariant),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Icon(icon, size: 16, color: scheme.primary),
+          const SizedBox(width: 6),
+          Text(
+            '$label: ',
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
+          ),
+          Flexible(
+            child: Text(
+              value,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 

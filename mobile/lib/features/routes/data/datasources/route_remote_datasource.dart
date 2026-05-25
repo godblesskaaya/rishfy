@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 
+import '../../../bookings/data/models/booking_models.dart';
 import '../models/route_models.dart';
 
 class RouteRemoteDataSource {
@@ -114,6 +115,18 @@ class RouteRemoteDataSource {
     return RouteDto.fromJson(payload as Map<String, dynamic>);
   }
 
+  Future<RouteOperationsDto> getRouteOperations(String routeId) async {
+    final Response<Map<String, dynamic>> res =
+        await _dio.get<Map<String, dynamic>>('/api/v1/routes/$routeId/operations');
+    return RouteOperationsDto.fromJson(res.data ?? <String, dynamic>{});
+  }
+
+  Future<RouteOperationsDto> startRouteRun(String routeId) async {
+    final Response<Map<String, dynamic>> res =
+        await _dio.post<Map<String, dynamic>>('/api/v1/routes/$routeId/start-run');
+    return RouteOperationsDto.fromJson(res.data ?? <String, dynamic>{});
+  }
+
   Future<RouteDto> createRoute(CreateRouteRequest req) async {
     final Response<Map<String, dynamic>> res =
         await _dio.post<Map<String, dynamic>>(
@@ -144,4 +157,102 @@ class RouteRemoteDataSource {
     final dynamic payload = res.data?['route'] ?? res.data;
     return RouteDto.fromJson(payload as Map<String, dynamic>);
   }
+}
+
+class RouteOperationsDto {
+  const RouteOperationsDto({
+    required this.route,
+    required this.activeRun,
+    required this.runStops,
+    required this.bookings,
+  });
+
+  final RouteDto route;
+  final RouteRunDto? activeRun;
+  final List<RouteRunStopDto> runStops;
+  final List<BookingDto> bookings;
+
+  factory RouteOperationsDto.fromJson(Map<String, dynamic> json) {
+    final dynamic routePayload = json['route'] ?? json;
+    final List<dynamic> rawBookings =
+        json['bookings'] as List<dynamic>? ?? <dynamic>[];
+    final List<dynamic> rawRunStops =
+        json['run_stops'] as List<dynamic>? ?? <dynamic>[];
+    return RouteOperationsDto(
+      route: RouteDto.fromJson(routePayload as Map<String, dynamic>),
+      activeRun: json['active_run'] is Map<String, dynamic>
+          ? RouteRunDto.fromJson(json['active_run'] as Map<String, dynamic>)
+          : null,
+      runStops: rawRunStops
+          .map(
+            (dynamic item) =>
+                RouteRunStopDto.fromJson(item as Map<String, dynamic>),
+          )
+          .toList(),
+      bookings: rawBookings
+          .map((dynamic item) => BookingDto.fromJson(item as Map<String, dynamic>))
+          .toList(),
+    );
+  }
+}
+
+class RouteRunDto {
+  const RouteRunDto({
+    required this.runId,
+    required this.routeId,
+    required this.driverUserId,
+    required this.status,
+    this.startedAt,
+    this.currentStopIndex = 0,
+  });
+
+  final String runId;
+  final String routeId;
+  final String driverUserId;
+  final String status;
+  final DateTime? startedAt;
+  final int currentStopIndex;
+
+  factory RouteRunDto.fromJson(Map<String, dynamic> json) => RouteRunDto(
+        runId: json['id']?.toString() ?? json['run_id']?.toString() ?? '',
+        routeId: json['route_id']?.toString() ?? '',
+        driverUserId: json['driver_id']?.toString() ?? '',
+        status: json['status']?.toString() ?? 'scheduled',
+        startedAt: json['started_at'] != null
+            ? DateTime.tryParse(json['started_at'].toString())
+            : null,
+        currentStopIndex: json['current_stop_index'] is num
+            ? (json['current_stop_index'] as num).toInt()
+            : 0,
+      );
+}
+
+class RouteRunStopDto {
+  const RouteRunStopDto({
+    required this.stopId,
+    required this.routeRunId,
+    required this.bookingId,
+    required this.stopKind,
+    required this.sequence,
+    required this.status,
+    this.stopName,
+  });
+
+  final String stopId;
+  final String routeRunId;
+  final String bookingId;
+  final String stopKind;
+  final int sequence;
+  final String status;
+  final String? stopName;
+
+  factory RouteRunStopDto.fromJson(Map<String, dynamic> json) => RouteRunStopDto(
+        stopId: json['id']?.toString() ?? '',
+        routeRunId: json['route_run_id']?.toString() ?? '',
+        bookingId: json['booking_id']?.toString() ?? '',
+        stopKind: json['stop_kind']?.toString() ?? 'pickup',
+        sequence: json['sequence'] is num ? (json['sequence'] as num).toInt() : 0,
+        status: json['status']?.toString() ?? 'pending',
+        stopName: json['stop_name']?.toString(),
+      );
 }

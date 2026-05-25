@@ -84,7 +84,8 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
           } else if (isDriver) {
             GoRouter.of(this.context).go('/bookings');
           }
-        } else if (actionLabel == 'board passenger' &&
+        } else if ((actionLabel == 'start drive to pickup' ||
+                actionLabel == 'board passenger') &&
             mounted &&
             isDriver &&
             !_driverBroadcastRequested) {
@@ -93,7 +94,10 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
               await ref.read(bookingDetailProvider(widget.bookingId).future);
           await ref
               .read(driverBroadcastProvider.notifier)
-              .startStreaming(updatedBooking.journeyStreamId);
+              .startStreaming(
+                bookingId: updatedBooking.bookingId,
+                tripId: updatedBooking.tripId,
+              );
         }
       } else if (next.status == TripActionStatus.failed && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -132,7 +136,10 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
             unawaited(
               ref
                   .read(driverBroadcastProvider.notifier)
-                  .startStreaming(booking.journeyStreamId),
+                  .startStreaming(
+                    bookingId: booking.bookingId,
+                    tripId: booking.tripId,
+                  ),
             );
           });
         }
@@ -286,7 +293,7 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Passenger trip'),
+        title: const Text('Driver trip'),
         actions: <Widget>[
           IconButton(
             icon: const Icon(Icons.emergency, color: Colors.red),
@@ -313,7 +320,11 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
             bottom: 0,
             child: _DriverJourneySheet(
               booking: booking,
+              liveUpdate: tracking.latest,
               actionState: actionState,
+              onStart: () => ref
+                  .read(journeyActionProvider.notifier)
+                  .start(widget.bookingId),
               onArrive: () => ref
                   .read(journeyActionProvider.notifier)
                   .arrivePickup(widget.bookingId),
@@ -663,6 +674,28 @@ class _PassengerJourneyPanel extends StatelessWidget {
       );
     }
 
+    if (update?.distanceToActiveStopMeters != null) {
+      details.add(
+        _InfoRow(
+          icon: Icons.route,
+          label: booking.isPrePickupJourney
+              ? 'Distance to pickup'
+              : 'Distance to drop-off',
+          value: _formatDistance(update!.distanceToActiveStopMeters!),
+        ),
+      );
+    }
+
+    if (update?.remainingRouteFraction != null) {
+      details.add(
+        _InfoRow(
+          icon: Icons.timeline,
+          label: 'Trip progress',
+          value: _formatProgress(update!.remainingRouteFraction!),
+        ),
+      );
+    }
+
     if (booking.etaStale == true) {
       details.add(
         const _InfoRow(
@@ -801,6 +834,18 @@ class _PassengerJourneyPanel extends StatelessWidget {
     return '${(seconds / 60).ceil()}m';
   }
 
+  String _formatDistance(int meters) {
+    if (meters >= 1000) {
+      return '${(meters / 1000).toStringAsFixed(1)} km';
+    }
+    return '$meters m';
+  }
+
+  String _formatProgress(double remainingFraction) {
+    final int percent = ((1 - remainingFraction).clamp(0, 1) * 100).round();
+    return '$percent% complete';
+  }
+
   String _formatWalk(int? distanceMeters, int? timeSeconds) {
     final List<String> parts = <String>[];
     if (distanceMeters != null) {
@@ -833,7 +878,9 @@ class _PassengerJourneyPanel extends StatelessWidget {
 class _DriverJourneySheet extends StatelessWidget {
   const _DriverJourneySheet({
     required this.booking,
+    required this.liveUpdate,
     required this.actionState,
+    required this.onStart,
     required this.onArrive,
     required this.onBoard,
     required this.onDropoff,
@@ -841,7 +888,9 @@ class _DriverJourneySheet extends StatelessWidget {
   });
 
   final BookingEntity booking;
+  final DriverLocationUpdate? liveUpdate;
   final TripActionState actionState;
+  final VoidCallback onStart;
   final VoidCallback onArrive;
   final VoidCallback onBoard;
   final VoidCallback onDropoff;
@@ -851,7 +900,9 @@ class _DriverJourneySheet extends StatelessWidget {
   Widget build(BuildContext context) {
     final ColorScheme scheme = Theme.of(context).colorScheme;
     final bool isLoading = actionState.status == TripActionStatus.loading;
-    final int? eta = booking.etaToPickupSeconds ?? booking.etaToDropoffSeconds;
+    final int? eta = booking.isPrePickupJourney
+        ? (liveUpdate?.etaToPickupSeconds ?? booking.etaToPickupSeconds)
+        : (liveUpdate?.etaToDropoffSeconds ?? booking.etaToDropoffSeconds);
 
     String nextActionLabel() {
       return booking.nextDriverActionLabel;
@@ -859,6 +910,7 @@ class _DriverJourneySheet extends StatelessWidget {
 
     VoidCallback? primaryAction() {
       if (isLoading) return null;
+      if (booking.canDriverStartTrip) return onStart;
       if (booking.canDriverMarkArrived) return onArrive;
       if (booking.canDriverMarkBoarded) return onBoard;
       if (booking.canDriverMarkDroppedOff) return onDropoff;
@@ -923,7 +975,7 @@ class _DriverJourneySheet extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
                   Text(
-                    'Passenger',
+                    'Rider',
                     style: Theme.of(context).textTheme.labelLarge?.copyWith(
                           fontWeight: FontWeight.w700,
                         ),
@@ -994,6 +1046,43 @@ class _DriverJourneySheet extends StatelessWidget {
                 value:
                     '${_formatEta(eta)}${booking.etaApproximate == true ? ' approx.' : ''}',
               ),
+            if (liveUpdate?.distanceToActiveStopMeters != null)
+              _InfoRow(
+                icon: Icons.route,
+                label: booking.isPrePickupJourney
+                    ? 'Distance to pickup'
+                    : 'Distance to drop-off',
+                value: _formatDistance(liveUpdate!.distanceToActiveStopMeters!),
+              ),
+            if (liveUpdate?.remainingRouteFraction != null)
+              _InfoRow(
+                icon: Icons.timeline,
+                label: 'Trip progress',
+                value: _formatProgress(liveUpdate!.remainingRouteFraction!),
+              ),
+            if (liveUpdate != null)
+              _InfoRow(
+                icon: Icons.update,
+                label: 'Last live update',
+                value: _timeAgo(liveUpdate!.timestamp),
+              ),
+            if (liveUpdate == null &&
+                booking.driverLat != null &&
+                booking.driverLng != null &&
+                booking.driverLocationUpdatedAt != null)
+              _InfoRow(
+                icon: Icons.update,
+                label: 'Last live update',
+                value: _timeAgo(booking.driverLocationUpdatedAt!),
+              ),
+            if (booking.driverLat != null &&
+                booking.driverLng != null &&
+                booking.etaStale == true)
+              const _InfoRow(
+                icon: Icons.warning_amber_rounded,
+                label: 'ETA quality',
+                value: 'Live tracking is active, but ETA confidence is low right now.',
+              ),
             const SizedBox(height: AppConstants.spaceMd),
             Text(
               'Next action: ${nextActionLabel()}',
@@ -1057,17 +1146,20 @@ class _DriverJourneySheet extends StatelessWidget {
   }
 
   String _driverSheetHint(BookingEntity booking) {
+    if (booking.canDriverStartTrip) {
+      return 'Start the drive to ${booking.pickupDisplayName} and keep live tracking active while you approach the rider.';
+    }
     if (booking.canDriverMarkArrived) {
-      return 'Reach the passenger pickup stop and confirm arrival once you are at the meeting point.';
+      return 'Reach ${booking.pickupDisplayName} and confirm arrival once the rider can identify you at the pickup point.';
     }
     if (booking.canDriverMarkBoarded) {
-      return 'The pickup stop is active. Confirm boarding only after the passenger is seated.';
+      return 'The rider is at the pickup point. Confirm boarding only after they are seated and ready to depart.';
     }
     if (booking.canDriverMarkDroppedOff) {
-      return 'Drive the fixed route to the passenger drop-off stop and confirm once they alight.';
+      return 'Follow the live trip route to ${booking.dropoffDisplayName} and confirm drop-off once the rider has alighted.';
     }
     if (booking.canParticipantCompleteJourney) {
-      return 'Driving work is complete. The passenger is finishing the last walking leg.';
+      return 'Your driving portion is complete. The rider is finishing the last walking segment on foot.';
     }
     return 'No operational action is pending for this booking.';
   }
@@ -1077,6 +1169,26 @@ class _DriverJourneySheet extends StatelessWidget {
       return '${seconds}s';
     }
     return '${(seconds / 60).ceil()}m';
+  }
+
+  String _formatDistance(int meters) {
+    if (meters >= 1000) {
+      return '${(meters / 1000).toStringAsFixed(1)} km';
+    }
+    return '$meters m';
+  }
+
+  String _formatProgress(double remainingFraction) {
+    final int percent = ((1 - remainingFraction).clamp(0, 1) * 100).round();
+    return '$percent% complete';
+  }
+
+  String _timeAgo(DateTime timestamp) {
+    final int seconds = DateTime.now().difference(timestamp).inSeconds;
+    if (seconds < 60) {
+      return '${seconds}s ago';
+    }
+    return '${(seconds / 60).floor()}m ago';
   }
 }
 
@@ -1089,22 +1201,28 @@ class _JourneyPhaseStrip extends StatelessWidget {
   final String state;
   final bool isDriver;
 
-  static const List<({String key, String label})> _steps =
-      <({String key, String label})>[
-    (key: 'confirmed', label: 'Pickup'),
-    (key: 'driver_arrived', label: 'Arrived'),
-    (key: 'in_transit', label: 'Onboard'),
-    (key: 'walking_to_destination', label: 'Final walk'),
-    (key: 'completed', label: 'Done'),
-  ];
-
   @override
   Widget build(BuildContext context) {
     final ColorScheme scheme = Theme.of(context).colorScheme;
     final int activeIndex = _activeIndex(state);
+    final List<({String key, String label})> steps = isDriver
+        ? const <({String key, String label})>[
+            (key: 'confirmed', label: 'To pickup'),
+            (key: 'driver_arrived', label: 'At pickup'),
+            (key: 'in_transit', label: 'On route'),
+            (key: 'walking_to_destination', label: 'Drop-off'),
+            (key: 'completed', label: 'Done'),
+          ]
+        : const <({String key, String label})>[
+            (key: 'confirmed', label: 'Pickup'),
+            (key: 'driver_arrived', label: 'Arrived'),
+            (key: 'in_transit', label: 'Onboard'),
+            (key: 'walking_to_destination', label: 'Final walk'),
+            (key: 'completed', label: 'Done'),
+          ];
 
     return Row(
-      children: List<Widget>.generate(_steps.length, (int index) {
+      children: List<Widget>.generate(steps.length, (int index) {
         final bool completed = index < activeIndex;
         final bool active = index == activeIndex;
         final Color color =
@@ -1112,7 +1230,7 @@ class _JourneyPhaseStrip extends StatelessWidget {
 
         return Expanded(
           child: Padding(
-            padding: EdgeInsets.only(right: index == _steps.length - 1 ? 0 : 8),
+            padding: EdgeInsets.only(right: index == steps.length - 1 ? 0 : 8),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
@@ -1125,7 +1243,7 @@ class _JourneyPhaseStrip extends StatelessWidget {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  _steps[index].label,
+                  steps[index].label,
                   style: Theme.of(context).textTheme.labelSmall?.copyWith(
                         color: active || completed
                             ? scheme.onSurface
