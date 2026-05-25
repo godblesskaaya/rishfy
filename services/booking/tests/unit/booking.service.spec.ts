@@ -57,6 +57,7 @@ const { refundPayment } = await import('../../src/clients/payment.grpc.client.js
 const { releaseSeats } = await import('../../src/clients/route.grpc.client.js');
 const { startTrackedTrip, completeTrackedTrip } = await import('../../src/clients/location.grpc.client.js');
 const {
+  publishBookingCompleted,
   publishBookingEmergency,
   publishBookingJourneyCompleted,
   publishBookingNoShow,
@@ -125,7 +126,9 @@ function makeRepo() {
     appendEvent: vi.fn().mockResolvedValue(undefined),
     markPaymentRefunded: vi.fn(),
     markDriverArrived: vi.fn(),
+    startTrip: vi.fn(),
     boardPassenger: vi.fn(),
+    listByRouteForDriver: vi.fn(),
     dropoffPassenger: vi.fn(),
     completeJourney: vi.fn(),
     completeLegacyTrip: vi.fn(),
@@ -303,42 +306,94 @@ describe('BookingService journey actions', () => {
 });
 
 describe('BookingService legacy trip actions', () => {
-  it('keeps startTrip as a legacy alias for boarding', async () => {
+  it('moves a confirmed booking into the driver approach phase', async () => {
     const repo = makeRepo();
-    const readyToBoard = { ...baseBooking, journey_state: 'driver_arrived' as const };
-    const boarded = { ...readyToBoard, journey_state: 'in_transit' as const, trip_id: 'trip-1', boarded_at: new Date() };
-    repo.findById.mockResolvedValue(readyToBoard);
-    repo.boardPassenger.mockResolvedValue(boarded);
+    const readyToStart = { ...baseBooking, journey_state: 'confirmed' as const };
+    const approaching = {
+      ...readyToStart,
+      journey_state: 'driver_approaching' as const,
+    };
+    repo.findById.mockResolvedValue(readyToStart);
+    repo.startTrip.mockResolvedValue(approaching);
 
     const svc = new BookingService(repo as never);
     const result = await svc.startTrip('booking-1', 'driver-1');
 
-    expect(result.journey_state).toBe('in_transit');
-    expect(repo.boardPassenger).toHaveBeenCalledWith('booking-1', 'trip-1');
+    expect(result.journey_state).toBe('driver_approaching');
+    expect(repo.startTrip).toHaveBeenCalledWith('booking-1');
+    expect(vi.mocked(publishTripStarted)).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps completeTrip as a legacy compatibility close-out path', async () => {
+  it('uses completeTrip as a legacy alias for driver dropoff while transport is active', async () => {
     const repo = makeRepo();
     const activeBooking = { ...baseBooking, journey_state: 'in_transit' as const, trip_id: 'trip-1' };
-    const completed = {
+    const droppedOff = {
       ...activeBooking,
-      status: 'completed' as const,
-      journey_state: 'completed' as const,
-      completed_at: new Date(),
-      journey_completed_at: new Date(),
+      journey_state: 'walking_to_destination' as const,
       trip_completed_at: new Date(),
       dropped_off_at: new Date(),
     };
     repo.findById.mockResolvedValue(activeBooking);
-    repo.completeLegacyTrip.mockResolvedValue(completed);
+    repo.dropoffPassenger.mockResolvedValue(droppedOff);
+
+    const svc = new BookingService(repo as never);
+    const result = await svc.completeTrip('booking-1', 'driver-1');
+
+    expect(result.journey_state).toBe('walking_to_destination');
+    expect(repo.dropoffPassenger).toHaveBeenCalledWith('booking-1');
+    expect(repo.completeLegacyTrip).not.toHaveBeenCalled();
+    expect(repo.completeJourney).not.toHaveBeenCalled();
+    expect(vi.mocked(completeTrackedTrip)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(publishTripCompleted)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(publishBookingJourneyCompleted)).not.toHaveBeenCalled();
+    expect(vi.mocked(publishBookingCompleted)).not.toHaveBeenCalled();
+  });
+
+  it('uses completeTrip as a legacy alias for final journey completion after dropoff', async () => {
+    const repo = makeRepo();
+    const walking = { ...baseBooking, journey_state: 'walking_to_destination' as const, trip_id: 'trip-1' };
+    const completed = {
+      ...walking,
+      status: 'completed' as const,
+      journey_state: 'completed' as const,
+      completed_at: new Date(),
+      journey_completed_at: new Date(),
+    };
+    repo.findById.mockResolvedValue(walking);
+    repo.completeJourney.mockResolvedValue(completed);
 
     const svc = new BookingService(repo as never);
     const result = await svc.completeTrip('booking-1', 'driver-1');
 
     expect(result.status).toBe('completed');
-    expect(repo.completeLegacyTrip).toHaveBeenCalledWith('booking-1');
-    expect(vi.mocked(completeTrackedTrip)).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(publishTripCompleted)).toHaveBeenCalledTimes(1);
+    expect(repo.completeJourney).toHaveBeenCalledWith('booking-1');
+    expect(repo.dropoffPassenger).not.toHaveBeenCalled();
+    expect(repo.completeLegacyTrip).not.toHaveBeenCalled();
+    expect(vi.mocked(completeTrackedTrip)).not.toHaveBeenCalled();
+    expect(vi.mocked(publishTripCompleted)).not.toHaveBeenCalled();
+    expect(vi.mocked(publishBookingJourneyCompleted)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(publishBookingCompleted)).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('BookingService.listDriverRouteOperations', () => {
+  it('prioritizes live operational bookings for a route', async () => {
+    const repo = makeRepo();
+    repo.listByRouteForDriver.mockResolvedValue([
+      { ...baseBooking, id: 'booking-3', journey_state: 'completed' as const },
+      { ...baseBooking, id: 'booking-2', journey_state: 'confirmed' as const },
+      { ...baseBooking, id: 'booking-1', journey_state: 'driver_arrived' as const },
+    ]);
+
+    const svc = new BookingService(repo as never);
+    const result = await svc.listDriverRouteOperations('route-1', 'driver-1');
+
+    expect(repo.listByRouteForDriver).toHaveBeenCalledWith('route-1', 'driver-1');
+    expect(result.map((booking) => booking.id)).toEqual([
+      'booking-1',
+      'booking-2',
+      'booking-3',
+    ]);
   });
 });
 

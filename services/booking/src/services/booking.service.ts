@@ -28,7 +28,6 @@ const ARRIVE_PICKUP_STATES: readonly ActionJourneyState[] = [null, 'confirmed', 
 const BOARD_PASSENGER_STATES: readonly ActionJourneyState[] = ['driver_arrived'];
 const NO_SHOW_STATES: readonly ActionJourneyState[] = ['driver_arrived'];
 const IN_VEHICLE_STATES: readonly ActionJourneyState[] = [LEGACY_BOARDED_STATE, NORMALIZED_IN_TRANSIT_STATE];
-const LEGACY_COMPLETABLE_STATES: readonly ActionJourneyState[] = ['boarded', 'in_transit', 'walking_to_destination', 'dropped_off'];
 const JOURNEY_COMPLETION_STATES: readonly ActionJourneyState[] = ['walking_to_destination', 'dropped_off'];
 
 export interface CreateBookingParams {
@@ -301,64 +300,45 @@ export class BookingService {
   }
 
   async startTrip(bookingId: string, driverId: string): Promise<BookingRow> {
-    return this.boardPassenger(bookingId, driverId);
+    const booking = await this.getBookingForDriverAction(bookingId, driverId);
+    this.ensureJourneyState(booking, [null, 'confirmed'], 'Cannot start trip in current state');
+
+    const updated = await this.repo.startTrip(bookingId);
+    if (!updated) {
+      throw Object.assign(new Error('Cannot start trip in current state'), { code: 'INVALID_STATE' });
+    }
+
+    await this.repo.appendEvent(bookingId, 'booking.trip_started', {
+      driverId,
+      passengerId: updated.passenger_id,
+      tripId: updated.trip_id ?? '',
+      timestamp: new Date().toISOString(),
+      journeyState: updated.journey_state,
+    });
+    await publishTripStarted({
+      bookingId,
+      driverId,
+      passengerId: updated.passenger_id,
+      timestamp: new Date().toISOString(),
+    });
+
+    return this.normalizeBooking(updated)!;
   }
 
   async completeTrip(bookingId: string, driverId: string): Promise<BookingRow> {
     const booking = await this.getBookingForDriverAction(bookingId, driverId);
-    this.ensureJourneyState(booking, LEGACY_COMPLETABLE_STATES, 'Cannot complete trip in current state');
-    const updated = await this.repo.completeLegacyTrip(bookingId);
-    if (!updated) throw Object.assign(new Error('Cannot complete trip in current state'), { code: 'INVALID_STATE' });
+    const journeyState = this.normalizeJourneyState(booking.journey_state);
 
-    await this.repo.appendEvent(bookingId, 'passenger.dropped_off', { driverId, tripId: updated.trip_id ?? booking.trip_id ?? '' });
-    await this.repo.appendEvent(bookingId, 'passenger.walking_to_destination', { driverId, tripId: updated.trip_id ?? booking.trip_id ?? '' });
-    await this.repo.appendEvent(bookingId, 'booking.journey_completed', { actorId: driverId, completedBy: 'driver' });
-    await this.repo.appendEvent(bookingId, 'trip.completed', { driverId, tripId: updated.trip_id ?? booking.trip_id ?? '' });
-
-    const timestamp = new Date().toISOString();
-    await publishPassengerDroppedOff({
-      bookingId,
-      routeId: updated.route_id,
-      passengerId: updated.passenger_id,
-      driverId,
-      tripId: updated.trip_id ?? booking.trip_id ?? '',
-      timestamp,
-    });
-    await publishPassengerWalkingToDestination({
-      bookingId,
-      routeId: updated.route_id,
-      passengerId: updated.passenger_id,
-      driverId,
-      tripId: updated.trip_id ?? booking.trip_id ?? '',
-      timestamp,
-    });
-    await publishTripCompleted({
-      bookingId, driverId, passengerId: updated.passenger_id,
-      driverEarnings: parseFloat(updated.driver_earnings),
-      timestamp,
-    });
-    await publishBookingJourneyCompleted({
-      bookingId,
-      routeId: updated.route_id,
-      passengerId: updated.passenger_id,
-      driverId,
-      tripId: updated.trip_id ?? booking.trip_id ?? '',
-      timestamp,
-    });
-    await publishBookingCompleted({
-      bookingId, routeId: updated.route_id, passengerId: updated.passenger_id, driverId,
-      totalPrice: parseFloat(updated.total_price), driverEarnings: parseFloat(updated.driver_earnings),
-      timestamp,
-    });
-    if (updated.trip_id ?? booking.trip_id) {
-      await completeTrackedTrip({
-        tripId: updated.trip_id ?? booking.trip_id ?? '',
-        endLat: updated.dropoff_lat ?? updated.pickup_lat ?? 0,
-        endLng: updated.dropoff_lng ?? updated.pickup_lng ?? 0,
-      });
+    // Preserve the legacy endpoint while keeping lifecycle progression coherent:
+    // active transport advances to dropoff, and only the post-dropoff states can close the journey.
+    if (IN_VEHICLE_STATES.includes(journeyState)) {
+      return this.dropoffPassenger(bookingId, driverId);
+    }
+    if (JOURNEY_COMPLETION_STATES.includes(journeyState)) {
+      return this.completeJourney(bookingId, driverId);
     }
 
-    return this.normalizeBooking(updated)!;
+    throw Object.assign(new Error('Cannot complete trip in current state'), { code: 'INVALID_STATE' });
   }
 
   async arrivePickup(bookingId: string, driverId: string): Promise<BookingRow> {
@@ -390,6 +370,8 @@ export class BookingService {
         driverUserId: driverId,
         startLat: booking.pickup_lat ?? booking.dropoff_lat ?? 0,
         startLng: booking.pickup_lng ?? booking.dropoff_lng ?? 0,
+        destinationLat: booking.dropoff_lat ?? booking.pickup_lat ?? 0,
+        destinationLng: booking.dropoff_lng ?? booking.pickup_lng ?? 0,
       })
       ?? uuidv4();
     const updated = await this.repo.boardPassenger(bookingId, tripId);
@@ -553,6 +535,42 @@ export class BookingService {
   async listMyBookings(userId: string, role: 'passenger' | 'driver', limit = 20, offset = 0): Promise<BookingRow[]> {
     if (role === 'driver') return this.repo.listByDriver(userId, limit, offset);
     return this.repo.listByPassenger(userId, limit, offset);
+  }
+
+  async listDriverRouteOperations(routeId: string, driverId: string): Promise<BookingRow[]> {
+    const bookings = await this.repo.listByRouteForDriver(routeId, driverId);
+    const priority = (booking: BookingRow): number => {
+      const state = this.normalizeJourneyState(booking.journey_state);
+      switch (state) {
+        case 'driver_arrived':
+          return 0;
+        case 'driver_approaching':
+          return 1;
+        case 'confirmed':
+        case null:
+          return 2;
+        case 'in_transit':
+          return 3;
+        case 'dropped_off':
+        case 'walking_to_destination':
+          return 4;
+        case 'completed':
+          return 5;
+        case 'no_show':
+        case 'cancelled':
+          return 6;
+        default:
+          return 7;
+      }
+    };
+
+    return [...bookings].sort((a, b) => {
+      const delta = priority(a) - priority(b);
+      if (delta != 0) return delta;
+      const aTime = a.estimated_pickup_time ?? a.created_at;
+      const bTime = b.estimated_pickup_time ?? b.created_at;
+      return aTime.getTime() - bTime.getTime();
+    });
   }
 
   async handlePaymentCompleted(bookingId: string, paymentId: string): Promise<void> {

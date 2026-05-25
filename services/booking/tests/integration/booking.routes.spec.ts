@@ -20,6 +20,7 @@ const {
     completeJourney: vi.fn(),
     submitRating: vi.fn(),
     listMyBookings: vi.fn(),
+    listDriverRouteOperations: vi.fn(),
     getBooking: vi.fn(),
   },
   scheduleExpiryMock: vi.fn(),
@@ -222,8 +223,8 @@ describe('booking routes integration', () => {
     expect(res.json()).toMatchObject({ error: 'INVALID_STATE' });
   });
 
-  it('POST /bookings/:id/start-trip preserves the legacy alias for boarding', async () => {
-    serviceMock.startTrip.mockResolvedValue({ id: 'booking-1', journey_state: 'in_transit', trip_id: 'trip-1' });
+  it('POST /bookings/:id/start-trip moves the booking into the driver approach phase', async () => {
+    serviceMock.startTrip.mockResolvedValue({ id: 'booking-1', journey_state: 'driver_approaching', trip_id: null });
 
     const res = await app.inject({
       method: 'POST',
@@ -233,6 +234,51 @@ describe('booking routes integration', () => {
 
     expect(res.statusCode).toBe(200);
     expect(serviceMock.startTrip).toHaveBeenCalledWith('booking-1', 'driver-1');
+  });
+
+  it('GET /bookings/routes/:routeId/operations returns the driver route workspace bookings', async () => {
+    const routeId = '11111111-1111-1111-1111-111111111111';
+    serviceMock.listDriverRouteOperations.mockResolvedValue([
+      { id: 'booking-1', route_id: routeId, journey_state: 'driver_arrived' },
+      { id: 'booking-2', route_id: routeId, journey_state: 'confirmed' },
+    ]);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/v1/bookings/routes/${routeId}/operations`,
+      headers: { 'x-user-id': 'driver-1' },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(serviceMock.listDriverRouteOperations).toHaveBeenCalledWith(routeId, 'driver-1');
+    expect(res.json()).toMatchObject({
+      bookings: [
+        { id: 'booking-1', route_id: routeId, journey_state: 'driver_arrived' },
+        { id: 'booking-2', route_id: routeId, journey_state: 'confirmed' },
+      ],
+    });
+  });
+
+  it('GET /bookings/routes/:routeId/operations returns 401 without x-user-id', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/v1/bookings/routes/route-1/operations',
+    });
+
+    expect(res.statusCode).toBe(401);
+  });
+
+  it('GET /bookings/routes/:routeId/operations returns 400 for a non-UUID route id', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/v1/bookings/routes/not-a-uuid/operations',
+      headers: { 'x-user-id': 'driver-1' },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({
+      error: 'VALIDATION_ERROR',
+    });
   });
 
   it('POST /bookings/:id/complete-trip preserves the legacy completion alias', async () => {

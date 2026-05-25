@@ -54,6 +54,23 @@ describe('BookingRepository journey transitions', () => {
     );
   });
 
+  it('moves a confirmed booking into the driver approach phase', async () => {
+    const pool = {
+      query: vi.fn().mockResolvedValue({
+        rows: [{ id: 'booking-1', journey_state: 'driver_approaching' }],
+      }),
+    };
+    const repo = new BookingRepository(pool as never);
+
+    const result = await repo.startTrip('booking-1');
+
+    expect(result).toEqual({ id: 'booking-1', journey_state: 'driver_approaching' });
+    expect(pool.query).toHaveBeenCalledWith(
+      expect.stringContaining("journey_state='driver_approaching'"),
+      ['booking-1'],
+    );
+  });
+
   it('boards the passenger and stores trip linkage', async () => {
     const pool = {
       query: vi.fn().mockResolvedValue({

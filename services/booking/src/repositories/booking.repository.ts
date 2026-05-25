@@ -197,6 +197,18 @@ export class BookingRepository {
     return rows.map((row) => normalizeBookingRow(row)!);
   }
 
+  async listByRouteForDriver(routeId: string, driverId: string): Promise<BookingRow[]> {
+    const { rows } = await this.pool.query<BookingRow>(
+      `SELECT * FROM bookings
+       WHERE route_id=$1
+         AND driver_id=$2
+         AND status NOT IN ('driver_cancelled','passenger_cancelled')
+       ORDER BY created_at ASC`,
+      [routeId, driverId],
+    );
+    return rows.map((row) => normalizeBookingRow(row)!);
+  }
+
   async confirm(id: string, paymentId: string): Promise<BookingRow> {
     const { rows } = await this.pool.query<BookingRow>(
       `UPDATE bookings SET status='confirmed', payment_status='paid', payment_id=$2,
@@ -256,6 +268,19 @@ export class BookingRepository {
        WHERE id=$1
          AND status='confirmed'
          AND (journey_state IS NULL OR journey_state IN ('confirmed', 'driver_approaching'))
+       RETURNING *`,
+      [id],
+    );
+    return normalizeBookingRow(rows[0] ?? null);
+  }
+
+  async startTrip(id: string): Promise<BookingRow | null> {
+    const { rows } = await this.pool.query<BookingRow>(
+      `UPDATE bookings
+       SET journey_state='driver_approaching', updated_at=now()
+       WHERE id=$1
+         AND status='confirmed'
+         AND (journey_state IS NULL OR journey_state='confirmed')
        RETURNING *`,
       [id],
     );

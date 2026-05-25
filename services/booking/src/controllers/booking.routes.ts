@@ -6,9 +6,11 @@ import { scheduleExpiry, getExpiryQueue } from '../jobs/booking-expiry.worker.js
 import IORedis from 'ioredis';
 import { config } from '../config.js';
 import { logger } from '../logger.js';
+import { z } from 'zod';
 
 const service = new BookingService(new BookingRepository(pgPool));
 const redis = new IORedis(config.REDIS_URL, { maxRetriesPerRequest: null });
+const uuidParamSchema = z.object({ routeId: z.string().uuid() });
 
 export async function bookingRoutes(app: FastifyInstance): Promise<void> {
   // POST /api/v1/bookings — create booking (saga step 1)
@@ -86,6 +88,22 @@ export async function bookingRoutes(app: FastifyInstance): Promise<void> {
     const { limit = 20, offset = 0 } = query;
     const role = requestedRole === 'driver' ? 'driver' : 'passenger';
     const bookings = await service.listMyBookings(userId, role, limit, offset);
+    return reply.send({ bookings });
+  });
+
+  // GET /api/v1/bookings/routes/:routeId/operations — driver route workspace
+  app.get('/api/v1/bookings/routes/:routeId/operations', async (req, reply) => {
+    const userId = req.headers['x-user-id'] as string;
+    if (!userId) return reply.status(401).send({ error: 'UNAUTHORIZED' });
+    const parse = uuidParamSchema.safeParse(req.params);
+    if (!parse.success) {
+      return reply.status(400).send({
+        error: 'VALIDATION_ERROR',
+        message: 'routeId must be a valid UUID',
+      });
+    }
+    const { routeId } = parse.data;
+    const bookings = await service.listDriverRouteOperations(routeId, userId);
     return reply.send({ bookings });
   });
 

@@ -67,6 +67,8 @@ export async function startTrackedTrip(params: {
   driverUserId: string;
   startLat: number;
   startLng: number;
+  destinationLat?: number;
+  destinationLng?: number;
 }): Promise<string | null> {
   try {
     const response = await callUnary<StartTripGrpcResponse>('startTrip', {
@@ -77,6 +79,13 @@ export async function startTrackedTrip(params: {
         latitude: params.startLat,
         longitude: params.startLng,
       },
+      destinationLocation:
+        params.destinationLat != null && params.destinationLng != null
+            ? {
+                latitude: params.destinationLat,
+                longitude: params.destinationLng,
+              }
+            : undefined,
     });
     return response.trip?.tripId ?? response.trip?.trip_id ?? null;
   } catch (err) {
