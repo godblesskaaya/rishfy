@@ -116,32 +116,44 @@ class RouteRemoteDataSource {
   }
 
   Future<RouteOperationsDto> getRouteOperations(String routeId) async {
-    final Response<Map<String, dynamic>> res =
-        await _dio.get<Map<String, dynamic>>('/api/v1/routes/$routeId/operations');
+    final Response<Map<String, dynamic>> res = await _dio
+        .get<Map<String, dynamic>>('/api/v1/routes/$routeId/operations');
     return RouteOperationsDto.fromJson(res.data ?? <String, dynamic>{});
   }
 
   Future<RouteOperationsDto> startRouteRun(String routeId) async {
     final Response<Map<String, dynamic>> res =
-        await _dio.post<Map<String, dynamic>>('/api/v1/routes/$routeId/start-run');
+        await _dio.post<Map<String, dynamic>>(
+      '/api/v1/routes/$routeId/start-run',
+      data: <String, dynamic>{},
+    );
     return RouteOperationsDto.fromJson(res.data ?? <String, dynamic>{});
   }
 
   Future<RouteOperationsDto> advanceRouteStop(String routeId) async {
     final Response<Map<String, dynamic>> res =
-        await _dio.post<Map<String, dynamic>>('/api/v1/routes/$routeId/advance-stop');
+        await _dio.post<Map<String, dynamic>>(
+      '/api/v1/routes/$routeId/advance-stop',
+      data: <String, dynamic>{},
+    );
     return RouteOperationsDto.fromJson(res.data ?? <String, dynamic>{});
   }
 
   Future<RouteOperationsDto> completeRouteStop(String routeId) async {
     final Response<Map<String, dynamic>> res =
-        await _dio.post<Map<String, dynamic>>('/api/v1/routes/$routeId/complete-stop');
+        await _dio.post<Map<String, dynamic>>(
+      '/api/v1/routes/$routeId/complete-stop',
+      data: <String, dynamic>{},
+    );
     return RouteOperationsDto.fromJson(res.data ?? <String, dynamic>{});
   }
 
   Future<RouteOperationsDto> completeRouteRun(String routeId) async {
     final Response<Map<String, dynamic>> res =
-        await _dio.post<Map<String, dynamic>>('/api/v1/routes/$routeId/complete-run');
+        await _dio.post<Map<String, dynamic>>(
+      '/api/v1/routes/$routeId/complete-run',
+      data: <String, dynamic>{},
+    );
     return RouteOperationsDto.fromJson(res.data ?? <String, dynamic>{});
   }
 
@@ -208,7 +220,8 @@ class RouteOperationsDto {
           )
           .toList(),
       bookings: rawBookings
-          .map((dynamic item) => BookingDto.fromJson(item as Map<String, dynamic>))
+          .map((dynamic item) =>
+              BookingDto.fromJson(item as Map<String, dynamic>))
           .toList(),
     );
   }
@@ -264,12 +277,14 @@ class RouteRunStopDto {
   final String status;
   final String? stopName;
 
-  factory RouteRunStopDto.fromJson(Map<String, dynamic> json) => RouteRunStopDto(
+  factory RouteRunStopDto.fromJson(Map<String, dynamic> json) =>
+      RouteRunStopDto(
         stopId: json['id']?.toString() ?? '',
         routeRunId: json['route_run_id']?.toString() ?? '',
         bookingId: json['booking_id']?.toString() ?? '',
         stopKind: json['stop_kind']?.toString() ?? 'pickup',
-        sequence: json['sequence'] is num ? (json['sequence'] as num).toInt() : 0,
+        sequence:
+            json['sequence'] is num ? (json['sequence'] as num).toInt() : 0,
         status: json['status']?.toString() ?? 'pending',
         stopName: json['stop_name']?.toString(),
       );

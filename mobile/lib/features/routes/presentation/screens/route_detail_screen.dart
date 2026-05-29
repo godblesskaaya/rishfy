@@ -125,7 +125,7 @@ class _RouteDetailBodyState extends ConsumerState<_RouteDetailBody> {
             ],
             color: Colors.blue,
             width: 6,
-            patterns: const <PatternItem>[
+            patterns: <PatternItem>[
               PatternItem.dash(20),
               PatternItem.gap(10),
             ],
