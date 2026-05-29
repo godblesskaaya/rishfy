@@ -56,6 +56,19 @@ const MNO_MAP: Record<string, string> = {
   halopesa: 'Halopesa',
 };
 
+async function readJsonResponse<T>(res: Response, context: string): Promise<T> {
+  const body = await res.text();
+  if (!body.trim()) {
+    throw new Error(`${context} returned an empty response body`);
+  }
+
+  try {
+    return JSON.parse(body) as T;
+  } catch {
+    throw new Error(`${context} returned non-JSON response: ${body.slice(0, 240)}`);
+  }
+}
+
 export class AzampayProvider implements PaymentProvider {
   readonly name = 'azampay';
   private token: string | null = null;
@@ -77,7 +90,7 @@ export class AzampayProvider implements PaymentProvider {
       }),
     });
     if (!res.ok) throw new Error(`Azampay auth failed: ${res.status}`);
-    const data = (await res.json()) as AzampayTokenResponse;
+    const data = await readJsonResponse<AzampayTokenResponse>(res, 'Azampay auth');
     const accessToken = data.data?.accessToken ?? data.accessToken;
     const expire = data.data?.expire ?? data.expire;
     if (!accessToken || !expire) {
@@ -121,7 +134,7 @@ export class AzampayProvider implements PaymentProvider {
       throw new Error(`Azampay push failed (${res.status}): ${text}`);
     }
 
-    const data = (await res.json()) as AzampayMNOCheckoutResponse;
+    const data = await readJsonResponse<AzampayMNOCheckoutResponse>(res, 'Azampay checkout');
 
     return {
       providerReference: data.transactionId ?? data.reference ?? null,
@@ -144,8 +157,12 @@ export class AzampayProvider implements PaymentProvider {
     const data = JSON.parse(payload.rawBody) as AzampayCallback;
     const rawStatus = String(data.transactionStatus ?? data.transactionstatus ?? data.success ?? '').toLowerCase();
     const success = rawStatus === 'true' || rawStatus === '1' || rawStatus === 'success' || rawStatus === 'successful';
+    const internalReference = data.utilityref ?? data.reference;
+    if (!internalReference) {
+      throw new Error('Azampay callback missing internal reference');
+    }
     return {
-      internalReference: data.utilityref ?? data.reference,
+      internalReference,
       providerReference: data.transactionId ?? data.reference ?? '',
       status: success ? 'completed' : 'failed',
       failureCode: success ? undefined : 'PROVIDER_DECLINED',

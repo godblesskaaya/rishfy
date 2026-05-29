@@ -94,4 +94,27 @@ describe('payment routes integration', () => {
       error: 'INVALID_SIGNATURE',
     });
   });
+
+  it('hides provider internals when initiation fails', async () => {
+    serviceMock.initiatePayment.mockRejectedValue(new Error('TypeError: fetch failed'));
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/payments/initiate',
+      headers: { 'x-user-id': 'user-1' },
+      payload: {
+        bookingId: 'booking-1',
+        amountTzs: 5000,
+        method: 'mpesa_tz',
+        payerPhone: '+255700000001',
+        idempotencyKey: 'idem-1',
+      },
+    });
+
+    expect(res.statusCode).toBe(502);
+    expect(res.json()).toEqual({
+      error: 'PAYMENT_INITIATION_FAILED',
+      message: 'Payment provider is temporarily unavailable. Please try again.',
+    });
+  });
 });

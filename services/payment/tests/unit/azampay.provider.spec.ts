@@ -28,7 +28,7 @@ describe('AzampayProvider', () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({
         ok: true,
-        json: async () => ({
+        text: async () => JSON.stringify({
           data: {
             accessToken: 'token-123',
             expire: '2030-01-01T00:00:00Z',
@@ -37,7 +37,7 @@ describe('AzampayProvider', () => {
       })
       .mockResolvedValueOnce({
         ok: true,
-        json: async () => ({
+        text: async () => JSON.stringify({
           transactionId: 'txn-123',
           message: 'Success',
         }),
@@ -66,6 +66,44 @@ describe('AzampayProvider', () => {
         }),
       }),
     );
+  });
+
+  it('reports empty checkout responses without leaking JSON parser errors', async () => {
+    const { AzampayProvider } = await import('../../src/providers/azampay.provider.js');
+    const provider = new AzampayProvider({
+      baseUrl: 'https://sandbox.azampay.co.tz',
+      authUrl: 'https://authenticator-sandbox.azampay.co.tz',
+      appName: 'app',
+      clientId: 'client-id',
+      clientSecret: 'client-secret',
+      apiKey: 'api-key',
+      callbackSecret: 'callback-secret',
+    });
+
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        text: async () => JSON.stringify({
+          data: {
+            accessToken: 'token-123',
+            expire: '2030-01-01T00:00:00Z',
+          },
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        text: async () => '',
+      }));
+
+    await expect(provider.initiatePayment({
+      bookingId: 'booking-1',
+      userId: 'user-1',
+      amountTzs: 5000,
+      method: 'mpesa_tz',
+      payerPhone: '+255700000002',
+      idempotencyKey: 'idem-1',
+      internalReference: 'RSHFY-REF-1',
+    })).rejects.toThrow('Azampay checkout returned an empty response body');
   });
 
   it('parses callback success from transactionStatus field', async () => {
@@ -117,5 +155,27 @@ describe('AzampayProvider', () => {
       signature: '',
       rawBody: '{"message":"success"}',
     })).toBe(true);
+  });
+
+  it('rejects callbacks without an internal reference', async () => {
+    const { AzampayProvider } = await import('../../src/providers/azampay.provider.js');
+    const provider = new AzampayProvider({
+      baseUrl: 'https://sandbox.azampay.co.tz',
+      authUrl: 'https://authenticator-sandbox.azampay.co.tz',
+      appName: 'app',
+      clientId: 'client-id',
+      clientSecret: 'client-secret',
+      apiKey: 'api-key',
+      callbackSecret: 'callback-secret',
+    });
+
+    expect(() => provider.parseCallback({
+      provider: 'azampay',
+      signature: 'sig',
+      rawBody: JSON.stringify({
+        transactionStatus: 'Success',
+        transactionId: 'txn-1',
+      }),
+    })).toThrow('Azampay callback missing internal reference');
   });
 });

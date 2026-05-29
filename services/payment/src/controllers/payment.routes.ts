@@ -37,7 +37,10 @@ export async function paymentRoutes(app: FastifyInstance): Promise<void> {
       });
     } catch (err) {
       logger.error({ err }, 'POST /payments/initiate failed');
-      return reply.status(502).send({ error: 'PAYMENT_INITIATION_FAILED', message: String(err) });
+      return reply.status(502).send({
+        error: 'PAYMENT_INITIATION_FAILED',
+        message: 'Payment provider is temporarily unavailable. Please try again.',
+      });
     }
   });
 
