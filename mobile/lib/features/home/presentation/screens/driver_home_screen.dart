@@ -242,7 +242,8 @@ class _DriverJourneyCard extends StatelessWidget {
 
           return InkWell(
             borderRadius: BorderRadius.circular(AppConstants.radiusLg),
-            onTap: () => unawaited(context.push('/routes/${nextRoute.routeId}')),
+            onTap: () =>
+                unawaited(context.push('/routes/${nextRoute.routeId}')),
             child: Container(
               padding: const EdgeInsets.all(AppConstants.spaceLg),
               decoration: BoxDecoration(
@@ -427,7 +428,7 @@ class _DriverJourneyCard extends StatelessWidget {
       return 'Stay on the live route to ${booking.dropoffDisplayName} and confirm drop-off when the rider alights.';
     }
     if (booking.canParticipantCompleteJourney) {
-      return 'Your driving work is complete. The rider is finishing the last on-foot segment.';
+      return 'Drop-off is recorded. Continue toward your destination or the next passenger stop.';
     }
     if (booking.isCompleted) {
       return 'This trip is complete. Open it if you need the final summary.';
@@ -471,7 +472,7 @@ class _DriverJourneyCard extends StatelessWidget {
       return 'The rider is onboard. Keep the route and ETA visible through drop-off.';
     }
     if (booking.canParticipantCompleteJourney) {
-      return 'The vehicle portion is done and the rider is finishing on foot.';
+      return 'You can continue the route; this rider no longer needs a driver action.';
     }
     if (booking.isCompleted) {
       return 'This booking has no remaining driver actions.';

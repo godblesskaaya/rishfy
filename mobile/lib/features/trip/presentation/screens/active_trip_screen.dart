@@ -1,11 +1,14 @@
 import 'dart:async';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:google_polyline_algorithm/google_polyline_algorithm.dart';
 
+import '../../../../core/config/env.dart';
 import '../../../../core/constants/app_constants.dart';
 import '../../../../shared/providers/active_role_provider.dart';
 import '../../../../shared/widgets/primary_button.dart';
@@ -16,6 +19,93 @@ import '../../../routes/domain/entities/route_entity.dart';
 import '../../../routes/presentation/providers/route_provider.dart';
 import '../../data/models/location_models.dart';
 import '../providers/trip_provider.dart';
+
+enum _TripNavigationMode {
+  driving('driving', Icons.directions_car, 'Drive'),
+  walking('walking', Icons.directions_walk, 'Walk'),
+  bicycling('bicycling', Icons.directions_bike, 'Bike');
+
+  const _TripNavigationMode(this.apiValue, this.icon, this.label);
+
+  final String apiValue;
+  final IconData icon;
+  final String label;
+}
+
+class _TripNavigationLeg {
+  const _TripNavigationLeg({
+    required this.mode,
+    required this.points,
+    required this.distanceText,
+    required this.durationText,
+    required this.instructions,
+  });
+
+  final _TripNavigationMode mode;
+  final List<LatLng> points;
+  final String distanceText;
+  final String durationText;
+  final List<String> instructions;
+
+  String get firstInstruction =>
+      instructions.isEmpty ? 'Continue to the next stop.' : instructions.first;
+}
+
+class _TripNavigationState {
+  const _TripNavigationState._({
+    required this.isLoading,
+    this.leg,
+    this.error,
+  });
+
+  const _TripNavigationState.idle()
+      : this._(
+          isLoading: false,
+        );
+
+  const _TripNavigationState.loading()
+      : this._(
+          isLoading: true,
+        );
+
+  const _TripNavigationState.ready(_TripNavigationLeg leg)
+      : this._(
+          isLoading: false,
+          leg: leg,
+        );
+
+  const _TripNavigationState.failed(String error)
+      : this._(
+          isLoading: false,
+          error: error,
+        );
+
+  final bool isLoading;
+  final _TripNavigationLeg? leg;
+  final String? error;
+}
+
+class _NavigationRequest {
+  const _NavigationRequest({
+    required this.origin,
+    required this.destination,
+    required this.mode,
+  });
+
+  final LatLng origin;
+  final LatLng destination;
+  final _TripNavigationMode mode;
+
+  String get cacheKey => <String>[
+        mode.apiValue,
+        _bucket(origin.latitude),
+        _bucket(origin.longitude),
+        _bucket(destination.latitude),
+        _bucket(destination.longitude),
+      ].join(':');
+
+  String _bucket(double value) => value.toStringAsFixed(4);
+}
 
 class ActiveTripScreen extends ConsumerStatefulWidget {
   const ActiveTripScreen({required this.bookingId, super.key});
@@ -32,9 +122,284 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
   bool _driverBroadcastRequested = false;
   bool _passengerTrackingRequested = false;
   String? _lastActionFeedback;
+  Position? _passengerPosition;
+  bool _loadingPassengerPosition = false;
+  _TripNavigationMode _passengerNavigationMode = _TripNavigationMode.walking;
+  _TripNavigationState _navigationState = const _TripNavigationState.idle();
+  String? _lastNavigationKey;
 
   void _onMapCreated(GoogleMapController controller) {
     _mapController = controller;
+  }
+
+  @override
+  void dispose() {
+    _mapController?.dispose();
+    super.dispose();
+  }
+
+  DriverTrackingState _trackingWithDriverPosition(
+    BookingEntity booking,
+    DriverTrackingState tracking,
+    DriverBroadcastState broadcast,
+  ) {
+    final Position? position = broadcast.lastPosition;
+    if (position == null) {
+      return tracking;
+    }
+
+    final DriverLocationUpdate live = DriverLocationUpdate.fromBookingContext(
+      driverUserId: booking.driverId ?? '',
+      lat: position.latitude,
+      lng: position.longitude,
+      heading: position.heading,
+      speedKmh: position.speed * 3.6,
+      timestamp: position.timestamp,
+      tripId: booking.tripId,
+      bookingId: booking.bookingId,
+      journeyState: booking.effectiveJourneyState,
+      routeStatus: booking.effectiveRouteStatus,
+      stopLabel: booking.isPrePickupJourney
+          ? booking.pickupDisplayName
+          : booking.dropoffDisplayName,
+      stopType: booking.isPrePickupJourney ? 'pickup' : 'dropoff',
+      etaToPickupSeconds: booking.etaToPickupSeconds,
+      etaToDropoffSeconds: booking.etaToDropoffSeconds,
+      etaApproximate: booking.etaApproximate,
+      etaStale: booking.etaStale,
+    );
+
+    final List<DriverLocationUpdate> history = <DriverLocationUpdate>[
+      ...tracking.history,
+      live,
+    ];
+    return tracking.copyWith(
+      latest: live,
+      history: history.length > 100
+          ? history.sublist(history.length - 100)
+          : history,
+      isConnected: broadcast.isStreaming || tracking.isConnected,
+      error: broadcast.error ?? tracking.error,
+    );
+  }
+
+  Future<void> _ensurePassengerPosition() async {
+    if (_loadingPassengerPosition || _passengerPosition != null) {
+      return;
+    }
+    _loadingPassengerPosition = true;
+    try {
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        if (mounted) {
+          setState(() {
+            _navigationState = const _TripNavigationState.failed(
+              'Location permission is needed for pickup navigation.',
+            );
+          });
+        }
+        return;
+      }
+      final Position position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() => _passengerPosition = position);
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _navigationState = const _TripNavigationState.failed(
+            'Could not read your current location.',
+          );
+        });
+      }
+    } finally {
+      _loadingPassengerPosition = false;
+    }
+  }
+
+  void _scheduleNavigationRefresh({
+    required BookingEntity booking,
+    required DriverTrackingState tracking,
+    required bool isDriver,
+  }) {
+    final _NavigationRequest? request = _navigationRequestFor(
+      booking: booking,
+      tracking: tracking,
+      isDriver: isDriver,
+    );
+    if (request == null) {
+      return;
+    }
+
+    final String key = request.cacheKey;
+    if (_lastNavigationKey == key ||
+        _navigationState.isLoading ||
+        Env.googleMapsApiKey.trim().isEmpty) {
+      return;
+    }
+
+    _lastNavigationKey = key;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      unawaited(_loadNavigation(request));
+    });
+  }
+
+  _NavigationRequest? _navigationRequestFor({
+    required BookingEntity booking,
+    required DriverTrackingState tracking,
+    required bool isDriver,
+  }) {
+    final double? targetLat = _navigationTargetLat(booking, isDriver);
+    final double? targetLng = _navigationTargetLng(booking, isDriver);
+    if (targetLat == null || targetLng == null) {
+      return null;
+    }
+
+    if (isDriver) {
+      final DriverLocationUpdate? latest = tracking.latest;
+      if (latest == null) {
+        return null;
+      }
+      return _NavigationRequest(
+        origin: LatLng(latest.lat, latest.lng),
+        destination: LatLng(targetLat, targetLng),
+        mode: _TripNavigationMode.driving,
+      );
+    }
+
+    if (!booking.isPrePickupJourney && !booking.isPostDropoffJourney) {
+      return null;
+    }
+    final Position? position = _passengerPosition;
+    if (position == null) {
+      unawaited(_ensurePassengerPosition());
+      return null;
+    }
+    return _NavigationRequest(
+      origin: LatLng(position.latitude, position.longitude),
+      destination: LatLng(targetLat, targetLng),
+      mode: _passengerNavigationMode,
+    );
+  }
+
+  double? _navigationTargetLat(BookingEntity booking, bool isDriver) {
+    if (booking.isPrePickupJourney) {
+      return booking.resolvedPickupLat;
+    }
+    if (isDriver) {
+      return booking.resolvedDropoffLat;
+    }
+    if (booking.isPostDropoffJourney) {
+      return booking.destinationLat ?? booking.resolvedDropoffLat;
+    }
+    return null;
+  }
+
+  double? _navigationTargetLng(BookingEntity booking, bool isDriver) {
+    if (booking.isPrePickupJourney) {
+      return booking.resolvedPickupLng;
+    }
+    if (isDriver) {
+      return booking.resolvedDropoffLng;
+    }
+    if (booking.isPostDropoffJourney) {
+      return booking.destinationLng ?? booking.resolvedDropoffLng;
+    }
+    return null;
+  }
+
+  Future<void> _loadNavigation(_NavigationRequest request) async {
+    setState(() => _navigationState = const _TripNavigationState.loading());
+    try {
+      final Response<Map<String, dynamic>> response =
+          await Dio().get<Map<String, dynamic>>(
+        'https://maps.googleapis.com/maps/api/directions/json',
+        queryParameters: <String, dynamic>{
+          'origin': '${request.origin.latitude},${request.origin.longitude}',
+          'destination':
+              '${request.destination.latitude},${request.destination.longitude}',
+          'mode': request.mode.apiValue,
+          'alternatives': false,
+          'key': Env.googleMapsApiKey,
+        },
+      );
+      final _TripNavigationLeg leg =
+          _parseNavigationLeg(response.data ?? <String, dynamic>{}, request);
+      if (!mounted) return;
+      setState(() => _navigationState = _TripNavigationState.ready(leg));
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _navigationState = const _TripNavigationState.failed(
+          'Navigation directions are unavailable right now.',
+        );
+      });
+    }
+  }
+
+  _TripNavigationLeg _parseNavigationLeg(
+    Map<String, dynamic> json,
+    _NavigationRequest request,
+  ) {
+    final List<dynamic> routes =
+        json['routes'] as List<dynamic>? ?? const <dynamic>[];
+    if (routes.isEmpty) {
+      throw StateError('No route returned');
+    }
+    final Map<String, dynamic> route = routes.first as Map<String, dynamic>;
+    final Map<String, dynamic>? overview =
+        route['overview_polyline'] as Map<String, dynamic>?;
+    final String encoded = overview?['points'] as String? ?? '';
+    final List<LatLng> points = encoded.isEmpty
+        ? <LatLng>[request.origin, request.destination]
+        : decodePolyline(encoded)
+            .map((List<num> point) =>
+                LatLng(point[0].toDouble(), point[1].toDouble()))
+            .toList();
+
+    final List<dynamic> legs =
+        route['legs'] as List<dynamic>? ?? const <dynamic>[];
+    final Map<String, dynamic> leg =
+        legs.isEmpty ? <String, dynamic>{} : legs.first as Map<String, dynamic>;
+    final String distanceText =
+        ((leg['distance'] as Map<String, dynamic>?)?['text'] as String?) ?? '';
+    final String durationText =
+        ((leg['duration'] as Map<String, dynamic>?)?['text'] as String?) ?? '';
+    final List<dynamic> steps = leg['steps'] as List<dynamic>? ?? const [];
+    final List<String> instructions = steps
+        .whereType<Map<String, dynamic>>()
+        .map((Map<String, dynamic> step) =>
+            _cleanInstruction(step['html_instructions']?.toString() ?? ''))
+        .where((String value) => value.isNotEmpty)
+        .take(4)
+        .toList();
+
+    return _TripNavigationLeg(
+      mode: request.mode,
+      points: points,
+      distanceText: distanceText,
+      durationText: durationText,
+      instructions: instructions,
+    );
+  }
+
+  String _cleanInstruction(String raw) {
+    return raw
+        .replaceAll(RegExp(r'<[^>]+>'), ' ')
+        .replaceAll('&nbsp;', ' ')
+        .replaceAll('&amp;', '&')
+        .replaceAll('&lt;', '<')
+        .replaceAll('&gt;', '>')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
   }
 
   void _panToDriver(DriverLocationUpdate update) {
@@ -88,6 +453,8 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
         ref.watch(bookingDetailProvider(widget.bookingId));
     final DriverTrackingState tracking =
         ref.watch(driverTrackingProvider(widget.bookingId));
+    final DriverBroadcastState driverBroadcast =
+        ref.watch(driverBroadcastProvider);
     final TripActionState actionState = ref.watch(journeyActionProvider);
 
     ref.listen<TripActionState>(journeyActionProvider,
@@ -125,9 +492,7 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
           _driverBroadcastRequested = true;
           final BookingEntity updatedBooking =
               await ref.read(bookingDetailProvider(widget.bookingId).future);
-          await ref
-              .read(driverBroadcastProvider.notifier)
-              .startStreaming(
+          await ref.read(driverBroadcastProvider.notifier).startStreaming(
                 bookingId: updatedBooking.bookingId,
                 tripId: updatedBooking.tripId,
               );
@@ -151,6 +516,9 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
         final RouteEntity? route = booking.routePolyline == null
             ? ref.watch(routeDetailProvider(booking.routeId)).valueOrNull
             : null;
+        final DriverTrackingState effectiveTracking = isDriver
+            ? _trackingWithDriverPosition(booking, tracking, driverBroadcast)
+            : tracking;
 
         if (booking.driverId != null) {
           ref
@@ -167,9 +535,7 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (!mounted) return;
             unawaited(
-              ref
-                  .read(driverBroadcastProvider.notifier)
-                  .startStreaming(
+              ref.read(driverBroadcastProvider.notifier).startStreaming(
                     bookingId: booking.bookingId,
                     tripId: booking.tripId,
                   ),
@@ -193,19 +559,31 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
           });
         }
 
-        if (tracking.latest != null) {
+        _scheduleNavigationRefresh(
+          booking: booking,
+          tracking: effectiveTracking,
+          isDriver: isDriver,
+        );
+
+        if (effectiveTracking.latest != null) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
-            _panToDriver(tracking.latest!);
-            _frameTripContext(booking, tracking);
+            _panToDriver(effectiveTracking.latest!);
+            _frameTripContext(booking, effectiveTracking);
           });
         }
 
         return isDriver
-            ? _buildDriverView(context, booking, tracking, route, actionState)
+            ? _buildDriverView(
+                context,
+                booking,
+                effectiveTracking,
+                route,
+                actionState,
+              )
             : _buildPassengerView(
                 context,
                 booking,
-                tracking,
+                effectiveTracking,
                 route,
                 actionState,
               );
@@ -242,85 +620,98 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
           ),
         ],
       ),
-      body: Column(
+      body: Stack(
         children: <Widget>[
-          Expanded(
-            flex: 3,
-            child: Stack(
-              children: <Widget>[
-                GoogleMap(
-                  initialCameraPosition:
-                      CameraPosition(target: initialPosition, zoom: 14),
-                  onMapCreated: _onMapCreated,
-                  markers: _buildMarkers(booking, tracking, false),
-                  polylines: _buildPolylines(booking, tracking, route),
-                  myLocationEnabled: true,
-                  myLocationButtonEnabled: false,
-                  zoomControlsEnabled: false,
-                  onCameraMoveStarted: () =>
-                      setState(() => _followDriver = false),
-                ),
-                Positioned(
-                  top: 12,
-                  left: 12,
-                  right: 12,
-                  child: _TripMapOverlay(
-                    booking: booking,
-                    update: tracking.latest,
-                    isDriver: false,
-                  ),
-                ),
-                if (!_followDriver && driverUpdate != null)
-                  Positioned(
-                    right: 16,
-                    bottom: 16,
-                    child: FloatingActionButton.small(
-                      heroTag: 'recenter_trip',
-                      onPressed: () {
-                        setState(() => _followDriver = true);
-                        _panToDriver(driverUpdate);
-                      },
-                      child: const Icon(Icons.my_location),
-                    ),
-                  ),
-                if (!tracking.isConnected && booking.isJourneyActive)
-                  Positioned(
-                    top: 8,
-                    left: 0,
-                    right: 0,
-                    child: Center(
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 4,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.orange,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: const Text(
-                          'Reconnecting to live driver location...',
-                          style: TextStyle(color: Colors.white, fontSize: 12),
-                        ),
-                      ),
-                    ),
-                  ),
-              ],
+          GoogleMap(
+            initialCameraPosition:
+                CameraPosition(target: initialPosition, zoom: 14),
+            onMapCreated: _onMapCreated,
+            markers: _buildMarkers(booking, tracking, false),
+            polylines: _buildPolylines(
+              booking,
+              tracking,
+              route,
+              _navigationState.leg,
+            ),
+            myLocationEnabled: true,
+            myLocationButtonEnabled: false,
+            zoomControlsEnabled: false,
+            onCameraMoveStarted: () => setState(() => _followDriver = false),
+          ),
+          Positioned(
+            top: 12,
+            left: 12,
+            right: 12,
+            child: _TripMapOverlay(
+              booking: booking,
+              update: tracking.latest,
+              isDriver: false,
+              navigation: _navigationState.leg,
             ),
           ),
-          Expanded(
-            flex: 2,
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(AppConstants.spaceMd),
-              child: _PassengerJourneyPanel(
-                booking: booking,
-                tracking: tracking,
-                actionState: actionState,
-                onCompleteJourney: () => ref
-                    .read(journeyActionProvider.notifier)
-                    .completeJourney(widget.bookingId),
+          if (!_followDriver && driverUpdate != null)
+            Positioned(
+              right: 16,
+              bottom: 136,
+              child: FloatingActionButton.small(
+                heroTag: 'recenter_trip',
+                onPressed: () {
+                  setState(() => _followDriver = true);
+                  _panToDriver(driverUpdate);
+                },
+                child: const Icon(Icons.my_location),
               ),
             ),
+          if (!tracking.isConnected && booking.isJourneyActive)
+            Positioned(
+              top: 8,
+              left: 0,
+              right: 0,
+              child: Center(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.orange,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Text(
+                    'Reconnecting to live driver location...',
+                    style: TextStyle(color: Colors.white, fontSize: 12),
+                  ),
+                ),
+              ),
+            ),
+          DraggableScrollableSheet(
+            minChildSize: 0.18,
+            initialChildSize: 0.34,
+            maxChildSize: 0.84,
+            snap: true,
+            snapSizes: const <double>[0.18, 0.34, 0.84],
+            builder: (BuildContext context, ScrollController scrollController) {
+              return _ResizableJourneySheet(
+                scrollController: scrollController,
+                child: _PassengerJourneyPanel(
+                  booking: booking,
+                  tracking: tracking,
+                  actionState: actionState,
+                  navigationState: _navigationState,
+                  navigationMode: _passengerNavigationMode,
+                  onNavigationModeChanged: (_TripNavigationMode mode) {
+                    setState(() {
+                      _passengerNavigationMode = mode;
+                      _lastNavigationKey = null;
+                      _navigationState = const _TripNavigationState.idle();
+                    });
+                  },
+                  onCompleteJourney: () => ref
+                      .read(journeyActionProvider.notifier)
+                      .completeJourney(widget.bookingId),
+                ),
+              );
+            },
           ),
         ],
       ),
@@ -357,7 +748,12 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
             myLocationButtonEnabled: false,
             zoomControlsEnabled: false,
             markers: _buildMarkers(booking, tracking, true),
-            polylines: _buildPolylines(booking, tracking, route),
+            polylines: _buildPolylines(
+              booking,
+              tracking,
+              route,
+              _navigationState.leg,
+            ),
           ),
           Positioned(
             top: 12,
@@ -367,30 +763,37 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
               booking: booking,
               update: tracking.latest,
               isDriver: true,
+              navigation: _navigationState.leg,
             ),
           ),
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: _DriverJourneySheet(
-              booking: booking,
-              liveUpdate: tracking.latest,
-              actionState: actionState,
-              onStart: () => ref
-                  .read(journeyActionProvider.notifier)
-                  .start(widget.bookingId),
-              onArrive: () => ref
-                  .read(journeyActionProvider.notifier)
-                  .arrivePickup(widget.bookingId),
-              onBoard: () => ref
-                  .read(journeyActionProvider.notifier)
-                  .boardPassenger(widget.bookingId),
-              onDropoff: () => ref
-                  .read(journeyActionProvider.notifier)
-                  .dropoffPassenger(widget.bookingId),
-              onNoShow: () => _markNoShow(),
-            ),
+          DraggableScrollableSheet(
+            minChildSize: 0.2,
+            initialChildSize: 0.38,
+            maxChildSize: 0.86,
+            snap: true,
+            snapSizes: const <double>[0.2, 0.38, 0.86],
+            builder: (BuildContext context, ScrollController scrollController) {
+              return _DriverJourneySheet(
+                booking: booking,
+                liveUpdate: tracking.latest,
+                actionState: actionState,
+                navigationState: _navigationState,
+                scrollController: scrollController,
+                onStart: () => ref
+                    .read(journeyActionProvider.notifier)
+                    .start(widget.bookingId),
+                onArrive: () => ref
+                    .read(journeyActionProvider.notifier)
+                    .arrivePickup(widget.bookingId),
+                onBoard: () => ref
+                    .read(journeyActionProvider.notifier)
+                    .boardPassenger(widget.bookingId),
+                onDropoff: () => ref
+                    .read(journeyActionProvider.notifier)
+                    .dropoffPassenger(widget.bookingId),
+                onNoShow: () => _markNoShow(),
+              );
+            },
           ),
         ],
       ),
@@ -471,8 +874,9 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
           markerId: const MarkerId('driver'),
           position: LatLng(driverLat, driverLng),
           rotation: driverHeading,
-          zIndex: 3,
-          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+          zIndexInt: 3,
+          icon:
+              BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
           infoWindow: InfoWindow(
             title: isDriver ? 'Your vehicle' : 'Driver',
             snippet: booking.driverName ?? '',
@@ -491,7 +895,7 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
             booking.resolvedPickupLat!,
             booking.resolvedPickupLng!,
           ),
-          zIndex: isActivePickup ? 2 : 1,
+          zIndexInt: isActivePickup ? 2 : 1,
           icon: BitmapDescriptor.defaultMarkerWithHue(
             isActivePickup
                 ? BitmapDescriptor.hueGreen
@@ -512,7 +916,7 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
             booking.resolvedDropoffLat!,
             booking.resolvedDropoffLng!,
           ),
-          zIndex: isActiveDropoff ? 2 : 1,
+          zIndexInt: isActiveDropoff ? 2 : 1,
           icon: BitmapDescriptor.defaultMarkerWithHue(
             isActiveDropoff
                 ? BitmapDescriptor.hueRed
@@ -547,6 +951,7 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
     BookingEntity booking,
     DriverTrackingState tracking,
     RouteEntity? route,
+    _TripNavigationLeg? navigation,
   ) {
     final Set<Polyline> polylines = <Polyline>{};
 
@@ -599,7 +1004,7 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
                 ],
                 color: Colors.blue,
                 width: 6,
-                patterns: const <PatternItem>[
+                patterns: <PatternItem>[
                   PatternItem.dash(20),
                   PatternItem.gap(10),
                 ],
@@ -610,6 +1015,18 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
       } catch (_) {
         // Keep the trip screen usable even if the backend route polyline is malformed.
       }
+    }
+
+    if (navigation != null && navigation.points.length >= 2) {
+      polylines.add(
+        Polyline(
+          polylineId: const PolylineId('navigation'),
+          points: navigation.points,
+          color: Colors.blue,
+          width: 7,
+          zIndex: 5,
+        ),
+      );
     }
 
     return polylines;
@@ -628,12 +1045,18 @@ class _PassengerJourneyPanel extends StatelessWidget {
     required this.booking,
     required this.tracking,
     required this.actionState,
+    required this.navigationState,
+    required this.navigationMode,
+    required this.onNavigationModeChanged,
     required this.onCompleteJourney,
   });
 
   final BookingEntity booking;
   final DriverTrackingState tracking;
   final TripActionState actionState;
+  final _TripNavigationState navigationState;
+  final _TripNavigationMode navigationMode;
+  final ValueChanged<_TripNavigationMode> onNavigationModeChanged;
   final VoidCallback onCompleteJourney;
 
   @override
@@ -720,6 +1143,20 @@ class _PassengerJourneyPanel extends StatelessWidget {
       ),
     ];
 
+    if (booking.isPrePickupJourney || booking.isPostDropoffJourney) {
+      details.add(const SizedBox(height: 12));
+      details.add(
+        _NavigationModeCard(
+          title: booking.isPrePickupJourney
+              ? 'Navigate to pickup'
+              : 'Navigate to destination',
+          state: navigationState,
+          selectedMode: navigationMode,
+          onModeChanged: onNavigationModeChanged,
+        ),
+      );
+    }
+
     if (booking.isPrePickupJourney &&
         (booking.pickupWalkingDistance != null ||
             booking.pickupWalkingTime != null)) {
@@ -778,9 +1215,7 @@ class _PassengerJourneyPanel extends StatelessWidget {
             if (update?.distanceToActiveStopMeters != null)
               _KpiPill(
                 icon: Icons.route,
-                label: booking.isPrePickupJourney
-                    ? 'Distance'
-                    : 'Remaining',
+                label: booking.isPrePickupJourney ? 'Distance' : 'Remaining',
                 value: _formatDistance(update!.distanceToActiveStopMeters!),
               ),
           ],
@@ -997,16 +1432,66 @@ class _PassengerJourneyPanel extends StatelessWidget {
   }
 }
 
+class _ResizableJourneySheet extends StatelessWidget {
+  const _ResizableJourneySheet({
+    required this.scrollController,
+    required this.child,
+  });
+
+  final ScrollController scrollController;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+    return Material(
+      elevation: 8,
+      borderRadius: const BorderRadius.vertical(
+        top: Radius.circular(AppConstants.radiusXl),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: SingleChildScrollView(
+        controller: scrollController,
+        padding: EdgeInsets.fromLTRB(
+          AppConstants.spaceLg,
+          AppConstants.spaceMd,
+          AppConstants.spaceLg,
+          AppConstants.spaceLg + MediaQuery.of(context).padding.bottom,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 12),
+                decoration: BoxDecoration(
+                  color: scheme.outlineVariant,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            child,
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _TripMapOverlay extends StatelessWidget {
   const _TripMapOverlay({
     required this.booking,
     required this.update,
     required this.isDriver,
+    required this.navigation,
   });
 
   final BookingEntity booking;
   final DriverLocationUpdate? update;
   final bool isDriver;
+  final _TripNavigationLeg? navigation;
 
   @override
   Widget build(BuildContext context) {
@@ -1022,56 +1507,224 @@ class _TripMapOverlay extends StatelessWidget {
     return Material(
       elevation: 3,
       borderRadius: BorderRadius.circular(AppConstants.radiusMd),
-      color: scheme.surface.withOpacity(0.96),
+      color: scheme.surface.withValues(alpha: 0.96),
       child: Padding(
         padding: const EdgeInsets.all(AppConstants.spaceMd),
-        child: Row(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            Container(
-              width: 38,
-              height: 38,
-              decoration: BoxDecoration(
-                color: scheme.primaryContainer,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(
-                booking.isPrePickupJourney ? Icons.pin_drop_outlined : Icons.flag_outlined,
-                color: scheme.primary,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Text(
-                    isDriver ? booking.nextDriverActionLabel : booking.journeyLabel,
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: scheme.onSurfaceVariant,
-                    ),
+            Row(
+              children: <Widget>[
+                Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    color: scheme.primaryContainer,
+                    borderRadius: BorderRadius.circular(12),
                   ),
-                  const SizedBox(height: 2),
+                  child: Icon(
+                    booking.isPrePickupJourney
+                        ? Icons.pin_drop_outlined
+                        : Icons.flag_outlined,
+                    color: scheme.primary,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        isDriver
+                            ? booking.nextDriverActionLabel
+                            : booking.journeyLabel,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        stopLabel,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (eta != null)
                   Text(
-                    stopLabel,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                    _formatEta(eta),
                     style: theme.textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w700,
+                      color: scheme.primary,
+                      fontWeight: FontWeight.w800,
                     ),
                   ),
+              ],
+            ),
+            if (navigation != null) ...<Widget>[
+              const SizedBox(height: 10),
+              Row(
+                children: <Widget>[
+                  Icon(navigation!.mode.icon, size: 18, color: scheme.primary),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      navigation!.firstInstruction,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  if (navigation!.durationText.isNotEmpty)
+                    Text(
+                      navigation!.durationText,
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: scheme.primary,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                 ],
               ),
-            ),
-            if (eta != null)
-              Text(
-                _formatEta(eta),
-                style: theme.textTheme.titleSmall?.copyWith(
-                  color: scheme.primary,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
+            ],
           ],
         ),
+      ),
+    );
+  }
+
+  String _formatEta(int seconds) {
+    if (seconds < 60) {
+      return '${seconds}s';
+    }
+    return '${(seconds / 60).ceil()}m';
+  }
+}
+
+class _NavigationModeCard extends StatelessWidget {
+  const _NavigationModeCard({
+    required this.title,
+    required this.state,
+    this.selectedMode,
+    this.onModeChanged,
+  });
+
+  final String title;
+  final _TripNavigationState state;
+  final _TripNavigationMode? selectedMode;
+  final ValueChanged<_TripNavigationMode>? onModeChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+    final _TripNavigationLeg? leg = state.leg;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(AppConstants.spaceMd),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(AppConstants.radiusMd),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Icon(Icons.navigation_outlined, color: scheme.primary),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  title,
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              if (state.isLoading)
+                const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+            ],
+          ),
+          if (selectedMode != null && onModeChanged != null) ...<Widget>[
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              children: _TripNavigationMode.values.map(
+                (_TripNavigationMode mode) {
+                  return ChoiceChip(
+                    avatar: Icon(mode.icon, size: 16),
+                    label: Text(mode.label),
+                    selected: selectedMode == mode,
+                    onSelected: (_) => onModeChanged!(mode),
+                  );
+                },
+              ).toList(),
+            ),
+          ],
+          const SizedBox(height: 10),
+          if (leg != null) ...<Widget>[
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: <Widget>[
+                if (leg.durationText.isNotEmpty)
+                  _KpiPill(
+                    icon: Icons.schedule,
+                    label: 'Time',
+                    value: leg.durationText,
+                  ),
+                if (leg.distanceText.isNotEmpty)
+                  _KpiPill(
+                    icon: Icons.route,
+                    label: 'Distance',
+                    value: leg.distanceText,
+                  ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Text(
+              leg.firstInstruction,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            if (leg.instructions.length > 1) ...<Widget>[
+              const SizedBox(height: 6),
+              Text(
+                leg.instructions.skip(1).take(2).join('  |  '),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ] else if (state.error != null) ...<Widget>[
+            Text(
+              state.error!,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: scheme.error,
+              ),
+            ),
+          ] else ...<Widget>[
+            Text(
+              'Preparing directions from your current location.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: scheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }
@@ -1082,6 +1735,8 @@ class _DriverJourneySheet extends StatelessWidget {
     required this.booking,
     required this.liveUpdate,
     required this.actionState,
+    required this.navigationState,
+    required this.scrollController,
     required this.onStart,
     required this.onArrive,
     required this.onBoard,
@@ -1092,6 +1747,8 @@ class _DriverJourneySheet extends StatelessWidget {
   final BookingEntity booking;
   final DriverLocationUpdate? liveUpdate;
   final TripActionState actionState;
+  final _TripNavigationState navigationState;
+  final ScrollController scrollController;
   final VoidCallback onStart;
   final VoidCallback onArrive;
   final VoidCallback onBoard;
@@ -1124,7 +1781,9 @@ class _DriverJourneySheet extends StatelessWidget {
       borderRadius: const BorderRadius.vertical(
         top: Radius.circular(AppConstants.radiusXl),
       ),
-      child: Padding(
+      clipBehavior: Clip.antiAlias,
+      child: SingleChildScrollView(
+        controller: scrollController,
         padding: EdgeInsets.fromLTRB(
           AppConstants.spaceLg,
           AppConstants.spaceMd,
@@ -1226,6 +1885,13 @@ class _DriverJourneySheet extends StatelessWidget {
               ),
             ),
             const SizedBox(height: AppConstants.spaceMd),
+            _NavigationModeCard(
+              title: booking.isPrePickupJourney
+                  ? 'Driving to pickup'
+                  : 'Driving to drop-off',
+              state: navigationState,
+            ),
+            const SizedBox(height: AppConstants.spaceMd),
             Text(
               '${booking.originName ?? 'Route'} -> ${booking.destinationName ?? ''}',
               style: Theme.of(context).textTheme.bodyMedium,
@@ -1283,7 +1949,8 @@ class _DriverJourneySheet extends StatelessWidget {
               const _InfoRow(
                 icon: Icons.warning_amber_rounded,
                 label: 'ETA quality',
-                value: 'Live tracking is active, but ETA confidence is low right now.',
+                value:
+                    'Live tracking is active, but ETA confidence is low right now.',
               ),
             const SizedBox(height: AppConstants.spaceMd),
             Text(
@@ -1337,7 +2004,7 @@ class _DriverJourneySheet extends StatelessWidget {
               SizedBox(
                 width: double.infinity,
                 child: PrimaryButton(
-                  label: 'Passenger on final walk',
+                  label: 'Back to driver operations',
                   onPressed: () => context.go('/bookings'),
                 ),
               ),
@@ -1361,7 +2028,7 @@ class _DriverJourneySheet extends StatelessWidget {
       return 'Follow the live trip route to ${booking.dropoffDisplayName} and confirm drop-off once the rider has alighted.';
     }
     if (booking.canParticipantCompleteJourney) {
-      return 'Your driving portion is complete. The rider is finishing the last walking segment on foot.';
+      return 'Drop-off is recorded. Continue your route toward your final destination or the next passenger stop.';
     }
     return 'No operational action is pending for this booking.';
   }
@@ -1502,7 +2169,7 @@ class _StatusChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.14),
+        color: color.withValues(alpha: 0.14),
         borderRadius: BorderRadius.circular(999),
       ),
       child: Text(
@@ -1533,7 +2200,7 @@ class _KpiPill extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
-        color: scheme.surface.withOpacity(0.75),
+        color: scheme.surface.withValues(alpha: 0.75),
         borderRadius: BorderRadius.circular(AppConstants.radiusMd),
         border: Border.all(color: scheme.outlineVariant),
       ),

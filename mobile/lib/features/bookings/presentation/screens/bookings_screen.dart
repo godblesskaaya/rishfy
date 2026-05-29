@@ -58,12 +58,16 @@ class _DriverBookingsView extends ConsumerWidget {
             final List<BookingEntity> past = bookings
                 .where((BookingEntity booking) =>
                     !(booking.isCancelled || booking.isNoShow) &&
-                    (booking.isCompleted || booking.status == 'expired'))
+                    (booking.isCompleted ||
+                        booking.isPostDropoffJourney ||
+                        booking.status == 'expired'))
                 .toList();
             final List<BookingEntity> upcoming = bookings
                 .where((BookingEntity booking) =>
                     !(booking.isCancelled || booking.isNoShow) &&
-                    !(booking.isCompleted || booking.status == 'expired'))
+                    !(booking.isCompleted ||
+                        booking.isPostDropoffJourney ||
+                        booking.status == 'expired'))
                 .toList();
 
             return TabBarView(
@@ -323,7 +327,8 @@ class _BookingCard extends StatelessWidget {
                   ),
                   const Spacer(),
                   Text(
-                    booking.canParticipantCompleteJourney
+                    role == _BookingRole.passenger &&
+                            booking.canParticipantCompleteJourney
                         ? 'Finish journey'
                         : booking.canOpenJourney
                             ? booking.isJourneyActive
@@ -361,7 +366,11 @@ class _BookingCard extends StatelessWidget {
       parts.add('Final walk ${(booking.dropoffWalkingTime! / 60).ceil()}m');
     }
     if (role == _BookingRole.driver) {
-      parts.add('Next: ${booking.nextDriverActionLabel}');
+      if (booking.canParticipantCompleteJourney) {
+        parts.add('Driver done');
+      } else {
+        parts.add('Next: ${booking.nextDriverActionLabel}');
+      }
     } else if (role == _BookingRole.passenger &&
         booking.canParticipantCompleteJourney) {
       parts.add('Next: Finish final walk');

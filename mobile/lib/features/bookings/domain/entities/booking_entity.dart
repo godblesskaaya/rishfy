@@ -278,7 +278,7 @@ class BookingEntity extends Equatable {
       return 'Confirm drop-off';
     }
     if (canParticipantCompleteJourney) {
-      return 'Driving complete';
+      return 'Drop-off complete';
     }
     if (isCompleted) {
       return 'Journey completed';
