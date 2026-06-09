@@ -30,8 +30,14 @@ export interface BookingRow {
   pickup_walking_distance: number | null;
   dropoff_walking_distance: number | null;
   pickup_walking_time: number | null;
+  dropoff_walking_time: number | null;
   estimated_pickup_time: Date | null;
   suggested_pickup_name: string | null;
+  suggested_dropoff_name: string | null;
+  pickup_point_lat: number | null;
+  pickup_point_lng: number | null;
+  dropoff_point_lat: number | null;
+  dropoff_point_lng: number | null;
   // status
   total_price: string;
   platform_fee: string;
@@ -81,6 +87,14 @@ function normalizeBookingRow<T extends BookingRow | null>(booking: T): T {
   };
 }
 
+const BOOKING_RETURNING = `
+  *,
+  ST_Y(pickup_point::geometry) AS pickup_point_lat,
+  ST_X(pickup_point::geometry) AS pickup_point_lng,
+  ST_Y(dropoff_point::geometry) AS dropoff_point_lat,
+  ST_X(dropoff_point::geometry) AS dropoff_point_lng
+`;
+
 export class BookingRepository {
   constructor(private readonly pool: Pool) {}
 
@@ -98,8 +112,10 @@ export class BookingRepository {
     pickupWalkingDistance?: number;
     dropoffWalkingDistance?: number;
     pickupWalkingTime?: number;
+    dropoffWalkingTime?: number;
     estimatedPickupTime?: Date;
     suggestedPickupName?: string;
+    suggestedDropoffName?: string;
     pickupPointLat?: number;
     pickupPointLng?: number;
     dropoffPointLat?: number;
@@ -115,32 +131,34 @@ export class BookingRepository {
       `INSERT INTO bookings (
         route_id, passenger_id, driver_id, seats_booked, seat_count,
         pickup_name, dropoff_name, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng,
-        pickup_walking_distance, dropoff_walking_distance, pickup_walking_time,
-        estimated_pickup_time, suggested_pickup_name,
+        pickup_walking_distance, dropoff_walking_distance,
+        pickup_walking_time, dropoff_walking_time,
+        estimated_pickup_time, suggested_pickup_name, suggested_dropoff_name,
         pickup_point, dropoff_point,
         total_price, platform_fee, driver_earnings,
         status, payment_status, confirmation_code, idempotency_key, expires_at
       ) VALUES (
         $1,$2,$3,$4,$4,
         $5,$6,$7,$8,$9,$10,
-        $11,$12,$13,$14,$15,
-        CASE WHEN $16::double precision IS NOT NULL AND $17::double precision IS NOT NULL
-             THEN ST_SetSRID(ST_MakePoint($17,$16),4326)::geography ELSE NULL END,
+        $11,$12,$13,$14,$15,$16,$17,
         CASE WHEN $18::double precision IS NOT NULL AND $19::double precision IS NOT NULL
              THEN ST_SetSRID(ST_MakePoint($19,$18),4326)::geography ELSE NULL END,
-        $20,$21,$22,
-        'pending','unpaid',$23,$24,$25
+        CASE WHEN $20::double precision IS NOT NULL AND $21::double precision IS NOT NULL
+             THEN ST_SetSRID(ST_MakePoint($21,$20),4326)::geography ELSE NULL END,
+        $22,$23,$24,
+        'pending','unpaid',$25,$26,$27
       )
       ON CONFLICT (idempotency_key) DO UPDATE SET updated_at = now()
-      RETURNING *`,
+      RETURNING ${BOOKING_RETURNING}`,
       [
         data.routeId, data.passengerId, data.driverId, data.seatsBooked,
         data.pickupName ?? null, data.dropoffName ?? null,
         data.pickupLat ?? null, data.pickupLng ?? null,
         data.dropoffLat ?? null, data.dropoffLng ?? null,
         data.pickupWalkingDistance ?? null, data.dropoffWalkingDistance ?? null,
-        data.pickupWalkingTime ?? null, data.estimatedPickupTime ?? null,
-        data.suggestedPickupName ?? null,
+        data.pickupWalkingTime ?? null, data.dropoffWalkingTime ?? null,
+        data.estimatedPickupTime ?? null,
+        data.suggestedPickupName ?? null, data.suggestedDropoffName ?? null,
         data.pickupPointLat ?? null, data.pickupPointLng ?? null,
         data.dropoffPointLat ?? null, data.dropoffPointLng ?? null,
         data.totalPrice, data.platformFee, data.driverEarnings,
@@ -157,25 +175,31 @@ export class BookingRepository {
        WHERE id = $1 AND driver_id = $2
          AND status = 'pending'
          AND created_at > now() - INTERVAL '10 minutes'
-       RETURNING *`,
+       RETURNING ${BOOKING_RETURNING}`,
       [bookingId, driverId, reason],
     );
     return normalizeBookingRow(rows[0] ?? null);
   }
 
   async findById(id: string): Promise<BookingRow | null> {
-    const { rows } = await this.pool.query<BookingRow>('SELECT * FROM bookings WHERE id=$1', [id]);
+    const { rows } = await this.pool.query<BookingRow>(
+      `SELECT ${BOOKING_RETURNING} FROM bookings WHERE id=$1`,
+      [id],
+    );
     return normalizeBookingRow(rows[0] ?? null);
   }
 
   async findByCode(code: string): Promise<BookingRow | null> {
-    const { rows } = await this.pool.query<BookingRow>('SELECT * FROM bookings WHERE confirmation_code=$1', [code]);
+    const { rows } = await this.pool.query<BookingRow>(
+      `SELECT ${BOOKING_RETURNING} FROM bookings WHERE confirmation_code=$1`,
+      [code],
+    );
     return normalizeBookingRow(rows[0] ?? null);
   }
 
   async listByPassenger(passengerId: string, limit = 20, offset = 0): Promise<BookingRow[]> {
     const { rows } = await this.pool.query<BookingRow>(
-      'SELECT * FROM bookings WHERE passenger_id=$1 ORDER BY created_at DESC LIMIT $2 OFFSET $3',
+      `SELECT ${BOOKING_RETURNING} FROM bookings WHERE passenger_id=$1 ORDER BY created_at DESC LIMIT $2 OFFSET $3`,
       [passengerId, limit, offset],
     );
     return rows.map((row) => normalizeBookingRow(row)!);
@@ -183,7 +207,7 @@ export class BookingRepository {
 
   async listByDriver(driverId: string, limit = 20, offset = 0): Promise<BookingRow[]> {
     const { rows } = await this.pool.query<BookingRow>(
-      'SELECT * FROM bookings WHERE driver_id=$1 ORDER BY created_at DESC LIMIT $2 OFFSET $3',
+      `SELECT ${BOOKING_RETURNING} FROM bookings WHERE driver_id=$1 ORDER BY created_at DESC LIMIT $2 OFFSET $3`,
       [driverId, limit, offset],
     );
     return rows.map((row) => normalizeBookingRow(row)!);
@@ -191,7 +215,7 @@ export class BookingRepository {
 
   async listByRoute(routeId: string): Promise<BookingRow[]> {
     const { rows } = await this.pool.query<BookingRow>(
-      'SELECT * FROM bookings WHERE route_id=$1 AND status NOT IN (\'driver_cancelled\',\'passenger_cancelled\')',
+      `SELECT ${BOOKING_RETURNING} FROM bookings WHERE route_id=$1 AND status NOT IN ('driver_cancelled','passenger_cancelled')`,
       [routeId],
     );
     return rows.map((row) => normalizeBookingRow(row)!);
@@ -199,7 +223,7 @@ export class BookingRepository {
 
   async listByRouteForDriver(routeId: string, driverId: string): Promise<BookingRow[]> {
     const { rows } = await this.pool.query<BookingRow>(
-      `SELECT * FROM bookings
+      `SELECT ${BOOKING_RETURNING} FROM bookings
        WHERE route_id=$1
          AND driver_id=$2
          AND status NOT IN ('driver_cancelled','passenger_cancelled')
@@ -212,7 +236,7 @@ export class BookingRepository {
   async confirm(id: string, paymentId: string): Promise<BookingRow> {
     const { rows } = await this.pool.query<BookingRow>(
       `UPDATE bookings SET status='confirmed', payment_status='paid', payment_id=$2,
-       confirmed_at=now(), journey_state='confirmed', updated_at=now() WHERE id=$1 RETURNING *`,
+       confirmed_at=now(), journey_state='confirmed', updated_at=now() WHERE id=$1 RETURNING ${BOOKING_RETURNING}`,
       [id, paymentId],
     );
     return normalizeBookingRow(rows[0]!)!;
@@ -230,7 +254,7 @@ export class BookingRepository {
              AND (journey_state IS NULL OR journey_state IN ('confirmed', 'driver_approaching', 'driver_arrived'))
            )
          )
-       RETURNING *`,
+       RETURNING ${BOOKING_RETURNING}`,
       [id, reason],
     );
     return normalizeBookingRow(rows[0] ?? null);
@@ -247,7 +271,7 @@ export class BookingRepository {
              AND (journey_state IS NULL OR journey_state IN ('confirmed', 'driver_approaching', 'driver_arrived'))
            )
          )
-       RETURNING *`,
+       RETURNING ${BOOKING_RETURNING}`,
       [routeId],
     );
     return rows.map((row) => normalizeBookingRow(row)!);
@@ -268,7 +292,7 @@ export class BookingRepository {
        WHERE id=$1
          AND status='confirmed'
          AND (journey_state IS NULL OR journey_state IN ('confirmed', 'driver_approaching'))
-       RETURNING *`,
+       RETURNING ${BOOKING_RETURNING}`,
       [id],
     );
     return normalizeBookingRow(rows[0] ?? null);
@@ -281,7 +305,7 @@ export class BookingRepository {
        WHERE id=$1
          AND status='confirmed'
          AND (journey_state IS NULL OR journey_state='confirmed')
-       RETURNING *`,
+       RETURNING ${BOOKING_RETURNING}`,
       [id],
     );
     return normalizeBookingRow(rows[0] ?? null);
@@ -298,7 +322,7 @@ export class BookingRepository {
        WHERE id=$1
          AND status='confirmed'
           AND journey_state='driver_arrived'
-        RETURNING *`,
+        RETURNING ${BOOKING_RETURNING}`,
       [id, tripId],
     );
     return normalizeBookingRow(rows[0] ?? null);
@@ -314,7 +338,7 @@ export class BookingRepository {
        WHERE id=$1
          AND status='confirmed'
          AND journey_state IN ('boarded', 'in_transit')
-       RETURNING *`,
+       RETURNING ${BOOKING_RETURNING}`,
       [id],
     );
     return normalizeBookingRow(rows[0] ?? null);
@@ -333,7 +357,7 @@ export class BookingRepository {
            (status='confirmed' AND journey_state IN ('walking_to_destination', 'dropped_off'))
            OR (status='completed' AND journey_state='walking_to_destination')
          )
-       RETURNING *`,
+       RETURNING ${BOOKING_RETURNING}`,
       [id],
     );
     return normalizeBookingRow(rows[0] ?? null);
@@ -352,7 +376,7 @@ export class BookingRepository {
        WHERE id=$1
          AND status='confirmed'
          AND journey_state IN ('boarded', 'in_transit', 'walking_to_destination', 'dropped_off')
-       RETURNING *`,
+       RETURNING ${BOOKING_RETURNING}`,
       [id],
     );
     return normalizeBookingRow(rows[0] ?? null);
@@ -370,7 +394,7 @@ export class BookingRepository {
        WHERE id=$1
          AND status='confirmed'
           AND journey_state='driver_arrived'
-        RETURNING *`,
+        RETURNING ${BOOKING_RETURNING}`,
       [id, reason],
     );
     return normalizeBookingRow(rows[0] ?? null);
@@ -381,7 +405,7 @@ export class BookingRepository {
     const reviewCol = raterIsPassenger ? 'passenger_review' : 'driver_review';
     const { rows } = await this.pool.query<BookingRow>(
       `UPDATE bookings SET ${col}=$2, ${reviewCol}=$3, updated_at=now()
-       WHERE id=$1 AND status='completed' RETURNING *`,
+       WHERE id=$1 AND status='completed' RETURNING ${BOOKING_RETURNING}`,
       [id, rating, review],
     );
     return normalizeBookingRow(rows[0] ?? null);
@@ -398,7 +422,7 @@ export class BookingRepository {
     const { rows } = await this.pool.query<BookingRow>(
       `UPDATE bookings
        SET payment_status='refunded', cancellation_policy=$2, updated_at=now()
-       WHERE id=$1 RETURNING *`,
+       WHERE id=$1 RETURNING ${BOOKING_RETURNING}`,
       [id, policy],
     );
     return normalizeBookingRow(rows[0]!)!;

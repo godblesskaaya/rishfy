@@ -46,8 +46,10 @@ export interface CreateBookingParams {
   pickupWalkingDistance?: number;
   dropoffWalkingDistance?: number;
   pickupWalkingTime?: number;
+  dropoffWalkingTime?: number;
   estimatedPickupTime?: Date;
   suggestedPickupName?: string;
+  suggestedDropoffName?: string;
   pickupPointLat?: number;
   pickupPointLng?: number;
   dropoffPointLat?: number;
@@ -139,8 +141,10 @@ export class BookingService {
         pickupWalkingDistance: params.pickupWalkingDistance,
         dropoffWalkingDistance: params.dropoffWalkingDistance,
         pickupWalkingTime: params.pickupWalkingTime,
+        dropoffWalkingTime: params.dropoffWalkingTime,
         estimatedPickupTime: params.estimatedPickupTime,
         suggestedPickupName: params.suggestedPickupName,
+        suggestedDropoffName: params.suggestedDropoffName,
         pickupPointLat: params.pickupPointLat,
         pickupPointLng: params.pickupPointLng,
         dropoffPointLat: params.dropoffPointLat,
@@ -171,6 +175,9 @@ export class BookingService {
       suggestedPickupName: params.suggestedPickupName,
       suggestedPickupLat: params.pickupPointLat,
       suggestedPickupLng: params.pickupPointLng,
+      suggestedDropoffName: params.suggestedDropoffName,
+      suggestedDropoffLat: params.dropoffPointLat,
+      suggestedDropoffLng: params.dropoffPointLng,
       estimatedPickupTime: params.estimatedPickupTime?.toISOString(),
     });
 
@@ -368,10 +375,10 @@ export class BookingService {
         bookingId,
         routeId: booking.route_id,
         driverUserId: driverId,
-        startLat: booking.pickup_lat ?? booking.dropoff_lat ?? 0,
-        startLng: booking.pickup_lng ?? booking.dropoff_lng ?? 0,
-        destinationLat: booking.dropoff_lat ?? booking.pickup_lat ?? 0,
-        destinationLng: booking.dropoff_lng ?? booking.pickup_lng ?? 0,
+        startLat: booking.pickup_point_lat ?? booking.pickup_lat ?? booking.dropoff_lat ?? 0,
+        startLng: booking.pickup_point_lng ?? booking.pickup_lng ?? booking.dropoff_lng ?? 0,
+        destinationLat: booking.dropoff_point_lat ?? booking.dropoff_lat ?? booking.pickup_lat ?? 0,
+        destinationLng: booking.dropoff_point_lng ?? booking.dropoff_lng ?? booking.pickup_lng ?? 0,
       })
       ?? uuidv4();
     const updated = await this.repo.boardPassenger(bookingId, tripId);

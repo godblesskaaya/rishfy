@@ -36,6 +36,9 @@ export async function publishBookingCreated(data: {
   suggestedPickupName?: string;
   suggestedPickupLat?: number;
   suggestedPickupLng?: number;
+  suggestedDropoffName?: string;
+  suggestedDropoffLat?: number;
+  suggestedDropoffLng?: number;
   estimatedPickupTime?: string;
 }): Promise<void> { await pub(T.CREATED, data.bookingId, data); }
 

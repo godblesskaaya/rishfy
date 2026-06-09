@@ -32,8 +32,10 @@ export async function bookingRoutes(app: FastifyInstance): Promise<void> {
       pickupWalkingDistance?: number;
       dropoffWalkingDistance?: number;
       pickupWalkingTime?: number;
+      dropoffWalkingTime?: number;
       estimatedPickupTime?: string;
       suggestedPickupName?: string;
+      suggestedDropoffName?: string;
       pickupPointLat?: number;
       pickupPointLng?: number;
       dropoffPointLat?: number;
@@ -57,8 +59,10 @@ export async function bookingRoutes(app: FastifyInstance): Promise<void> {
         pickupWalkingDistance: body.pickupWalkingDistance,
         dropoffWalkingDistance: body.dropoffWalkingDistance,
         pickupWalkingTime: body.pickupWalkingTime,
+        dropoffWalkingTime: body.dropoffWalkingTime,
         estimatedPickupTime: body.estimatedPickupTime ? new Date(body.estimatedPickupTime) : undefined,
         suggestedPickupName: body.suggestedPickupName,
+        suggestedDropoffName: body.suggestedDropoffName,
         pickupPointLat: body.pickupPointLat,
         pickupPointLng: body.pickupPointLng,
         dropoffPointLat: body.dropoffPointLat,
