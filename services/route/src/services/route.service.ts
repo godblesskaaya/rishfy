@@ -56,6 +56,7 @@ export interface SearchResult {
   walking_distance_to_pickup: number;
   walking_time_to_pickup: number;
   suggested_pickup_point: { lat: number; lng: number; name: string | null };
+  suggested_dropoff_point: { lat: number; lng: number; name: string | null };
   walking_distance_from_dropoff: number;
   walking_time_from_dropoff: number;
   driver_departure_time: Date;
@@ -424,8 +425,9 @@ export class RouteService {
       );
       if (!dropoffWalk || dropoffWalk.distance_meters > maxWalk) continue;
 
-      // Reverse-geocode suggested pickup name
+      // Reverse-geocode route-relative rendezvous names
       const pickupName = await this.cachedReverseGeocode(pickupLat, pickupLng);
+      const dropoffName = await this.cachedReverseGeocode(dropoffLat, dropoffLng);
 
       results.push({
         route_id: candidate.id,
@@ -439,6 +441,7 @@ export class RouteService {
         walking_distance_to_pickup: pickupWalk.distance_meters,
         walking_time_to_pickup: pickupWalk.duration_seconds,
         suggested_pickup_point: { lat: pickupLat, lng: pickupLng, name: pickupName },
+        suggested_dropoff_point: { lat: dropoffLat, lng: dropoffLng, name: dropoffName },
         walking_distance_from_dropoff: dropoffWalk.distance_meters,
         walking_time_from_dropoff: dropoffWalk.duration_seconds,
         driver_departure_time: candidate.departure_time,
