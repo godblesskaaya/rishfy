@@ -51,7 +51,8 @@ class _RouteSearchScreenState extends ConsumerState<RouteSearchScreen> {
 
   bool _loadingOriginSuggestions = false;
   bool _loadingDestinationSuggestions = false;
-  List<LocationSearchResult> _originSuggestions = const <LocationSearchResult>[];
+  List<LocationSearchResult> _originSuggestions =
+      const <LocationSearchResult>[];
   List<LocationSearchResult> _destinationSuggestions =
       const <LocationSearchResult>[];
 
@@ -495,8 +496,7 @@ class _RouteSearchScreenState extends ConsumerState<RouteSearchScreen> {
             maxChildSize: 0.92,
             snap: true,
             snapSizes: const <double>[0.10, 0.32, 0.60, 0.92],
-            builder:
-                (BuildContext ctx, ScrollController scrollController) {
+            builder: (BuildContext ctx, ScrollController scrollController) {
               return Material(
                 elevation: 8,
                 borderRadius: const BorderRadius.vertical(
@@ -511,9 +511,7 @@ class _RouteSearchScreenState extends ConsumerState<RouteSearchScreen> {
                         width: 40,
                         height: 4,
                         decoration: BoxDecoration(
-                          color: Theme.of(context)
-                              .colorScheme
-                              .outlineVariant,
+                          color: Theme.of(context).colorScheme.outlineVariant,
                           borderRadius: BorderRadius.circular(2),
                         ),
                       ),
@@ -545,8 +543,7 @@ class _RouteSearchScreenState extends ConsumerState<RouteSearchScreen> {
                                           .add(const Duration(days: 60)),
                                     );
                                     if (picked != null) {
-                                      setState(
-                                          () => _departureDate = picked);
+                                      setState(() => _departureDate = picked);
                                     }
                                   },
                                   child: Container(
@@ -615,8 +612,7 @@ class _RouteSearchScreenState extends ConsumerState<RouteSearchScreen> {
                                           size: 18,
                                         ),
                                         const SizedBox(width: 8),
-                                        Text(
-                                            _departureTime.format(context)),
+                                        Text(_departureTime.format(context)),
                                       ],
                                     ),
                                   ),
@@ -635,30 +631,26 @@ class _RouteSearchScreenState extends ConsumerState<RouteSearchScreen> {
                                 onPressed: _seatCount > 1
                                     ? () => setState(() => _seatCount--)
                                     : null,
-                                icon: const Icon(
-                                    Icons.remove_circle_outline),
+                                icon: const Icon(Icons.remove_circle_outline),
                               ),
                               Text(
                                 '$_seatCount',
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .titleMedium,
+                                style: Theme.of(context).textTheme.titleMedium,
                               ),
                               IconButton(
-                                onPressed: _seatCount <
-                                        AppConstants.maxSeatsPerBooking
-                                    ? () => setState(() => _seatCount++)
-                                    : null,
-                                icon: const Icon(
-                                    Icons.add_circle_outline),
+                                onPressed:
+                                    _seatCount < AppConstants.maxSeatsPerBooking
+                                        ? () => setState(() => _seatCount++)
+                                        : null,
+                                icon: const Icon(Icons.add_circle_outline),
                               ),
                             ],
                           ),
 
                           // ── Advanced options ──────────────────────────
                           InkWell(
-                            onTap: () => setState(
-                                () => _showAdvanced = !_showAdvanced),
+                            onTap: () =>
+                                setState(() => _showAdvanced = !_showAdvanced),
                             child: Padding(
                               padding: const EdgeInsets.symmetric(
                                   vertical: AppConstants.spaceSm),
@@ -667,9 +659,8 @@ class _RouteSearchScreenState extends ConsumerState<RouteSearchScreen> {
                                   Text(
                                     'Advanced options',
                                     style: TextStyle(
-                                      color: Theme.of(context)
-                                          .colorScheme
-                                          .primary,
+                                      color:
+                                          Theme.of(context).colorScheme.primary,
                                       fontSize: 13,
                                     ),
                                   ),
@@ -677,9 +668,8 @@ class _RouteSearchScreenState extends ConsumerState<RouteSearchScreen> {
                                     _showAdvanced
                                         ? Icons.expand_less
                                         : Icons.expand_more,
-                                    color: Theme.of(context)
-                                        .colorScheme
-                                        .primary,
+                                    color:
+                                        Theme.of(context).colorScheme.primary,
                                     size: 18,
                                   ),
                                 ],
@@ -689,45 +679,37 @@ class _RouteSearchScreenState extends ConsumerState<RouteSearchScreen> {
                           if (_showAdvanced) ...<Widget>[
                             Text(
                               'Time flexibility',
-                              style:
-                                  Theme.of(context).textTheme.bodySmall,
+                              style: Theme.of(context).textTheme.bodySmall,
                             ),
                             const SizedBox(height: 6),
                             Wrap(
                               spacing: 6,
-                              children:
-                                  <int>[15, 30, 60].map((int m) {
+                              children: <int>[15, 30, 60].map((int m) {
                                 return ChoiceChip(
                                   label: Text('±$m min'),
-                                  selected:
-                                      _timeFlexibilityMinutes == m,
+                                  selected: _timeFlexibilityMinutes == m,
                                   onSelected: (_) => setState(
-                                      () =>
-                                          _timeFlexibilityMinutes = m),
+                                      () => _timeFlexibilityMinutes = m),
                                 );
                               }).toList(),
                             ),
                             const SizedBox(height: 12),
                             Text(
                               'Max walking distance to pickup',
-                              style:
-                                  Theme.of(context).textTheme.bodySmall,
+                              style: Theme.of(context).textTheme.bodySmall,
                             ),
                             const SizedBox(height: 6),
                             Wrap(
                               spacing: 6,
-                              children: <int>[500, 1000, 1500, 2000]
-                                  .map((int m) {
+                              children:
+                                  <int>[500, 1000, 1500, 2000].map((int m) {
                                 return ChoiceChip(
                                   label: Text(
-                                    m < 1000
-                                        ? '${m}m'
-                                        : '${m ~/ 1000} km',
+                                    m < 1000 ? '${m}m' : '${m ~/ 1000} km',
                                   ),
-                                  selected:
-                                      _maxWalkingDistanceMeters == m,
-                                  onSelected: (_) => setState(() =>
-                                      _maxWalkingDistanceMeters = m),
+                                  selected: _maxWalkingDistanceMeters == m,
+                                  onSelected: (_) => setState(
+                                      () => _maxWalkingDistanceMeters = m),
                                 );
                               }).toList(),
                             ),
@@ -739,12 +721,10 @@ class _RouteSearchScreenState extends ConsumerState<RouteSearchScreen> {
                             label: 'Search',
                             icon: Icons.search,
                             loading: searchState.isLoading,
-                            onPressed:
-                                searchState.isLoading ? null : _search,
+                            onPressed: searchState.isLoading ? null : _search,
                           ),
                           if (searchState.error != null) ...<Widget>[
-                            const SizedBox(
-                                height: AppConstants.spaceMd),
+                            const SizedBox(height: AppConstants.spaceMd),
                             _ErrorBanner(message: searchState.error!),
                           ],
                           const SizedBox(height: AppConstants.spaceLg),
@@ -756,15 +736,19 @@ class _RouteSearchScreenState extends ConsumerState<RouteSearchScreen> {
                                 padding: const EdgeInsets.only(
                                   bottom: AppConstants.spaceSm,
                                 ),
-                                child: _SearchResultCard(result: r),
+                                child: _SearchResultCard(
+                                  result: r,
+                                  originSelection: _originSelection,
+                                  destinationSelection: _destinationSelection,
+                                ),
                               ),
                             )
                           else if (!searchState.isLoading &&
                               searchState.params != null &&
                               results.isEmpty)
                             Container(
-                              padding: const EdgeInsets.all(
-                                  AppConstants.spaceLg),
+                              padding:
+                                  const EdgeInsets.all(AppConstants.spaceLg),
                               decoration: BoxDecoration(
                                 color: Theme.of(context)
                                     .colorScheme
@@ -897,8 +881,7 @@ class _FloatingInputCard extends StatelessWidget {
                 hintText: 'Search or tap map',
                 prefixIcon: Icon(
                   Icons.location_on_outlined,
-                  color:
-                      mapTargetField == 'destination' ? Colors.red : null,
+                  color: mapTargetField == 'destination' ? Colors.red : null,
                   size: 20,
                 ),
                 suffixIcon: destinationSelection != null
@@ -921,18 +904,15 @@ class _FloatingInputCard extends StatelessWidget {
                         label: const Text('Origin'),
                         selected: mapTargetField == 'origin',
                         visualDensity: VisualDensity.compact,
-                        labelStyle:
-                            const TextStyle(fontSize: 11),
+                        labelStyle: const TextStyle(fontSize: 11),
                         onSelected: (_) => onSelectField('origin'),
                       ),
                       ChoiceChip(
                         label: const Text('Dest.'),
                         selected: mapTargetField == 'destination',
                         visualDensity: VisualDensity.compact,
-                        labelStyle:
-                            const TextStyle(fontSize: 11),
-                        onSelected: (_) =>
-                            onSelectField('destination'),
+                        labelStyle: const TextStyle(fontSize: 11),
+                        onSelected: (_) => onSelectField('destination'),
                       ),
                     ],
                   ),
@@ -952,8 +932,7 @@ class _FloatingInputCard extends StatelessWidget {
                     style: TextStyle(fontSize: 12),
                   ),
                   style: TextButton.styleFrom(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
                     visualDensity: VisualDensity.compact,
                   ),
                 ),
@@ -1074,9 +1053,15 @@ class _ErrorBanner extends StatelessWidget {
 // ─── Search result card ───────────────────────────────────────────────────────
 
 class _SearchResultCard extends StatelessWidget {
-  const _SearchResultCard({required this.result});
+  const _SearchResultCard({
+    required this.result,
+    required this.originSelection,
+    required this.destinationSelection,
+  });
 
   final SearchResultDto result;
+  final LocationSearchResult? originSelection;
+  final LocationSearchResult? destinationSelection;
 
   @override
   Widget build(BuildContext context) {
@@ -1101,10 +1086,20 @@ class _SearchResultCard extends StatelessWidget {
             'suggestedPickupName': result.suggestedPickupName,
             'suggestedPickupLat': result.suggestedPickupLat,
             'suggestedPickupLng': result.suggestedPickupLng,
+            'suggestedDropoffName': result.suggestedDropoffName,
+            'suggestedDropoffLat': result.suggestedDropoffLat,
+            'suggestedDropoffLng': result.suggestedDropoffLng,
+            'passengerPickupName': originSelection?.label,
+            'passengerPickupLat': originSelection?.latitude,
+            'passengerPickupLng': originSelection?.longitude,
+            'passengerDropoffName': destinationSelection?.label,
+            'passengerDropoffLat': destinationSelection?.latitude,
+            'passengerDropoffLng': destinationSelection?.longitude,
             'estimatedPickupTime': result.estimatedPickupTime.toIso8601String(),
             'walkingDistanceToPickup': result.walkingDistanceToPickup,
             'walkingTimeToPickup': result.walkingTimeToPickup,
             'walkingDistanceFromDropoff': result.walkingDistanceFromDropoff,
+            'walkingTimeFromDropoff': result.walkingTimeFromDropoff,
           },
         ),
         child: Padding(
@@ -1138,9 +1133,10 @@ class _SearchResultCard extends StatelessWidget {
                         if (result.vehicleLabel.isNotEmpty)
                           Text(
                             result.vehicleLabel,
-                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                  color: scheme.onSurfaceVariant,
-                                ),
+                            style:
+                                Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      color: scheme.onSurfaceVariant,
+                                    ),
                           ),
                       ],
                     ),
@@ -1199,7 +1195,8 @@ class _SearchResultCard extends StatelessWidget {
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
-                      Icon(Icons.pin_drop_outlined, size: 18, color: scheme.primary),
+                      Icon(Icons.pin_drop_outlined,
+                          size: 18, color: scheme.primary),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Column(
@@ -1207,7 +1204,10 @@ class _SearchResultCard extends StatelessWidget {
                           children: <Widget>[
                             Text(
                               'Suggested pickup',
-                              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .labelSmall
+                                  ?.copyWith(
                                     color: scheme.onSurfaceVariant,
                                   ),
                             ),

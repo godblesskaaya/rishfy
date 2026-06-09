@@ -209,18 +209,18 @@ class BookingDto {
       destinationLat: _toDouble(
         booking['destination_lat'] ??
             booking['final_destination_lat'] ??
-            booking['dropoff_point_lat'] ??
-            booking['dropoffPointLat'] ??
             booking['dropoff_lat'] ??
-            booking['dropoffLat'],
+            booking['dropoffLat'] ??
+            booking['dropoff_point_lat'] ??
+            booking['dropoffPointLat'],
       ),
       destinationLng: _toDouble(
         booking['destination_lng'] ??
             booking['final_destination_lng'] ??
-            booking['dropoff_point_lng'] ??
-            booking['dropoffPointLng'] ??
             booking['dropoff_lng'] ??
-            booking['dropoffLng'],
+            booking['dropoffLng'] ??
+            booking['dropoff_point_lng'] ??
+            booking['dropoffPointLng'],
       ),
       tripId: _readString(
             trip,
@@ -393,12 +393,14 @@ class CreateBookingRequest {
     this.suggestedPickupName,
     this.pickupPointLat,
     this.pickupPointLng,
+    this.suggestedDropoffName,
     this.dropoffPointLat,
     this.dropoffPointLng,
     this.estimatedPickupTime,
     this.pickupWalkingDistance,
     this.pickupWalkingTime,
     this.dropoffWalkingDistance,
+    this.dropoffWalkingTime,
   });
 
   final String routeId;
@@ -417,12 +419,14 @@ class CreateBookingRequest {
   final String? suggestedPickupName;
   final double? pickupPointLat;
   final double? pickupPointLng;
+  final String? suggestedDropoffName;
   final double? dropoffPointLat;
   final double? dropoffPointLng;
   final DateTime? estimatedPickupTime;
   final int? pickupWalkingDistance;
   final int? pickupWalkingTime;
   final int? dropoffWalkingDistance;
+  final int? dropoffWalkingTime;
 
   int get totalAmountTzs => seatsBooked * pricePerSeat;
 
@@ -442,6 +446,8 @@ class CreateBookingRequest {
           'suggestedPickupName': suggestedPickupName,
         if (pickupPointLat != null) 'pickupPointLat': pickupPointLat,
         if (pickupPointLng != null) 'pickupPointLng': pickupPointLng,
+        if (suggestedDropoffName != null)
+          'suggestedDropoffName': suggestedDropoffName,
         if (dropoffPointLat != null) 'dropoffPointLat': dropoffPointLat,
         if (dropoffPointLng != null) 'dropoffPointLng': dropoffPointLng,
         if (estimatedPickupTime != null)
@@ -451,6 +457,8 @@ class CreateBookingRequest {
         if (pickupWalkingTime != null) 'pickupWalkingTime': pickupWalkingTime,
         if (dropoffWalkingDistance != null)
           'dropoffWalkingDistance': dropoffWalkingDistance,
+        if (dropoffWalkingTime != null)
+          'dropoffWalkingTime': dropoffWalkingTime,
       };
 
   Map<String, dynamic> toPaymentJson(String bookingId) => <String, dynamic>{

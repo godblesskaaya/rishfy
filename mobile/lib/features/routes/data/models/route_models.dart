@@ -70,6 +70,9 @@ class SearchResultDto {
     required this.suggestedPickupLat,
     required this.suggestedPickupLng,
     required this.suggestedPickupName,
+    required this.suggestedDropoffLat,
+    required this.suggestedDropoffLng,
+    required this.suggestedDropoffName,
     required this.walkingDistanceFromDropoff,
     required this.walkingTimeFromDropoff,
     required this.driverDepartureTime,
@@ -88,9 +91,12 @@ class SearchResultDto {
   final String? vehiclePlate;
   final int walkingDistanceToPickup;
   final int walkingTimeToPickup;
-  final double suggestedPickupLat;
-  final double suggestedPickupLng;
+  final double? suggestedPickupLat;
+  final double? suggestedPickupLng;
   final String? suggestedPickupName;
+  final double? suggestedDropoffLat;
+  final double? suggestedDropoffLng;
+  final String? suggestedDropoffName;
   final int walkingDistanceFromDropoff;
   final int walkingTimeFromDropoff;
   final DateTime driverDepartureTime;
@@ -101,6 +107,8 @@ class SearchResultDto {
   factory SearchResultDto.fromJson(Map<String, dynamic> j) {
     final Map<String, dynamic>? pickupPt =
         j['suggested_pickup_point'] as Map<String, dynamic>?;
+    final Map<String, dynamic>? dropoffPt =
+        j['suggested_dropoff_point'] as Map<String, dynamic>?;
     return SearchResultDto(
       routeId: _readRequiredString(j, <String>['route_id', 'id']),
       driverId: _readRequiredString(j, <String>['driver_id']),
@@ -112,13 +120,20 @@ class SearchResultDto {
       vehiclePlate: _readString(j, <String>['vehicle_plate']),
       walkingDistanceToPickup: _toInt(j['walking_distance_to_pickup']),
       walkingTimeToPickup: _toInt(j['walking_time_to_pickup']),
-      suggestedPickupLat: _toNullableDouble(pickupPt?['lat']) ?? 0.0,
-      suggestedPickupLng: _toNullableDouble(pickupPt?['lng']) ?? 0.0,
+      suggestedPickupLat: _toNullableDouble(pickupPt?['lat']),
+      suggestedPickupLng: _toNullableDouble(pickupPt?['lng']),
       suggestedPickupName: _readString(
             pickupPt ?? <String, dynamic>{},
             <String>['name'],
           ) ??
           _readString(j, <String>['suggested_pickup_name']),
+      suggestedDropoffLat: _toNullableDouble(dropoffPt?['lat']),
+      suggestedDropoffLng: _toNullableDouble(dropoffPt?['lng']),
+      suggestedDropoffName: _readString(
+            dropoffPt ?? <String, dynamic>{},
+            <String>['name'],
+          ) ??
+          _readString(j, <String>['suggested_dropoff_name']),
       walkingDistanceFromDropoff: _toInt(j['walking_distance_from_dropoff']),
       walkingTimeFromDropoff: _toInt(j['walking_time_from_dropoff']),
       driverDepartureTime: _parseDateTime(j['driver_departure_time']),

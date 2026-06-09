@@ -192,6 +192,21 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
                 (extra?['suggestedPickupLat'] as num?)?.toDouble(),
             suggestedPickupLng:
                 (extra?['suggestedPickupLng'] as num?)?.toDouble(),
+            suggestedDropoffName: extra?['suggestedDropoffName'] as String?,
+            suggestedDropoffLat:
+                (extra?['suggestedDropoffLat'] as num?)?.toDouble(),
+            suggestedDropoffLng:
+                (extra?['suggestedDropoffLng'] as num?)?.toDouble(),
+            passengerPickupName: extra?['passengerPickupName'] as String?,
+            passengerPickupLat:
+                (extra?['passengerPickupLat'] as num?)?.toDouble(),
+            passengerPickupLng:
+                (extra?['passengerPickupLng'] as num?)?.toDouble(),
+            passengerDropoffName: extra?['passengerDropoffName'] as String?,
+            passengerDropoffLat:
+                (extra?['passengerDropoffLat'] as num?)?.toDouble(),
+            passengerDropoffLng:
+                (extra?['passengerDropoffLng'] as num?)?.toDouble(),
             estimatedPickupTime: extra?['estimatedPickupTime'] != null
                 ? DateTime.tryParse(extra!['estimatedPickupTime'] as String)
                 : null,
@@ -199,6 +214,7 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
             walkingTimeToPickup: extra?['walkingTimeToPickup'] as int?,
             walkingDistanceFromDropoff:
                 extra?['walkingDistanceFromDropoff'] as int?,
+            walkingTimeFromDropoff: extra?['walkingTimeFromDropoff'] as int?,
           );
         },
       ),

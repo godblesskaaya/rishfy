@@ -28,10 +28,20 @@ class CreateBookingScreen extends ConsumerStatefulWidget {
     this.suggestedPickupName,
     this.suggestedPickupLat,
     this.suggestedPickupLng,
+    this.suggestedDropoffName,
+    this.suggestedDropoffLat,
+    this.suggestedDropoffLng,
+    this.passengerPickupName,
+    this.passengerPickupLat,
+    this.passengerPickupLng,
+    this.passengerDropoffName,
+    this.passengerDropoffLat,
+    this.passengerDropoffLng,
     this.estimatedPickupTime,
     this.walkingDistanceToPickup,
     this.walkingTimeToPickup,
     this.walkingDistanceFromDropoff,
+    this.walkingTimeFromDropoff,
   });
 
   final String routeId;
@@ -40,10 +50,20 @@ class CreateBookingScreen extends ConsumerStatefulWidget {
   final String? suggestedPickupName;
   final double? suggestedPickupLat;
   final double? suggestedPickupLng;
+  final String? suggestedDropoffName;
+  final double? suggestedDropoffLat;
+  final double? suggestedDropoffLng;
+  final String? passengerPickupName;
+  final double? passengerPickupLat;
+  final double? passengerPickupLng;
+  final String? passengerDropoffName;
+  final double? passengerDropoffLat;
+  final double? passengerDropoffLng;
   final DateTime? estimatedPickupTime;
   final int? walkingDistanceToPickup;
   final int? walkingTimeToPickup;
   final int? walkingDistanceFromDropoff;
+  final int? walkingTimeFromDropoff;
 
   @override
   ConsumerState<CreateBookingScreen> createState() =>
@@ -62,8 +82,7 @@ class _CreateBookingScreenState extends ConsumerState<CreateBookingScreen> {
   void initState() {
     super.initState();
     // Seed phone field from current user once.
-    final String? userPhone =
-        ref.read(currentUserProvider)?.phoneNumber;
+    final String? userPhone = ref.read(currentUserProvider)?.phoneNumber;
     if (userPhone != null && userPhone.isNotEmpty) {
       // The user entity stores +255712345678 style. Strip the country code so
       // IntlPhoneField can render the local number.
@@ -119,19 +138,23 @@ class _CreateBookingScreenState extends ConsumerState<CreateBookingScreen> {
             paymentMethod: _paymentMethod,
             payerPhone: phone,
             idempotencyKey: const Uuid().v4(),
-            pickupName: route.originName,
-            dropoffName: route.destinationName,
-            pickupLat: route.originLat,
-            pickupLng: route.originLng,
-            dropoffLat: route.destinationLat,
-            dropoffLng: route.destinationLng,
+            pickupName: widget.passengerPickupName ?? route.originName,
+            dropoffName: widget.passengerDropoffName ?? route.destinationName,
+            pickupLat: widget.passengerPickupLat ?? route.originLat,
+            pickupLng: widget.passengerPickupLng ?? route.originLng,
+            dropoffLat: widget.passengerDropoffLat ?? route.destinationLat,
+            dropoffLng: widget.passengerDropoffLng ?? route.destinationLng,
             suggestedPickupName: widget.suggestedPickupName,
-            pickupPointLat: widget.suggestedPickupLat,
-            pickupPointLng: widget.suggestedPickupLng,
+            suggestedDropoffName: widget.suggestedDropoffName,
+            pickupPointLat: widget.suggestedPickupLat ?? route.originLat,
+            pickupPointLng: widget.suggestedPickupLng ?? route.originLng,
+            dropoffPointLat: widget.suggestedDropoffLat ?? route.destinationLat,
+            dropoffPointLng: widget.suggestedDropoffLng ?? route.destinationLng,
             estimatedPickupTime: widget.estimatedPickupTime,
             pickupWalkingDistance: widget.walkingDistanceToPickup,
             pickupWalkingTime: widget.walkingTimeToPickup,
             dropoffWalkingDistance: widget.walkingDistanceFromDropoff,
+            dropoffWalkingTime: widget.walkingTimeFromDropoff,
           ),
         );
     final CreateBookingState s = ref.read(createBookingProvider);
@@ -148,11 +171,16 @@ class _CreateBookingScreenState extends ConsumerState<CreateBookingScreen> {
 
   String _providerLabel(String method) {
     switch (method) {
-      case 'mpesa_tz': return 'M-Pesa';
-      case 'tigopesa': return 'TigoPesa';
-      case 'airtel_money': return 'Airtel Money';
-      case 'halopesa': return 'HaloPesa';
-      default: return method;
+      case 'mpesa_tz':
+        return 'M-Pesa';
+      case 'tigopesa':
+        return 'TigoPesa';
+      case 'airtel_money':
+        return 'Airtel Money';
+      case 'halopesa':
+        return 'HaloPesa';
+      default:
+        return method;
     }
   }
 
@@ -167,7 +195,8 @@ class _CreateBookingScreenState extends ConsumerState<CreateBookingScreen> {
       isDismissible: false,
       enableDrag: false,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(AppConstants.radiusXl)),
+        borderRadius:
+            BorderRadius.vertical(top: Radius.circular(AppConstants.radiusXl)),
       ),
       builder: (_) => _PaymentAwaitSheet(
         providerLabel: providerLabel,
@@ -179,7 +208,8 @@ class _CreateBookingScreenState extends ConsumerState<CreateBookingScreen> {
           Navigator.of(ctx).pop();
           if (s.status == CreateBookingStatus.completed &&
               s.paymentResponse != null) {
-            context.go('/bookings/${s.paymentResponse!.bookingId}');
+            context
+                .pushReplacement('/bookings/${s.paymentResponse!.bookingId}');
           } else if (s.status == CreateBookingStatus.failed) {
             // Reset so the next submit goes through cleanly.
             ref.read(createBookingProvider.notifier).reset();
@@ -222,7 +252,8 @@ class _CreateBookingScreenState extends ConsumerState<CreateBookingScreen> {
                   Text('${route.originName} → ${route.destinationName}',
                       style: Theme.of(context).textTheme.titleMedium),
                   const SizedBox(height: 4),
-                  Text('TZS ${NumberFormat('#,###').format(route.pricePerSeatTzs)} / seat'),
+                  Text(
+                      'TZS ${NumberFormat('#,###').format(route.pricePerSeatTzs)} / seat'),
                 ],
               ),
             ),
@@ -246,13 +277,16 @@ class _CreateBookingScreenState extends ConsumerState<CreateBookingScreen> {
           Row(
             children: <Widget>[
               IconButton(
-                onPressed: _seatCount > 1 ? () => setState(() => _seatCount--) : null,
+                onPressed:
+                    _seatCount > 1 ? () => setState(() => _seatCount--) : null,
                 icon: const Icon(Icons.remove_circle_outline),
               ),
-              Text('$_seatCount', style: Theme.of(context).textTheme.titleLarge),
+              Text('$_seatCount',
+                  style: Theme.of(context).textTheme.titleLarge),
               IconButton(
                 onPressed: _seatCount < route.availableSeats
-                    ? () => setState(() => _seatCount++) : null,
+                    ? () => setState(() => _seatCount++)
+                    : null,
                 icon: const Icon(Icons.add_circle_outline),
               ),
               const Spacer(),
@@ -264,7 +298,8 @@ class _CreateBookingScreenState extends ConsumerState<CreateBookingScreen> {
             ],
           ),
           const SizedBox(height: 20),
-          Text('Mobile money number', style: Theme.of(context).textTheme.titleSmall),
+          Text('Mobile money number',
+              style: Theme.of(context).textTheme.titleSmall),
           const SizedBox(height: 8),
           IntlPhoneField(
             // Key forces rebuild when a saved method is tapped so initialValue takes effect.
@@ -286,16 +321,15 @@ class _CreateBookingScreenState extends ConsumerState<CreateBookingScreen> {
           const SizedBox(height: 20),
           Text('Payment method', style: Theme.of(context).textTheme.titleSmall),
           Consumer(builder: (BuildContext ctx, WidgetRef ref, _) {
-            final List<PaymentMethod> saved =
-                ref.watch(paymentMethodsProvider);
+            final List<PaymentMethod> saved = ref.watch(paymentMethodsProvider);
             if (saved.isEmpty) return const SizedBox.shrink();
             return Padding(
               padding: const EdgeInsets.symmetric(vertical: 8),
               child: Wrap(
                 spacing: 8,
                 children: saved.map((PaymentMethod m) {
-                  final bool selected =
-                      m.provider == _paymentMethod && _payerPhone == _strip(m.phone);
+                  final bool selected = m.provider == _paymentMethod &&
+                      _payerPhone == _strip(m.phone);
                   return ChoiceChip(
                     avatar: const Icon(Icons.account_balance_wallet, size: 16),
                     label: Text(
@@ -438,7 +472,8 @@ class _PaymentAwaitSheetState extends ConsumerState<_PaymentAwaitSheet> {
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
           Container(
-            width: 40, height: 4,
+            width: 40,
+            height: 4,
             margin: const EdgeInsets.only(bottom: 20),
             decoration: BoxDecoration(
               color: Theme.of(context).colorScheme.outlineVariant,
@@ -448,11 +483,13 @@ class _PaymentAwaitSheetState extends ConsumerState<_PaymentAwaitSheet> {
           if (done) ...<Widget>[
             const Icon(Icons.check_circle, color: Colors.green, size: 56),
             const SizedBox(height: 12),
-            Text('Payment confirmed!', style: Theme.of(context).textTheme.titleLarge),
+            Text('Payment confirmed!',
+                style: Theme.of(context).textTheme.titleLarge),
           ] else if (failed) ...<Widget>[
             const Icon(Icons.error_outline, color: Colors.red, size: 56),
             const SizedBox(height: 12),
-            Text('Payment failed', style: Theme.of(context).textTheme.titleLarge),
+            Text('Payment failed',
+                style: Theme.of(context).textTheme.titleLarge),
             const SizedBox(height: 8),
             Text(s.error ?? 'Please try again.'),
           ] else ...<Widget>[
@@ -480,7 +517,9 @@ class _PaymentAwaitSheetState extends ConsumerState<_PaymentAwaitSheet> {
                   const Text('Or dial USSD manually'),
                   const SizedBox(height: 4),
                   Text(widget.ussdCode!,
-                      style: Theme.of(context).textTheme.titleLarge
+                      style: Theme.of(context)
+                          .textTheme
+                          .titleLarge
                           ?.copyWith(fontWeight: FontWeight.bold)),
                 ]),
               ),

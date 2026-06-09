@@ -224,14 +224,65 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
     }
   }
 
+  Future<void> _continueDriverRouteAfterBookingAction() async {
+    ref.invalidate(bookingDetailProvider(widget.bookingId));
+    final BookingEntity updatedBooking =
+        await ref.read(bookingDetailProvider(widget.bookingId).future);
+    ref.invalidate(driverRouteBookingsProvider(updatedBooking.routeId));
+    final List<BookingEntity> routeBookings = await ref
+        .read(driverRouteBookingsProvider(updatedBooking.routeId).future);
+    if (!mounted) {
+      return;
+    }
+
+    final BookingEntity? nextBooking = _nextDriverBooking(
+      routeBookings,
+      currentBookingId: updatedBooking.bookingId,
+    );
+    if (nextBooking != null) {
+      await ref.read(driverBroadcastProvider.notifier).stopStreaming();
+      if (!mounted) {
+        return;
+      }
+      GoRouter.of(context).go('/trip/${nextBooking.bookingId}');
+      return;
+    }
+
+    setState(() {
+      _lastNavigationKey = null;
+      _navigationState = const _TripNavigationState.idle();
+    });
+  }
+
+  BookingEntity? _nextDriverBooking(
+    List<BookingEntity> bookings, {
+    required String currentBookingId,
+  }) {
+    for (final BookingEntity booking in bookings) {
+      if (booking.bookingId == currentBookingId) {
+        continue;
+      }
+      if (booking.isCancelled || booking.isCompleted || booking.isNoShow) {
+        continue;
+      }
+      if (booking.canParticipantCompleteJourney) {
+        continue;
+      }
+      return booking;
+    }
+    return null;
+  }
+
   void _scheduleNavigationRefresh({
     required BookingEntity booking,
     required DriverTrackingState tracking,
+    required RouteEntity? route,
     required bool isDriver,
   }) {
     final _NavigationRequest? request = _navigationRequestFor(
       booking: booking,
       tracking: tracking,
+      route: route,
       isDriver: isDriver,
     );
     if (request == null) {
@@ -255,10 +306,11 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
   _NavigationRequest? _navigationRequestFor({
     required BookingEntity booking,
     required DriverTrackingState tracking,
+    required RouteEntity? route,
     required bool isDriver,
   }) {
-    final double? targetLat = _navigationTargetLat(booking, isDriver);
-    final double? targetLng = _navigationTargetLng(booking, isDriver);
+    final double? targetLat = _navigationTargetLat(booking, route, isDriver);
+    final double? targetLng = _navigationTargetLng(booking, route, isDriver);
     if (targetLat == null || targetLng == null) {
       return null;
     }
@@ -290,11 +342,18 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
     );
   }
 
-  double? _navigationTargetLat(BookingEntity booking, bool isDriver) {
+  double? _navigationTargetLat(
+    BookingEntity booking,
+    RouteEntity? route,
+    bool isDriver,
+  ) {
     if (booking.isPrePickupJourney) {
       return booking.resolvedPickupLat;
     }
     if (isDriver) {
+      if (booking.isPostDropoffJourney || booking.isCompleted) {
+        return route?.destinationLat ?? booking.resolvedDropoffLat;
+      }
       return booking.resolvedDropoffLat;
     }
     if (booking.isPostDropoffJourney) {
@@ -303,11 +362,18 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
     return null;
   }
 
-  double? _navigationTargetLng(BookingEntity booking, bool isDriver) {
+  double? _navigationTargetLng(
+    BookingEntity booking,
+    RouteEntity? route,
+    bool isDriver,
+  ) {
     if (booking.isPrePickupJourney) {
       return booking.resolvedPickupLng;
     }
     if (isDriver) {
+      if (booking.isPostDropoffJourney || booking.isCompleted) {
+        return route?.destinationLng ?? booking.resolvedDropoffLng;
+      }
       return booking.resolvedDropoffLng;
     }
     if (booking.isPostDropoffJourney) {
@@ -412,7 +478,12 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
     }
   }
 
-  void _frameTripContext(BookingEntity booking, DriverTrackingState tracking) {
+  void _frameTripContext(
+    BookingEntity booking,
+    DriverTrackingState tracking,
+    RouteEntity? route,
+    bool isDriver,
+  ) {
     if (!_followDriver) return;
     final DriverLocationUpdate? update = tracking.latest;
     if (_mapController == null || update == null) {
@@ -420,12 +491,8 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
     }
     final List<double> lats = <double>[update.lat];
     final List<double> lngs = <double>[update.lng];
-    final double? targetLat = booking.isPrePickupJourney
-        ? booking.resolvedPickupLat
-        : booking.resolvedDropoffLat;
-    final double? targetLng = booking.isPrePickupJourney
-        ? booking.resolvedPickupLng
-        : booking.resolvedDropoffLng;
+    final double? targetLat = _navigationTargetLat(booking, route, isDriver);
+    final double? targetLng = _navigationTargetLng(booking, route, isDriver);
     if (targetLat != null && targetLng != null) {
       lats.add(targetLat);
       lngs.add(targetLng);
@@ -471,9 +538,11 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
           SnackBar(content: Text('${_capitalize(actionLabel)} updated.')),
         );
 
-        if (actionLabel == 'drop off passenger' ||
-            actionLabel == 'complete trip' ||
-            actionLabel == 'mark no-show' ||
+        if (isDriver &&
+            (actionLabel == 'drop off passenger' ||
+                actionLabel == 'mark no-show')) {
+          await _continueDriverRouteAfterBookingAction();
+        } else if (actionLabel == 'complete trip' ||
             actionLabel == 'finish journey') {
           await ref.read(driverBroadcastProvider.notifier).stopStreaming();
           if (!mounted) {
@@ -513,7 +582,7 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
         body: Center(child: Text('Error: $error')),
       ),
       data: (BookingEntity booking) {
-        final RouteEntity? route = booking.routePolyline == null
+        final RouteEntity? route = isDriver || booking.routePolyline == null
             ? ref.watch(routeDetailProvider(booking.routeId)).valueOrNull
             : null;
         final DriverTrackingState effectiveTracking = isDriver
@@ -562,13 +631,14 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
         _scheduleNavigationRefresh(
           booking: booking,
           tracking: effectiveTracking,
+          route: route,
           isDriver: isDriver,
         );
 
         if (effectiveTracking.latest != null) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
             _panToDriver(effectiveTracking.latest!);
-            _frameTripContext(booking, effectiveTracking);
+            _frameTripContext(booking, effectiveTracking, route, isDriver);
           });
         }
 
@@ -632,6 +702,7 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
               tracking,
               route,
               _navigationState.leg,
+              isDriver: false,
             ),
             myLocationEnabled: true,
             myLocationButtonEnabled: false,
@@ -753,6 +824,7 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
               tracking,
               route,
               _navigationState.leg,
+              isDriver: true,
             ),
           ),
           Positioned(
@@ -948,11 +1020,11 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
   }
 
   Set<Polyline> _buildPolylines(
-    BookingEntity booking,
-    DriverTrackingState tracking,
-    RouteEntity? route,
-    _TripNavigationLeg? navigation,
-  ) {
+      BookingEntity booking,
+      DriverTrackingState tracking,
+      RouteEntity? route,
+      _TripNavigationLeg? navigation,
+      {required bool isDriver}) {
     final Set<Polyline> polylines = <Polyline>{};
 
     if (tracking.history.length >= 2) {
@@ -987,12 +1059,10 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
               width: 5,
             ),
           );
-          final double? targetLat = booking.isPrePickupJourney
-              ? booking.resolvedPickupLat
-              : booking.resolvedDropoffLat;
-          final double? targetLng = booking.isPrePickupJourney
-              ? booking.resolvedPickupLng
-              : booking.resolvedDropoffLng;
+          final double? targetLat =
+              _navigationTargetLat(booking, route, isDriver);
+          final double? targetLng =
+              _navigationTargetLng(booking, route, isDriver);
           final DriverLocationUpdate? latest = tracking.latest;
           if (latest != null && targetLat != null && targetLng != null) {
             polylines.add(

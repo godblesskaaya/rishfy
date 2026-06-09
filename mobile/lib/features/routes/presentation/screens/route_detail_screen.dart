@@ -63,7 +63,6 @@ class _RouteDetailBody extends ConsumerStatefulWidget {
 class _RouteDetailBodyState extends ConsumerState<_RouteDetailBody> {
   RouteEntity get route => widget.route;
   Position? _myPosition;
-  GoogleMapController? _mapController;
 
   @override
   void initState() {
@@ -90,13 +89,15 @@ class _RouteDetailBodyState extends ConsumerState<_RouteDetailBody> {
   }
 
   Set<Polyline> _buildPolylines() {
-    final DriverRouteOperations? operations = widget.routeOperationsAsync.valueOrNull;
+    final DriverRouteOperations? operations =
+        widget.routeOperationsAsync.valueOrNull;
     if (route.encodedPolyline == null || route.encodedPolyline!.isEmpty) {
       return <Polyline>{};
     }
     final List<List<num>> coords = decodePolyline(route.encodedPolyline!);
     final List<LatLng> points = coords
-        .map((List<num> point) => LatLng(point[0].toDouble(), point[1].toDouble()))
+        .map((List<num> point) =>
+            LatLng(point[0].toDouble(), point[1].toDouble()))
         .toList();
     final Set<Polyline> polylines = <Polyline>{
       Polyline(
@@ -150,9 +151,11 @@ class _RouteDetailBodyState extends ConsumerState<_RouteDetailBody> {
   }
 
   Set<Marker> _buildMarkers() {
-    final DriverRouteOperations? operations = widget.routeOperationsAsync.valueOrNull;
+    final DriverRouteOperations? operations =
+        widget.routeOperationsAsync.valueOrNull;
     final Map<String, BookingEntity> bookingsById = <String, BookingEntity>{
-      for (final BookingEntity booking in operations?.bookings ?? <BookingEntity>[])
+      for (final BookingEntity booking
+          in operations?.bookings ?? <BookingEntity>[])
         booking.bookingId: booking,
     };
     final Set<Marker> markers = <Marker>{
@@ -183,11 +186,13 @@ class _RouteDetailBodyState extends ConsumerState<_RouteDetailBody> {
           markerId: const MarkerId('me'),
           position: LatLng(_myPosition!.latitude, _myPosition!.longitude),
           infoWindow: const InfoWindow(title: 'You are here'),
-          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+          icon:
+              BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
         ),
     };
 
-    for (final DriverRouteRunStop stop in operations?.runStops ?? <DriverRouteRunStop>[]) {
+    for (final DriverRouteRunStop stop
+        in operations?.runStops ?? <DriverRouteRunStop>[]) {
       final BookingEntity? booking = bookingsById[stop.bookingId];
       final double? lat = stop.isPickup
           ? booking?.resolvedPickupLat
@@ -211,7 +216,7 @@ class _RouteDetailBodyState extends ConsumerState<_RouteDetailBody> {
         Marker(
           markerId: MarkerId('run_stop_${stop.stopId}'),
           position: LatLng(lat, lng),
-          zIndex: stop.isCurrentWorkItem ? 3 : 1,
+          zIndexInt: stop.isCurrentWorkItem ? 3 : 1,
           icon: BitmapDescriptor.defaultMarkerWithHue(hue),
           infoWindow: InfoWindow(
             title: _taskLabel(stop, booking),
@@ -222,25 +227,6 @@ class _RouteDetailBodyState extends ConsumerState<_RouteDetailBody> {
     }
 
     return markers;
-  }
-
-  LatLngBounds _bounds() {
-    final List<double> lats = <double>[route.originLat, route.destinationLat];
-    final List<double> lngs = <double>[route.originLng, route.destinationLng];
-    if (_myPosition != null) {
-      lats.add(_myPosition!.latitude);
-      lngs.add(_myPosition!.longitude);
-    }
-    return LatLngBounds(
-      southwest: LatLng(
-        lats.reduce((double a, double b) => a < b ? a : b) - 0.01,
-        lngs.reduce((double a, double b) => a < b ? a : b) - 0.01,
-      ),
-      northeast: LatLng(
-        lats.reduce((double a, double b) => a > b ? a : b) + 0.01,
-        lngs.reduce((double a, double b) => a > b ? a : b) + 0.01,
-      ),
-    );
   }
 
   LatLngBounds _operationsBounds(DriverRouteOperations? operations) {
@@ -317,6 +303,17 @@ class _RouteDetailBodyState extends ConsumerState<_RouteDetailBody> {
   }
 
   Future<void> _startRouteRun(BuildContext context) async {
+    final DriverRouteOperations? currentOperations =
+        widget.routeOperationsAsync.valueOrNull;
+    if (currentOperations != null && currentOperations.bookings.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+              'No passenger stops yet. Start passenger operations after a booking is confirmed.'),
+        ),
+      );
+      return;
+    }
     await ref.read(routeRunActionProvider.notifier).startRun(route.routeId);
     final RouteRunActionState result = ref.read(routeRunActionProvider);
     if (!context.mounted) {
@@ -332,6 +329,19 @@ class _RouteDetailBodyState extends ConsumerState<_RouteDetailBody> {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Route run started.')),
     );
+    final DriverRouteOperations? workspace = result.workspace;
+    final DriverRouteRunStop? activeStop = workspace?.activeStop;
+    if (activeStop != null && context.mounted) {
+      unawaited(context.push('/trip/${activeStop.bookingId}'));
+    }
+  }
+
+  void _leaveDetails(BuildContext context) {
+    if (context.canPop()) {
+      context.pop();
+      return;
+    }
+    context.go('/home');
   }
 
   Future<void> _advanceStop(BuildContext context) async {
@@ -378,7 +388,8 @@ class _RouteDetailBodyState extends ConsumerState<_RouteDetailBody> {
     }
     if (result.error != null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(result.error ?? 'Could not complete route run.')),
+        SnackBar(
+            content: Text(result.error ?? 'Could not complete route run.')),
       );
       return;
     }
@@ -400,11 +411,19 @@ class _RouteDetailBodyState extends ConsumerState<_RouteDetailBody> {
         ref.watch(routeRunActionProvider);
     final String price =
         'TZS ${NumberFormat('#,###').format(route.pricePerSeatTzs)}';
-    final String depTime =
-        DateFormat('EEE d MMM, HH:mm').format(route.departureDatetime.toLocal());
+    final String depTime = DateFormat('EEE d MMM, HH:mm')
+        .format(route.departureDatetime.toLocal());
+
+    final bool hasPassengerStops = operations?.bookings.isNotEmpty ?? false;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Route details')),
+      appBar: AppBar(
+        title: const Text('Route details'),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => _leaveDetails(context),
+        ),
+      ),
       body: Column(
         children: <Widget>[
           SizedBox(
@@ -422,14 +441,17 @@ class _RouteDetailBodyState extends ConsumerState<_RouteDetailBody> {
                   markers: _buildMarkers(),
                   polylines: _buildPolylines(),
                   onMapCreated: (GoogleMapController controller) {
-                    _mapController = controller;
                     Future<void>.delayed(const Duration(milliseconds: 300), () {
-                      controller.animateCamera(
-                        CameraUpdate.newLatLngBounds(
-                          _operationsBounds(
-                            isOwnRoute ? widget.routeOperationsAsync.valueOrNull : null,
+                      unawaited(
+                        controller.animateCamera(
+                          CameraUpdate.newLatLngBounds(
+                            _operationsBounds(
+                              isOwnRoute
+                                  ? widget.routeOperationsAsync.valueOrNull
+                                  : null,
+                            ),
+                            40,
                           ),
-                          40,
                         ),
                       );
                     });
@@ -446,7 +468,8 @@ class _RouteDetailBodyState extends ConsumerState<_RouteDetailBody> {
                       stop: operations!.activeStop!,
                       booking: operations.bookings
                           .where((BookingEntity item) =>
-                              item.bookingId == operations.activeStop!.bookingId)
+                              item.bookingId ==
+                              operations.activeStop!.bookingId)
                           .first,
                     ),
                   ),
@@ -568,12 +591,14 @@ class _RouteDetailBodyState extends ConsumerState<_RouteDetailBody> {
                     Expanded(
                       child: PrimaryButton(
                         label: activeRun == null
-                            ? 'Start route run'
+                            ? (hasPassengerStops
+                                ? 'Start route run'
+                                : 'No rider stops yet')
                             : 'Route run active',
                         loading: routeRunActionState.isLoading &&
                             routeRunActionState.lastAction ==
                                 RouteRunActionType.startRun,
-                        onPressed: activeRun == null
+                        onPressed: activeRun == null && hasPassengerStops
                             ? () => unawaited(_startRouteRun(context))
                             : null,
                       ),
@@ -651,14 +676,14 @@ class _RouteOperationsSection extends StatelessWidget {
               children: <Widget>[
                 Text(
                   operations.activeRun == null
-                      ? 'Route run not started'
+                      ? 'No passenger stops yet'
                       : 'No persisted stop plan yet',
                   style: Theme.of(context).textTheme.titleSmall,
                 ),
                 const SizedBox(height: 6),
                 Text(
                   operations.activeRun == null
-                      ? 'Start the route run when you are ready to drive. The server-managed stop list becomes the driver timeline.'
+                      ? 'Your route is posted and visible. Passenger stop management becomes available after a rider books this route.'
                       : 'This run has no stop plan available yet. Refresh after rider tasks are assigned.',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: scheme.onSurfaceVariant,
@@ -993,7 +1018,8 @@ class _RouteRunSummaryCard extends StatelessWidget {
     final ColorScheme scheme = theme.colorScheme;
     final DriverRouteRun? run = operations?.activeRun;
     final DriverRouteRunStop? activeStop = operations?.activeStop;
-    final List<DriverRouteRunStop> stops = operations?.runStops ?? <DriverRouteRunStop>[];
+    final List<DriverRouteRunStop> stops =
+        operations?.runStops ?? <DriverRouteRunStop>[];
     final int completedStops = stops
         .where((DriverRouteRunStop stop) => stop.isCompleted || stop.isSkipped)
         .length;
@@ -1023,7 +1049,9 @@ class _RouteRunSummaryCard extends StatelessWidget {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  run == null ? 'Route ready to launch' : 'Route run in progress',
+                  run == null
+                      ? 'Route ready to launch'
+                      : 'Route run in progress',
                   style: theme.textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.w800,
                   ),
@@ -1050,7 +1078,9 @@ class _RouteRunSummaryCard extends StatelessWidget {
               _KpiPill(
                 icon: Icons.timeline,
                 label: 'Stops',
-                value: totalStops == 0 ? 'None yet' : '$completedStops / $totalStops complete',
+                value: totalStops == 0
+                    ? 'None yet'
+                    : '$completedStops / $totalStops complete',
               ),
               _KpiPill(
                 icon: Icons.event_seat,
@@ -1060,7 +1090,8 @@ class _RouteRunSummaryCard extends StatelessWidget {
               _KpiPill(
                 icon: Icons.schedule,
                 label: 'Departure',
-                value: DateFormat('HH:mm').format(route.departureDatetime.toLocal()),
+                value: DateFormat('HH:mm')
+                    .format(route.departureDatetime.toLocal()),
               ),
             ],
           ),
@@ -1083,8 +1114,9 @@ class _RouteMapOverlay extends StatelessWidget {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-    final int? eta =
-        stop.isPickup ? booking.etaToPickupSeconds : booking.etaToDropoffSeconds;
+    final int? eta = stop.isPickup
+        ? booking.etaToPickupSeconds
+        : booking.etaToDropoffSeconds;
 
     return Material(
       elevation: 3,

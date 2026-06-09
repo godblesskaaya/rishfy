@@ -47,7 +47,8 @@ class _PostRouteScreenState extends ConsumerState<PostRouteScreen> {
   LocationSearchResult? _destinationSelection;
   List<LocationSearchResult> _waypoints = const <LocationSearchResult>[];
 
-  List<LocationSearchResult> _originSuggestions = const <LocationSearchResult>[];
+  List<LocationSearchResult> _originSuggestions =
+      const <LocationSearchResult>[];
   List<LocationSearchResult> _destinationSuggestions =
       const <LocationSearchResult>[];
   bool _loadingOriginSuggestions = false;
@@ -103,10 +104,8 @@ class _PostRouteScreenState extends ConsumerState<PostRouteScreen> {
     for (int i = 0; i < _waypoints.length; i++) {
       markers.add(Marker(
         markerId: MarkerId('waypoint_$i'),
-        position:
-            LatLng(_waypoints[i].latitude, _waypoints[i].longitude),
-        icon:
-            BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+        position: LatLng(_waypoints[i].latitude, _waypoints[i].longitude),
+        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
         infoWindow: InfoWindow(title: _waypoints[i].label),
       ));
     }
@@ -437,7 +436,7 @@ class _PostRouteScreenState extends ConsumerState<PostRouteScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Route posted successfully.')),
     );
-    context.go('/routes/${state.createdRoute!.routeId}');
+    context.pushReplacement('/routes/${state.createdRoute!.routeId}');
   }
 
   // ── Build ────────────────────────────────────────────────────────────────────
@@ -653,7 +652,8 @@ class _PostRouteScreenState extends ConsumerState<PostRouteScreen> {
                                   Expanded(
                                     child: OutlinedButton.icon(
                                       onPressed: _pickDepartureTime,
-                                      icon: const Icon(Icons.schedule, size: 18),
+                                      icon:
+                                          const Icon(Icons.schedule, size: 18),
                                       label:
                                           Text(_departureTime.format(context)),
                                     ),
@@ -676,12 +676,12 @@ class _PostRouteScreenState extends ConsumerState<PostRouteScreen> {
                                 spacing: 8,
                                 children: <int>[0, 5, 10, 15, 30]
                                     .map((int m) => ChoiceChip(
-                                          label: Text(
-                                              m == 0 ? 'Exact' : '$m min'),
+                                          label:
+                                              Text(m == 0 ? 'Exact' : '$m min'),
                                           selected: _flexibilityMinutes == m,
                                           onSelected: (_) {
-                                            setState(() =>
-                                                _flexibilityMinutes = m);
+                                            setState(
+                                                () => _flexibilityMinutes = m);
                                             _resetPreview();
                                           },
                                         ))
@@ -702,8 +702,8 @@ class _PostRouteScreenState extends ConsumerState<PostRouteScreen> {
                                         ? () =>
                                             setState(() => _availableSeats--)
                                         : null,
-                                    icon: const Icon(
-                                        Icons.remove_circle_outline),
+                                    icon:
+                                        const Icon(Icons.remove_circle_outline),
                                   ),
                                   Text('$_availableSeats'),
                                   IconButton(
@@ -711,8 +711,7 @@ class _PostRouteScreenState extends ConsumerState<PostRouteScreen> {
                                         ? () =>
                                             setState(() => _availableSeats++)
                                         : null,
-                                    icon:
-                                        const Icon(Icons.add_circle_outline),
+                                    icon: const Icon(Icons.add_circle_outline),
                                   ),
                                 ],
                               ),
@@ -762,8 +761,7 @@ class _PostRouteScreenState extends ConsumerState<PostRouteScreen> {
                                   ),
                                   validator: (String? value) {
                                     if (!useManualVehicle) return null;
-                                    final String raw =
-                                        (value ?? '').trim();
+                                    final String raw = (value ?? '').trim();
                                     if (raw.isEmpty) {
                                       return 'Vehicle UUID is required';
                                     }
@@ -814,8 +812,7 @@ class _PostRouteScreenState extends ConsumerState<PostRouteScreen> {
                                 const SizedBox(height: 8),
                                 Text(
                                   'Loading vehicles…',
-                                  style:
-                                      Theme.of(context).textTheme.bodySmall,
+                                  style: Theme.of(context).textTheme.bodySmall,
                                 ),
                               ],
                               if (vehicleOptions.isEmpty &&
@@ -823,8 +820,7 @@ class _PostRouteScreenState extends ConsumerState<PostRouteScreen> {
                                 const SizedBox(height: 8),
                                 Text(
                                   'No vehicles on your profile yet. Enter UUID manually.',
-                                  style:
-                                      Theme.of(context).textTheme.bodySmall,
+                                  style: Theme.of(context).textTheme.bodySmall,
                                 ),
                               ],
                               if (vehiclesAsync.hasError) ...<Widget>[
@@ -832,9 +828,8 @@ class _PostRouteScreenState extends ConsumerState<PostRouteScreen> {
                                 Text(
                                   'Vehicle list unavailable. Enter UUID manually.',
                                   style: TextStyle(
-                                      color: Theme.of(context)
-                                          .colorScheme
-                                          .error),
+                                      color:
+                                          Theme.of(context).colorScheme.error),
                                 ),
                               ],
                               const SizedBox(height: 24),
@@ -982,16 +977,15 @@ class _FloatingHeader extends StatelessWidget {
                     decoration: InputDecoration(
                       hintText: 'From…',
                       border: InputBorder.none,
-                      contentPadding:
-                          const EdgeInsets.symmetric(vertical: 14),
+                      contentPadding: const EdgeInsets.symmetric(vertical: 14),
                       suffixIcon: loadingOrigin
                           ? const SizedBox(
                               width: 16,
                               height: 16,
                               child: Padding(
                                 padding: EdgeInsets.all(12),
-                                child: CircularProgressIndicator(
-                                    strokeWidth: 2),
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2),
                               ),
                             )
                           : (originSelected
@@ -1026,16 +1020,15 @@ class _FloatingHeader extends StatelessWidget {
                     decoration: InputDecoration(
                       hintText: 'To…',
                       border: InputBorder.none,
-                      contentPadding:
-                          const EdgeInsets.symmetric(vertical: 14),
+                      contentPadding: const EdgeInsets.symmetric(vertical: 14),
                       suffixIcon: loadingDestination
                           ? const SizedBox(
                               width: 16,
                               height: 16,
                               child: Padding(
                                 padding: EdgeInsets.all(12),
-                                child: CircularProgressIndicator(
-                                    strokeWidth: 2),
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2),
                               ),
                             )
                           : (destinationSelected
@@ -1052,8 +1045,7 @@ class _FloatingHeader extends StatelessWidget {
             const Divider(height: 1),
             // Map target chips
             Padding(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               child: Row(
                 children: <Widget>[
                   const Icon(Icons.touch_app_outlined,
@@ -1125,8 +1117,8 @@ class _SuggestionOverlay extends StatelessWidget {
               return ListTile(
                 dense: true,
                 leading: const Icon(Icons.place_outlined, size: 18),
-                title: Text(r.label,
-                    style: Theme.of(context).textTheme.bodySmall),
+                title:
+                    Text(r.label, style: Theme.of(context).textTheme.bodySmall),
                 subtitle: Text(r.asLatLng,
                     style: Theme.of(context).textTheme.labelSmall),
                 onTap: () => onSelect(r),
@@ -1192,8 +1184,9 @@ class _WaypointList extends StatelessWidget {
               child: ListTile(
                 dense: true,
                 leading: CircleAvatar(
-                    radius: 12, child: Text('${index + 1}',
-                    style: const TextStyle(fontSize: 11))),
+                    radius: 12,
+                    child: Text('${index + 1}',
+                        style: const TextStyle(fontSize: 11))),
                 title: Text(waypoint.label),
                 subtitle: Text(waypoint.asLatLng),
                 trailing: IconButton(
@@ -1264,8 +1257,7 @@ class _ErrorCard extends StatelessWidget {
       ),
       child: Text(
         message,
-        style: TextStyle(
-            color: Theme.of(context).colorScheme.onErrorContainer),
+        style: TextStyle(color: Theme.of(context).colorScheme.onErrorContainer),
       ),
     );
   }

@@ -264,6 +264,14 @@ class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
     return '${mins.toString().padLeft(2, '0')}:${secs.toString().padLeft(2, '0')}';
   }
 
+  void _leaveDetails(BuildContext context) {
+    if (context.canPop()) {
+      context.pop();
+      return;
+    }
+    context.go('/bookings');
+  }
+
   @override
   Widget build(BuildContext context) {
     final AsyncValue<BookingEntity> asyncBooking =
@@ -272,7 +280,13 @@ class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
     final DeclineBookingState declineState = ref.watch(declineBookingProvider);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Booking details')),
+      appBar: AppBar(
+        title: const Text('Booking details'),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => _leaveDetails(context),
+        ),
+      ),
       body: asyncBooking.when(
         loading: () => const LoadingView(message: 'Loading booking...'),
         error: (Object error, _) => ErrorView(
@@ -443,11 +457,13 @@ class _BookingSummaryCard extends StatelessWidget {
                 ),
                 _BookingInfoChip(
                   icon: Icons.event_seat,
-                  label: '${booking.seatCount} seat${booking.seatCount == 1 ? '' : 's'}',
+                  label:
+                      '${booking.seatCount} seat${booking.seatCount == 1 ? '' : 's'}',
                 ),
                 _BookingInfoChip(
                   icon: Icons.payments_outlined,
-                  label: 'TZS ${NumberFormat('#,###').format(booking.totalPriceTzs)}',
+                  label:
+                      'TZS ${NumberFormat('#,###').format(booking.totalPriceTzs)}',
                 ),
                 _BookingInfoChip(
                   icon: Icons.verified_outlined,
@@ -504,9 +520,8 @@ class _BookingActionCard extends StatelessWidget {
         : booking.canParticipantCompleteJourney
             ? 'Final walk'
             : 'Current status';
-    final String message = isDriver
-        ? _driverMessage(booking)
-        : _passengerMessage(booking);
+    final String message =
+        isDriver ? _driverMessage(booking) : _passengerMessage(booking);
 
     return Container(
       padding: const EdgeInsets.all(AppConstants.spaceMd),
