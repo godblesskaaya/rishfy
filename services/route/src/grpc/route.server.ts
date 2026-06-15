@@ -5,6 +5,7 @@ import { config } from '../config.js';
 import { logger } from '../logger.js';
 import { RouteRepository } from '../repositories/route.repository.js';
 import { pgPool } from '../db.js';
+import type { RouteRow } from '../repositories/route.repository.js';
 
 const PROTO_PATH = path.resolve(process.cwd(), 'shared/protos/route.proto');
 
@@ -31,6 +32,76 @@ interface ReleaseSeatsReq { reservationId: string; bookingId: string; reason: st
 interface ReleaseSeatsRes { success: boolean; seatsRemaining: number }
 interface GetAvailabilityReq { routeId: string }
 interface GetAvailabilityRes { totalSeats: number; availableSeats: number; pendingReservations: number }
+interface GetRouteReq { routeId: string }
+
+function toTimestamp(d: Date | null | undefined): { seconds: number; nanos: number } | undefined {
+  if (!d) return undefined;
+  return { seconds: Math.floor(d.getTime() / 1000), nanos: 0 };
+}
+
+function statusToProto(status: RouteRow['status']): string {
+  switch (status) {
+    case 'draft':
+      return 'ROUTE_STATUS_DRAFT';
+    case 'full':
+      return 'ROUTE_STATUS_FULL';
+    case 'departed':
+      return 'ROUTE_STATUS_IN_PROGRESS';
+    case 'completed':
+      return 'ROUTE_STATUS_COMPLETED';
+    case 'cancelled':
+      return 'ROUTE_STATUS_CANCELLED';
+    case 'active':
+    default:
+      return 'ROUTE_STATUS_POSTED';
+  }
+}
+
+function routeToProto(route: RouteRow) {
+  const durationSeconds = route.duration_seconds ?? 0;
+  return {
+    routeId: route.id,
+    driverUserId: route.driver_id,
+    vehicleId: route.vehicle_id,
+    origin: {
+      coordinates: {
+        latitude: Number(route.origin_lat),
+        longitude: Number(route.origin_lng),
+      },
+      formattedAddress: route.origin_name,
+      city: '',
+      region: '',
+    },
+    destination: {
+      coordinates: {
+        latitude: Number(route.destination_lat),
+        longitude: Number(route.destination_lng),
+      },
+      formattedAddress: route.destination_name,
+      city: '',
+      region: '',
+    },
+    waypoints: [],
+    departureTime: toTimestamp(route.departure_time),
+    estimatedArrival: toTimestamp(new Date(route.departure_time.getTime() + durationSeconds * 1000)),
+    totalSeats: route.available_seats,
+    availableSeats: route.available_seats - route.booked_seats,
+    pricePerSeat: {
+      amount: String(Math.round(Number.parseFloat(route.price_per_seat) || 0)),
+      currency: 'TZS',
+    },
+    status: statusToProto(route.status),
+    polyline: route.polyline ?? '',
+    distanceMeters: route.distance_meters ?? 0,
+    durationSeconds,
+    smokingAllowed: false,
+    petsAllowed: false,
+    musicPreference: false,
+    notes: '',
+    createdAt: toTimestamp(route.created_at),
+    updatedAt: toTimestamp(route.updated_at),
+  };
+}
 
 const reserveSeats: Handler<ReserveSeatsReq, ReserveSeatsRes> = async (call, callback) => {
   try {
@@ -82,14 +153,27 @@ const getRouteAvailability: Handler<GetAvailabilityReq, GetAvailabilityRes> = as
   }
 };
 
+const getRoute: Handler<GetRouteReq, unknown> = async (call, callback) => {
+  try {
+    const route = await repo.findById(call.request.routeId);
+    if (!route) {
+      callback({ code: grpc.status.NOT_FOUND, message: 'route not found' } as grpc.ServiceError);
+      return;
+    }
+    callback(null, routeToProto(route));
+  } catch (err) {
+    logger.error({ err }, 'getRoute gRPC error');
+    callback({ code: grpc.status.INTERNAL, message: 'internal error' } as grpc.ServiceError);
+  }
+};
+
 export function startGrpcServer(): grpc.Server {
   const server = new grpc.Server();
   server.addService(RouteServiceDef.service, {
     reserveSeats,
     releaseSeats,
     getRouteAvailability,
-    getRoute: (_call: grpc.ServerUnaryCall<unknown, unknown>, callback: grpc.sendUnaryData<unknown>) =>
-      callback({ code: grpc.status.UNIMPLEMENTED } as grpc.ServiceError),
+    getRoute,
     getRoutesBatch: (_call: grpc.ServerUnaryCall<unknown, unknown>, callback: grpc.sendUnaryData<unknown>) =>
       callback({ code: grpc.status.UNIMPLEMENTED } as grpc.ServiceError),
     searchRoutes: (_call: grpc.ServerUnaryCall<unknown, unknown>, callback: grpc.sendUnaryData<unknown>) =>

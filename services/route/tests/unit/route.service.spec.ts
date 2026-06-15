@@ -773,6 +773,35 @@ describe('RouteService.searchRoutes — Stage 3 temporal filter', () => {
     expect(results.length).toBe(1);
     expect(results[0]?.route_id).toBe('route-1');
   });
+
+  it('keeps candidates slightly outside the preferred time window with tradeoff metadata', async () => {
+    const nearOutsideWindow = {
+      ...mockRoute,
+      id: 'route-near-time',
+      departure_time: new Date('2026-05-01T06:10:00Z'),
+      pickup_fraction: 0.1,
+      dropoff_fraction: 0.8,
+      closest_pickup_geojson: '{"type":"Point","coordinates":[39.22,-6.795]}',
+      closest_dropoff_geojson: '{"type":"Point","coordinates":[39.28,-6.81]}',
+    };
+
+    const pool = makePool();
+    const redis = makeRedis();
+    vi.mocked(pool.query).mockResolvedValueOnce({ rows: [nearOutsideWindow] } as never);
+
+    const svc = new RouteService(pool, redis);
+    const results = await svc.searchRoutes({
+      pickup_lat: -6.795, pickup_lng: 39.22,
+      dropoff_lat: -6.81, dropoff_lng: 39.28,
+      desired_departure_time: desiredTime,
+      time_flexibility_minutes: 30,
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0]?.route_id).toBe('route-near-time');
+    expect(results[0]?.time_exceeds_preference).toBe(true);
+    expect(results[0]?.time_overage_minutes).toBe(17);
+  });
 });
 
 // ─── searchRoutes — Stage 4 walking distance cache ───────────────────────────
@@ -821,7 +850,7 @@ describe('RouteService.searchRoutes — Stage 4 walking distance cache', () => {
     expect(mockGetWalkingDistance).not.toHaveBeenCalled();
   });
 
-  it('discards candidate when walking distance exceeds max', async () => {
+  it('keeps candidates slightly outside preferred walking distance with tradeoff metadata', async () => {
     const futureTime = new Date(Date.now() + 3600_000);
     const futureCandidate = {
       ...candidate,
@@ -844,6 +873,35 @@ describe('RouteService.searchRoutes — Stage 4 walking distance cache', () => {
       desired_departure_time: futureTime,
     });
 
+    expect(results).toHaveLength(1);
+    expect(results[0]?.walking_exceeds_preference).toBe(true);
+    expect(results[0]?.walking_overage_meters).toBe(1000);
+    expect(results[0]?.match_quality).toBe('flexible');
+  });
+
+  it('discards candidates outside the expanded walking limit', async () => {
+    const futureTime = new Date(Date.now() + 3600_000);
+    const futureCandidate = {
+      ...candidate,
+      departure_time: futureTime,
+      closest_pickup_geojson: '{"type":"Point","coordinates":[39.215,-6.793]}',
+      closest_dropoff_geojson: '{"type":"Point","coordinates":[39.285,-6.808]}',
+    };
+
+    const pool = makePool();
+    const redis = makeRedis();
+    vi.mocked(pool.query).mockResolvedValueOnce({ rows: [futureCandidate] } as never);
+
+    mockGetWalkingDistance.mockResolvedValue({ distance_meters: 1800, duration_seconds: 1200 });
+
+    const svc = new RouteService(pool, redis);
+    const results = await svc.searchRoutes({
+      pickup_lat: -6.795, pickup_lng: 39.22,
+      dropoff_lat: -6.81, dropoff_lng: 39.28,
+      max_walking_distance_meters: 1000,
+      desired_departure_time: futureTime,
+    });
+
     expect(results).toHaveLength(0);
   });
 });
@@ -851,7 +909,7 @@ describe('RouteService.searchRoutes — Stage 4 walking distance cache', () => {
 // ─── searchRoutes — Stage 5 ranking ──────────────────────────────────────────
 
 describe('RouteService.searchRoutes — Stage 5 ranking', () => {
-  it('returns results sorted by walking_distance_to_pickup ascending', async () => {
+  it('returns results sorted by passenger tradeoff score', async () => {
     const futureTime = new Date(Date.now() + 3600_000);
     const base = {
       ...mockRoute,
@@ -889,6 +947,7 @@ describe('RouteService.searchRoutes — Stage 5 ranking', () => {
 
     expect(results[0]?.route_id).toBe('route-close');
     expect(results[1]?.route_id).toBe('route-far');
+    expect(results[0]!.match_score).toBeGreaterThan(results[1]!.match_score);
     expect(results[0]!.walking_distance_to_pickup).toBeLessThan(results[1]!.walking_distance_to_pickup);
   });
 });

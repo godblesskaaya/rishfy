@@ -473,9 +473,18 @@ services:
     volumes:
       - ./infrastructure/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
-    ports:
-      - "9090:9090"
-    networks: [rishfy_net]
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=proxy"
+      - "traefik.http.routers.rishfy-prometheus-http.rule=Host(`prometheus.rishfy.com`)"
+      - "traefik.http.routers.rishfy-prometheus-http.entrypoints=web"
+      - "traefik.http.routers.rishfy-prometheus-http.middlewares=rishfy-prometheus-https-redirect"
+      - "traefik.http.routers.rishfy-prometheus.rule=Host(`prometheus.rishfy.com`)"
+      - "traefik.http.routers.rishfy-prometheus.entrypoints=websecure"
+      - "traefik.http.routers.rishfy-prometheus.tls.certresolver=letsencrypt"
+      - "traefik.http.middlewares.rishfy-prometheus-https-redirect.redirectscheme.scheme=https"
+      - "traefik.http.services.rishfy-prometheus.loadbalancer.server.port=9090"
+    networks: [rishfy_net, proxy]
 
   grafana:
     image: grafana/grafana:latest
@@ -490,9 +499,18 @@ services:
       - grafana_data:/var/lib/grafana
       - ./infrastructure/grafana/datasources:/etc/grafana/provisioning/datasources:ro
       - ./infrastructure/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
-    ports:
-      - "3001:3000"
-    networks: [rishfy_net]
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=proxy"
+      - "traefik.http.routers.rishfy-grafana-http.rule=Host(`grafana.rishfy.com`)"
+      - "traefik.http.routers.rishfy-grafana-http.entrypoints=web"
+      - "traefik.http.routers.rishfy-grafana-http.middlewares=rishfy-grafana-https-redirect"
+      - "traefik.http.routers.rishfy-grafana.rule=Host(`grafana.rishfy.com`)"
+      - "traefik.http.routers.rishfy-grafana.entrypoints=websecure"
+      - "traefik.http.routers.rishfy-grafana.tls.certresolver=letsencrypt"
+      - "traefik.http.middlewares.rishfy-grafana-https-redirect.redirectscheme.scheme=https"
+      - "traefik.http.services.rishfy-grafana.loadbalancer.server.port=3000"
+    networks: [rishfy_net, proxy]
 
   jaeger:
     image: jaegertracing/all-in-one:1.55
@@ -500,11 +518,18 @@ services:
     restart: unless-stopped
     environment:
       COLLECTOR_OTLP_ENABLED: "true"
-    ports:
-      - "16686:16686"   # UI
-      - "4317:4317"     # OTLP gRPC
-      - "4318:4318"     # OTLP HTTP
-    networks: [rishfy_net]
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=proxy"
+      - "traefik.http.routers.rishfy-jaeger-http.rule=Host(`jaeger.rishfy.com`)"
+      - "traefik.http.routers.rishfy-jaeger-http.entrypoints=web"
+      - "traefik.http.routers.rishfy-jaeger-http.middlewares=rishfy-jaeger-https-redirect"
+      - "traefik.http.routers.rishfy-jaeger.rule=Host(`jaeger.rishfy.com`)"
+      - "traefik.http.routers.rishfy-jaeger.entrypoints=websecure"
+      - "traefik.http.routers.rishfy-jaeger.tls.certresolver=letsencrypt"
+      - "traefik.http.middlewares.rishfy-jaeger-https-redirect.redirectscheme.scheme=https"
+      - "traefik.http.services.rishfy-jaeger.loadbalancer.server.port=16686"
+    networks: [rishfy_net, proxy]
 
   loki:
     image: grafana/loki:2.9.8
@@ -514,9 +539,18 @@ services:
     volumes:
       - ./infrastructure/loki-config.yml:/etc/loki/config.yml:ro
       - loki_data:/loki
-    ports:
-      - "3100:3100"
-    networks: [rishfy_net]
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=proxy"
+      - "traefik.http.routers.rishfy-loki-http.rule=Host(`loki.rishfy.com`)"
+      - "traefik.http.routers.rishfy-loki-http.entrypoints=web"
+      - "traefik.http.routers.rishfy-loki-http.middlewares=rishfy-loki-https-redirect"
+      - "traefik.http.routers.rishfy-loki.rule=Host(`loki.rishfy.com`)"
+      - "traefik.http.routers.rishfy-loki.entrypoints=websecure"
+      - "traefik.http.routers.rishfy-loki.tls.certresolver=letsencrypt"
+      - "traefik.http.middlewares.rishfy-loki-https-redirect.redirectscheme.scheme=https"
+      - "traefik.http.services.rishfy-loki.loadbalancer.server.port=3100"
+    networks: [rishfy_net, proxy]
 
   promtail:
     image: grafana/promtail:2.9.8

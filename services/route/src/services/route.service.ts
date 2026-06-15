@@ -63,6 +63,16 @@ export interface SearchResult {
   estimated_pickup_time: Date;
   available_seats: number;
   price_per_seat: string;
+  walking_preference_meters: number;
+  expanded_walking_limit_meters: number;
+  walking_exceeds_preference: boolean;
+  walking_overage_meters: number;
+  time_difference_minutes: number;
+  time_exceeds_preference: boolean;
+  time_overage_minutes: number;
+  match_quality: 'best' | 'good' | 'flexible';
+  match_score: number;
+  match_reasons: string[];
 }
 
 export interface DriverRouteOperation {
@@ -109,6 +119,91 @@ export class RouteService {
       p.max_walking_distance_meters ?? 1000,
       p.seats_needed ?? 1,
     ].join(':');
+  }
+
+  private expandedWalkingLimit(preferredMeters: number) {
+    return Math.min(
+      5000,
+      Math.max(preferredMeters + 750, Math.ceil(preferredMeters * 1.75)),
+    );
+  }
+
+  private expandedTimeFlexMs(preferredFlexMs: number) {
+    return Math.min(
+      180 * 60_000,
+      Math.max(preferredFlexMs + 15 * 60_000, Math.ceil(preferredFlexMs * 1.25)),
+    );
+  }
+
+  private buildMatchMetadata(input: {
+    pickupWalkMeters: number;
+    dropoffWalkMeters: number;
+    preferredWalkMeters: number;
+    timeDifferenceMinutes: number;
+    passengerFlexMinutes: number;
+    availableSeats: number;
+    seatsNeeded: number;
+    pricePerSeat: string;
+    driverRating: string | null;
+  }) {
+    const pickupOverage = Math.max(0, input.pickupWalkMeters - input.preferredWalkMeters);
+    const dropoffOverage = Math.max(0, input.dropoffWalkMeters - input.preferredWalkMeters);
+    const walkingOverage = pickupOverage + dropoffOverage;
+    const totalWalkingMeters = input.pickupWalkMeters + input.dropoffWalkMeters;
+    const price = Number.parseFloat(input.pricePerSeat);
+    const rating = input.driverRating === null ? null : Number.parseFloat(input.driverRating);
+    const seatSurplus = Math.max(0, input.availableSeats - input.seatsNeeded);
+
+    const rankingScore =
+      totalWalkingMeters / 60 +
+      walkingOverage / 12 +
+      input.timeDifferenceMinutes * 1.6 +
+      (Number.isFinite(price) ? price / 2500 : 0) -
+      Math.min(seatSurplus, 3) * 2 -
+      (rating !== null && Number.isFinite(rating) ? Math.max(0, rating - 4) * 5 : 0);
+
+    const matchScore = Math.max(0, Math.min(100, Math.round(100 - rankingScore)));
+    const walkingExceedsPreference = walkingOverage > 0;
+    const timeOverageMinutes = Math.max(0, input.timeDifferenceMinutes - input.passengerFlexMinutes);
+    const timeExceedsPreference = timeOverageMinutes > 0;
+
+    const matchQuality: SearchResult['match_quality'] =
+      !walkingExceedsPreference &&
+      !timeExceedsPreference &&
+      input.timeDifferenceMinutes <= Math.ceil(input.passengerFlexMinutes / 2)
+        ? 'best'
+        : walkingOverage <= 500 && timeOverageMinutes <= 15
+          ? 'good'
+          : 'flexible';
+
+    const matchReasons: string[] = [];
+    if (walkingExceedsPreference) {
+      matchReasons.push(`Walking is ${walkingOverage} m over your preference`);
+    } else {
+      matchReasons.push('Within preferred walking distance');
+    }
+    if (input.timeDifferenceMinutes === 0) {
+      matchReasons.push('Pickup time matches your request');
+    } else if (timeExceedsPreference) {
+      matchReasons.push(`Pickup is ${timeOverageMinutes} min outside your time preference`);
+    } else {
+      matchReasons.push(`Pickup is ${input.timeDifferenceMinutes} min from your requested time`);
+    }
+    if (seatSurplus > 0) {
+      matchReasons.push(`${seatSurplus} extra seat${seatSurplus === 1 ? '' : 's'} available`);
+    }
+
+    return {
+      walking_exceeds_preference: walkingExceedsPreference,
+      walking_overage_meters: walkingOverage,
+      time_difference_minutes: input.timeDifferenceMinutes,
+      time_exceeds_preference: timeExceedsPreference,
+      time_overage_minutes: timeOverageMinutes,
+      match_quality: matchQuality,
+      match_score: matchScore,
+      match_reasons: matchReasons,
+      rankingScore,
+    };
   }
 
   async previewRoute(input: PreviewRouteInput) {
@@ -381,9 +476,12 @@ export class RouteService {
     if (cached) return JSON.parse(cached) as SearchResult[];
 
     // Stages 1 + 2: PostGIS coarse spatial filter + sequence validation
+    const preferredWalk = params.max_walking_distance_meters ?? 1000;
+    const expandedWalkLimit = this.expandedWalkingLimit(preferredWalk);
+
     const stage12 = await this.repo.searchNearby({
       ...params,
-      coarse_radius_meters: config.COARSE_MATCH_RADIUS_METERS,
+      coarse_radius_meters: Math.max(config.COARSE_MATCH_RADIUS_METERS, expandedWalkLimit),
     });
 
     // Stage 3: Temporal filter
@@ -398,12 +496,15 @@ export class RouteService {
       })
       .filter(r => {
         const driverFlexMs = (r.flexibility_minutes ?? 15) * 60_000;
-        return Math.abs(r.estimated_pickup_time.getTime() - desiredTime.getTime()) <= passengerFlexMs + driverFlexMs;
+        const preferredFlexMs = passengerFlexMs + driverFlexMs;
+        return Math.abs(r.estimated_pickup_time.getTime() - desiredTime.getTime()) <=
+          this.expandedTimeFlexMs(preferredFlexMs);
       });
 
     // Stage 4: Walking distance via routing API with geohash cache
-    const maxWalk = params.max_walking_distance_meters ?? 1000;
-    const results: SearchResult[] = [];
+    const passengerFlexMinutes = params.time_flexibility_minutes ?? 30;
+    const seatsNeeded = params.seats_needed ?? 1;
+    const rankedResults: Array<SearchResult & { ranking_score: number }> = [];
 
     for (const candidate of stage3) {
       const pickupCoords = JSON.parse(candidate.closest_pickup_geojson) as { coordinates: [number, number] };
@@ -416,20 +517,35 @@ export class RouteService {
         { lat: params.pickup_lat, lng: params.pickup_lng },
         { lat: pickupLat, lng: pickupLng },
       );
-      if (!pickupWalk || pickupWalk.distance_meters > maxWalk) continue;
+      if (!pickupWalk || pickupWalk.distance_meters > expandedWalkLimit) continue;
 
       // Walking from dropoff
       const dropoffWalk = await this.cachedWalkingDistance(
         { lat: dropoffLat, lng: dropoffLng },
         { lat: params.dropoff_lat, lng: params.dropoff_lng },
       );
-      if (!dropoffWalk || dropoffWalk.distance_meters > maxWalk) continue;
+      if (!dropoffWalk || dropoffWalk.distance_meters > expandedWalkLimit) continue;
 
       // Reverse-geocode route-relative rendezvous names
       const pickupName = await this.cachedReverseGeocode(pickupLat, pickupLng);
       const dropoffName = await this.cachedReverseGeocode(dropoffLat, dropoffLng);
+      const availableSeats = candidate.available_seats - candidate.booked_seats;
+      const timeDifferenceMinutes = Math.round(
+        Math.abs(candidate.estimated_pickup_time.getTime() - desiredTime.getTime()) / 60_000,
+      );
+      const metadata = this.buildMatchMetadata({
+        pickupWalkMeters: pickupWalk.distance_meters,
+        dropoffWalkMeters: dropoffWalk.distance_meters,
+        preferredWalkMeters: preferredWalk,
+        timeDifferenceMinutes,
+        passengerFlexMinutes,
+        availableSeats,
+        seatsNeeded,
+        pricePerSeat: candidate.price_per_seat,
+        driverRating: candidate.driver_rating,
+      });
 
-      results.push({
+      rankedResults.push({
         route_id: candidate.id,
         driver_id: candidate.driver_id,
         driver_name: candidate.driver_name,
@@ -446,13 +562,33 @@ export class RouteService {
         walking_time_from_dropoff: dropoffWalk.duration_seconds,
         driver_departure_time: candidate.departure_time,
         estimated_pickup_time: candidate.estimated_pickup_time,
-        available_seats: candidate.available_seats - candidate.booked_seats,
+        available_seats: availableSeats,
         price_per_seat: candidate.price_per_seat,
+        walking_preference_meters: preferredWalk,
+        expanded_walking_limit_meters: expandedWalkLimit,
+        walking_exceeds_preference: metadata.walking_exceeds_preference,
+        walking_overage_meters: metadata.walking_overage_meters,
+        time_difference_minutes: metadata.time_difference_minutes,
+        time_exceeds_preference: metadata.time_exceeds_preference,
+        time_overage_minutes: metadata.time_overage_minutes,
+        match_quality: metadata.match_quality,
+        match_score: metadata.match_score,
+        match_reasons: metadata.match_reasons,
+        ranking_score: metadata.rankingScore,
       });
     }
 
-    // Stage 5: Rank by walking distance to pickup
-    results.sort((a, b) => a.walking_distance_to_pickup - b.walking_distance_to_pickup);
+    // Stage 5: Rank by total passenger tradeoff, with walking still the dominant signal.
+    rankedResults.sort((a, b) =>
+      a.ranking_score - b.ranking_score ||
+      a.walking_distance_to_pickup - b.walking_distance_to_pickup ||
+      a.estimated_pickup_time.getTime() - b.estimated_pickup_time.getTime(),
+    );
+    const results: SearchResult[] = rankedResults.map((resultWithScore) => {
+      const result = { ...resultWithScore };
+      delete (result as Partial<typeof resultWithScore>).ranking_score;
+      return result;
+    });
 
     await this.redis.setex(cacheKey, 60, JSON.stringify(results));
     return results;
@@ -542,7 +678,7 @@ export class RouteService {
       case 'journey_state_cancelled':
         return 6;
       default:
-        return status.toLowerCase() == 'booking_status_completed' ? 5 : 7;
+        return status.toLowerCase() === 'booking_status_completed' ? 5 : 7;
     }
   }
 

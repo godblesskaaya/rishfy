@@ -16,8 +16,7 @@ scrape_configs:
   # NGINX gateway metrics
   - job_name: nginx
     static_configs:
-      - targets: ['nginx:80']
-    metrics_path: /metrics
+      - targets: ['nginx-exporter:9113']
 
   # Application services
   - job_name: rishfy-services
@@ -36,17 +35,6 @@ scrape_configs:
         target_label: service
         regex: '(.+)-service:.*'
         replacement: '$1'
-
-  # Infrastructure
-  - job_name: postgres
-    static_configs:
-      - targets: ['postgres-exporter:9187']
-    # Requires optional postgres-exporter container
-
-  - job_name: redis
-    static_configs:
-      - targets: ['redis-exporter:9121']
-    # Requires optional redis-exporter container
 
   - job_name: prometheus
     static_configs:

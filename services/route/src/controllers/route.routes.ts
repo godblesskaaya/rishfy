@@ -52,6 +52,7 @@ const searchSchema = z.object({
   dropoff_lng: z.coerce.number().min(-180).max(180),
   desired_departure_time: z.string().optional(),
   time_flexibility_minutes: z.coerce.number().int().min(0).max(120).default(30),
+  preferred_walking_distance: z.coerce.number().int().min(100).max(5000).optional(),
   max_walking_distance: z.coerce.number().int().min(100).max(5000).default(1000),
   seats_needed: z.coerce.number().int().min(1).default(1),
 });
@@ -80,7 +81,7 @@ export async function routeRoutes(app: FastifyInstance, { svc }: { svc: RouteSer
         dropoff_lng: params.dropoff_lng,
         desired_departure_time: params.desired_departure_time ? new Date(params.desired_departure_time) : undefined,
         time_flexibility_minutes: params.time_flexibility_minutes,
-        max_walking_distance_meters: params.max_walking_distance,
+        max_walking_distance_meters: params.preferred_walking_distance ?? params.max_walking_distance,
         seats_needed: params.seats_needed,
       });
       return reply.send({ routes: results, total: results.length });
