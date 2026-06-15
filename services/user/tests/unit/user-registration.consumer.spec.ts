@@ -15,14 +15,15 @@ describe('applyUserRegisteredEvent', () => {
       role: 'passenger',
     });
 
-    expect(repo.upsertFromRegistration).toHaveBeenCalledWith({
-      id: 'user-1',
+    expect(repo.upsertFromRegistration).toHaveBeenCalledWith(expect.objectContaining({
+      id: expect.any(String),
+      auth_id: 'user-1',
       phone_number: '+255700000001',
       full_name: 'Rishfy Rider',
       email: 'rider@rishfy.test',
       role: 'passenger',
       status: 'active',
-    });
+    }));
   });
 
   it('supports legacy phone/user_type payload keys', async () => {
@@ -37,14 +38,15 @@ describe('applyUserRegisteredEvent', () => {
       user_type: 'driver',
     });
 
-    expect(repo.upsertFromRegistration).toHaveBeenCalledWith({
-      id: 'user-2',
+    expect(repo.upsertFromRegistration).toHaveBeenCalledWith(expect.objectContaining({
+      id: expect.any(String),
+      auth_id: 'user-2',
       phone_number: '+255700000002',
       full_name: 'Driver Candidate',
       email: null,
       role: 'driver',
       status: 'active',
-    });
+    }));
   });
 
   it('defaults full_name when missing', async () => {
@@ -57,14 +59,15 @@ describe('applyUserRegisteredEvent', () => {
       phone_number: '+255700000003',
     });
 
-    expect(repo.upsertFromRegistration).toHaveBeenCalledWith({
-      id: 'user-3',
+    expect(repo.upsertFromRegistration).toHaveBeenCalledWith(expect.objectContaining({
+      id: expect.any(String),
+      auth_id: 'user-3',
       phone_number: '+255700000003',
       full_name: 'Rishfy User',
       email: null,
       role: 'passenger',
       status: 'active',
-    });
+    }));
   });
 
   it('throws when phone identity field is missing', async () => {

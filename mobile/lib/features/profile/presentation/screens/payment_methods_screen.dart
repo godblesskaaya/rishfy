@@ -23,11 +23,12 @@ class PaymentMethodsScreen extends ConsumerWidget {
       );
       if (result == null) return;
       if (existing == null) {
-        await ref.read(paymentMethodsProvider.notifier).add(
-              label: result.label,
-              provider: result.provider,
-              phone: result.phone,
-            );
+	                    await ref.read(paymentMethodsProvider.notifier).add(
+	              label: result.label,
+	              provider: result.provider,
+	              phone: result.phone,
+	              isDefault: result.isDefault,
+	            );
       } else {
         await ref.read(paymentMethodsProvider.notifier).update(result);
       }
@@ -70,11 +71,17 @@ class PaymentMethodsScreen extends ConsumerWidget {
               separatorBuilder: (_, __) => const Divider(height: 1),
               itemBuilder: (BuildContext ctx, int i) {
                 final PaymentMethod m = methods[i];
-                return ListTile(
-                  leading: const Icon(Icons.payment),
-                  title: Text(m.label.isEmpty ? m.providerDisplayName : m.label),
-                  subtitle: Text('${m.providerDisplayName} · ${m.phone}'),
-                  trailing: IconButton(
+	                return ListTile(
+	                  leading: Icon(
+	                    m.isDefault ? Icons.check_circle : Icons.payment,
+	                  ),
+	                  title: Text(m.label.isEmpty ? m.providerDisplayName : m.label),
+	                  subtitle: Text(
+	                    m.isDefault
+	                        ? '${m.providerDisplayName} · ${m.phone} · Default'
+	                        : '${m.providerDisplayName} · ${m.phone}',
+	                  ),
+	                  trailing: IconButton(
                     tooltip: 'Delete',
                     icon: const Icon(Icons.delete_outline),
                     onPressed: () async {
@@ -122,11 +129,12 @@ class _MethodEditorSheet extends StatefulWidget {
 
 class _MethodEditorSheetState extends State<_MethodEditorSheet> {
   final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
-  late final TextEditingController _label =
-      TextEditingController(text: widget.existing?.label ?? '');
-  late String _provider = widget.existing?.provider ?? 'mpesa_tz';
-  late String _phoneNumber = widget.existing?.phone ?? '';
-  String _countryCode = '+255';
+	  late final TextEditingController _label =
+	      TextEditingController(text: widget.existing?.label ?? '');
+	  late String _provider = widget.existing?.provider ?? 'mpesa_tz';
+	  late String _phoneNumber = widget.existing?.phone ?? '';
+	  late bool _isDefault = widget.existing?.isDefault ?? false;
+	  String _countryCode = '+255';
 
   @override
   void dispose() {
@@ -148,13 +156,15 @@ class _MethodEditorSheetState extends State<_MethodEditorSheet> {
             id: '',
             label: _label.text.trim(),
             provider: _provider,
-            phone: fullPhone,
-          )
-        : widget.existing!.copyWith(
-            label: _label.text.trim(),
-            provider: _provider,
-            phone: fullPhone,
-          );
+	            phone: fullPhone,
+	            isDefault: _isDefault,
+	          )
+	        : widget.existing!.copyWith(
+	            label: _label.text.trim(),
+	            provider: _provider,
+	            phone: fullPhone,
+	            isDefault: _isDefault,
+	          );
     Navigator.of(context).pop(result);
   }
 
@@ -205,7 +215,7 @@ class _MethodEditorSheetState extends State<_MethodEditorSheet> {
               },
             ),
             const SizedBox(height: 12),
-            IntlPhoneField(
+	            IntlPhoneField(
               initialCountryCode: 'TZ',
               initialValue: initialNumber,
               decoration: const InputDecoration(
@@ -220,9 +230,15 @@ class _MethodEditorSheetState extends State<_MethodEditorSheet> {
                 final String number = phone?.number ?? '';
                 if (number.length < 9) return 'Enter a valid phone number';
                 return null;
-              },
-            ),
-            const SizedBox(height: 20),
+	              },
+	            ),
+	            SwitchListTile(
+	              contentPadding: EdgeInsets.zero,
+	              title: const Text('Use as default'),
+	              value: _isDefault,
+	              onChanged: (bool value) => setState(() => _isDefault = value),
+	            ),
+	            const SizedBox(height: 20),
             FilledButton(
               onPressed: _save,
               child: const Text('Save'),

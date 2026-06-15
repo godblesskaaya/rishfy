@@ -3,6 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/errors/app_exception.dart';
 import '../../../../core/network/dio_client.dart';
+import '../../../profile/domain/blocked_user.dart';
+import '../../../profile/domain/favorite_driver.dart';
+import '../../../profile/presentation/providers/profile_provider.dart';
 import '../../data/datasources/location_search_remote_datasource.dart';
 import '../../data/datasources/route_remote_datasource.dart';
 import '../../data/models/route_models.dart';
@@ -60,19 +63,22 @@ class RouteSearchState {
 final StateNotifierProvider<RouteSearchNotifier, RouteSearchState>
     routeSearchProvider =
     StateNotifierProvider<RouteSearchNotifier, RouteSearchState>(
-  (Ref ref) => RouteSearchNotifier(ref.read(routeDataSourceProvider)),
+  (Ref ref) => RouteSearchNotifier(ref, ref.read(routeDataSourceProvider)),
 );
 
 class RouteSearchNotifier extends StateNotifier<RouteSearchState> {
-  RouteSearchNotifier(this._ds) : super(const RouteSearchState());
+  RouteSearchNotifier(this._ref, this._ds) : super(const RouteSearchState());
 
+  final Ref _ref;
   final RouteRemoteDataSource _ds;
 
   Future<void> search(RouteSearchParams params) async {
     state = state.copyWith(isLoading: true, error: null, params: params);
     try {
       final List<SearchResultDto> results = await _ds.searchRoutes(params);
-      state = state.copyWith(isLoading: false, results: results);
+      final List<SearchResultDto> trustedResults =
+          await _applyTrustPreferences(results);
+      state = state.copyWith(isLoading: false, results: trustedResults);
     } catch (e) {
       state = state.copyWith(
         isLoading: false,
@@ -82,6 +88,32 @@ class RouteSearchNotifier extends StateNotifier<RouteSearchState> {
   }
 
   void clear() => state = const RouteSearchState();
+
+  Future<List<SearchResultDto>> _applyTrustPreferences(
+    List<SearchResultDto> results,
+  ) async {
+    try {
+      final List<FavoriteDriver> favorites =
+          await _ref.read(favoriteDriversProvider.future);
+      final List<BlockedUser> blocks =
+          await _ref.read(blockedUsersProvider.future);
+      final Set<String> favoriteIds =
+          favorites.map((FavoriteDriver f) => f.driverUserId).toSet();
+      final Set<String> blockedIds =
+          blocks.map((BlockedUser b) => b.blockedUserId).toSet();
+      final List<SearchResultDto> visible = results
+          .where((SearchResultDto result) => !blockedIds.contains(result.driverId))
+          .toList();
+      visible.sort((SearchResultDto a, SearchResultDto b) {
+        final int aFav = favoriteIds.contains(a.driverId) ? 0 : 1;
+        final int bFav = favoriteIds.contains(b.driverId) ? 0 : 1;
+        return aFav - bFav;
+      });
+      return visible;
+    } catch (_) {
+      return results;
+    }
+  }
 }
 
 // ---- Preview route ----

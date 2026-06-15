@@ -73,6 +73,24 @@ class ProfileScreen extends ConsumerWidget {
             trailing: const Icon(Icons.chevron_right),
             onTap: () => context.push('/profile/payment-methods'),
           ),
+          ListTile(
+            leading: const Icon(Icons.favorite_border),
+            title: const Text('Favorite drivers'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => context.push('/profile/favorite-drivers'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.block),
+            title: const Text('Blocked users'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => context.push('/profile/blocked-users'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.report_problem_outlined),
+            title: const Text('Safety reports'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => context.push('/profile/safety-reports'),
+          ),
           const Divider(),
           ListTile(
             leading: const Icon(Icons.settings_outlined),

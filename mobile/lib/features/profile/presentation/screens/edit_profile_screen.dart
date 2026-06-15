@@ -21,6 +21,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
   final TextEditingController _firstCtrl = TextEditingController();
   final TextEditingController _lastCtrl = TextEditingController();
   final TextEditingController _emailCtrl = TextEditingController();
+  final TextEditingController _photoCtrl = TextEditingController();
 
   bool _saving = false;
   String? _error;
@@ -31,6 +32,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
     _firstCtrl.dispose();
     _lastCtrl.dispose();
     _emailCtrl.dispose();
+    _photoCtrl.dispose();
     super.dispose();
   }
 
@@ -39,6 +41,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
     _firstCtrl.text = user.firstName;
     _lastCtrl.text = user.lastName;
     _emailCtrl.text = user.email ?? '';
+    _photoCtrl.text = user.profilePictureUrl ?? '';
     _seeded = true;
   }
 
@@ -48,10 +51,12 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
         .where((String s) => s.isNotEmpty)
         .join(' ');
     final String email = _emailCtrl.text.trim();
+    final String photoUrl = _photoCtrl.text.trim();
 
     final bool nameChanged = fullName != original.fullName;
     final bool emailChanged = email != (original.email ?? '');
-    if (!nameChanged && !emailChanged) {
+    final bool photoChanged = photoUrl != (original.profilePictureUrl ?? '');
+    if (!nameChanged && !emailChanged && !photoChanged) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Nothing to save.')),
       );
@@ -63,11 +68,16 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
       _error = null;
     });
     try {
-      final User updated =
+      User updated =
           await ref.read(profileRemoteDataSourceProvider).updateProfile(
                 fullName: nameChanged ? fullName : null,
                 email: emailChanged ? email : null,
               );
+      if (photoChanged && photoUrl.isNotEmpty) {
+        updated = await ref
+            .read(profileRemoteDataSourceProvider)
+            .confirmProfilePictureUrl(photoUrl);
+      }
       ref.read(authControllerProvider.notifier).updateUser(updated);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -145,6 +155,22 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                     final bool ok = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
                         .hasMatch(v.trim());
                     return ok ? null : 'Invalid email';
+                  },
+                ),
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: _photoCtrl,
+                  keyboardType: TextInputType.url,
+                  decoration: const InputDecoration(
+                    labelText: 'Profile photo URL (optional)',
+                  ),
+                  validator: (String? v) {
+                    final String value = v?.trim() ?? '';
+                    if (value.isEmpty) return null;
+                    final Uri? uri = Uri.tryParse(value);
+                    return uri != null && uri.hasScheme && uri.hasAuthority
+                        ? null
+                        : 'Enter a valid URL';
                   },
                 ),
                 const SizedBox(height: 12),

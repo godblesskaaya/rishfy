@@ -116,8 +116,8 @@ class NotificationsScreen extends ConsumerWidget {
     final List<NotificationDto> visible = state.notifications
         .where(
           (NotificationDto notification) =>
-              prefs.isEnabled(categoryFor(notification.type)) ||
-              categoryFor(notification.type) == NotificationCategory.system,
+              isCriticalNotificationType(notification.type) ||
+              prefs.isEnabled(categoryFor(notification.type)),
         )
         .toList();
     if (state.isLoading && visible.isEmpty) {

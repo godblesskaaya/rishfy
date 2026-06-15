@@ -39,6 +39,30 @@ String? notificationRouteFor({
     return explicitPath;
   }
 
+  final bool payoutNotification = normalizedType.contains('payout') ||
+      normalizedType.contains('settlement') ||
+      normalizedType.contains('wallet') ||
+      normalizedType.contains('earnings');
+  final String? payoutId = _readPayloadString(
+    data,
+    payoutNotification
+        ? <String>[
+            'payout_id',
+            'payoutId',
+            'settlement_id',
+            'settlementId',
+            'entity_id',
+            'entityId',
+          ]
+        : <String>['payout_id', 'payoutId', 'settlement_id', 'settlementId'],
+  );
+  if (payoutId != null) {
+    return '/driver/payouts/$payoutId';
+  }
+  if (payoutNotification) {
+    return '/driver/payouts';
+  }
+
   final String? bookingId = _readPayloadString(
     data,
     <String>['booking_id', 'bookingId', 'entity_id', 'entityId'],
@@ -64,9 +88,19 @@ String? notificationRouteFor({
       normalizedType.contains('boarded') ||
       normalizedType.contains('dropoff') ||
       normalizedType.contains('walking');
+  final bool receiptPreferred = normalizedType.contains('receipt') ||
+      normalizedType.contains('refund') ||
+      normalizedType.contains('payment_confirmed') ||
+      normalizedType.contains('payment_completed');
 
   if (bookingId != null) {
-    return liveTripPreferred ? '/trip/$bookingId' : '/bookings/$bookingId';
+    if (liveTripPreferred) {
+      return '/trip/$bookingId';
+    }
+    if (receiptPreferred) {
+      return '/bookings/$bookingId/receipt';
+    }
+    return '/bookings/$bookingId';
   }
 
   final String? routeId = _readPayloadString(
@@ -75,6 +109,28 @@ String? notificationRouteFor({
   );
   if (routeId != null) {
     return '/routes/$routeId';
+  }
+
+  if (normalizedType.contains('favorite_driver') ||
+      normalizedType.contains('favourite_driver')) {
+    return '/profile/favorite-drivers';
+  }
+
+  if (normalizedType.contains('safety')) {
+    return '/profile/safety-reports';
+  }
+
+  if (normalizedType.contains('block') ||
+      normalizedType.contains('moderation')) {
+    return '/profile/blocked-users';
+  }
+
+  if (normalizedType.contains('payment_method')) {
+    return '/profile/payment-methods';
+  }
+
+  if (normalizedType.contains('support') || normalizedType.contains('help')) {
+    return '/help';
   }
 
   return null;

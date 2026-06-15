@@ -13,6 +13,8 @@ import '../../../bookings/domain/entities/booking_entity.dart';
 import '../../../bookings/presentation/providers/booking_provider.dart';
 import '../../../routes/domain/entities/route_entity.dart';
 import '../../../routes/presentation/providers/route_provider.dart';
+import '../../../wallet/data/models/wallet_models.dart';
+import '../../../wallet/presentation/providers/wallet_provider.dart';
 
 class DriverHomeScreen extends ConsumerWidget {
   const DriverHomeScreen({super.key});
@@ -26,6 +28,8 @@ class DriverHomeScreen extends ConsumerWidget {
         ref.watch(myRoutesProvider);
     final AsyncValue<DriverEarningsStats> statsAsync =
         ref.watch(driverEarningsStatsProvider);
+    final AsyncValue<List<DriverPayout>> payoutsAsync =
+        ref.watch(driverPayoutHistoryProvider);
     final AsyncValue<BookingEntity?> activeJourneyAsync =
         ref.watch(activeDriverJourneyProvider);
 
@@ -105,7 +109,16 @@ class DriverHomeScreen extends ConsumerWidget {
               _EarningsCard(
                 statsAsync: statsAsync,
                 rating: rating,
-                onRetry: () => ref.invalidate(myDriverBookingsProvider),
+                onRetry: () => ref.invalidate(driverWalletProvider),
+              ),
+              const SizedBox(height: 12),
+              _PayoutPanel(
+                statsAsync: statsAsync,
+                payoutsAsync: payoutsAsync,
+                onOpenWallet: () => context.push('/driver/payouts'),
+                onRefresh: () {
+                  ref.invalidate(driverWalletProvider);
+                },
               ),
               const SizedBox(height: 24),
 
@@ -589,11 +602,11 @@ class _EarningsCard extends StatelessWidget {
     final ColorScheme scheme = Theme.of(context).colorScheme;
     final String formattedTotal = statsAsync.maybeWhen(
       data: (DriverEarningsStats s) =>
-          'TZS ${NumberFormat('#,###').format(s.weekTotalTzs)}',
+          'TZS ${NumberFormat('#,###').format(s.availableTzs)}',
       orElse: () => '—',
     );
     final int trips = statsAsync.maybeWhen(
-      data: (DriverEarningsStats s) => s.weekTrips,
+      data: (DriverEarningsStats s) => s.tripCount,
       orElse: () => 0,
     );
     final String ratingLabel =
@@ -618,7 +631,7 @@ class _EarningsCard extends StatelessWidget {
           Row(
             children: <Widget>[
               Text(
-                'This week',
+                'Available',
                 style: TextStyle(
                   color: scheme.onPrimary.withValues(alpha: 0.85),
                   fontSize: 14,
@@ -675,6 +688,171 @@ class _EarningsCard extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _PayoutPanel extends StatelessWidget {
+  const _PayoutPanel({
+    required this.statsAsync,
+    required this.payoutsAsync,
+    required this.onOpenWallet,
+    required this.onRefresh,
+  });
+
+  final AsyncValue<DriverEarningsStats> statsAsync;
+  final AsyncValue<List<DriverPayout>> payoutsAsync;
+  final VoidCallback onOpenWallet;
+  final VoidCallback onRefresh;
+
+  String _tzs(int value) => 'TZS ${NumberFormat('#,###').format(value)}';
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+    final DriverEarningsStats? stats = statsAsync.valueOrNull;
+    final List<DriverPayout> payouts = payoutsAsync.valueOrNull ?? <DriverPayout>[];
+
+    return Container(
+      padding: const EdgeInsets.all(AppConstants.spaceLg),
+      decoration: BoxDecoration(
+        border: Border.all(color: scheme.outlineVariant),
+        borderRadius: BorderRadius.circular(AppConstants.radiusLg),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Text(
+                'Payouts',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+              ),
+              const Spacer(),
+              IconButton(
+                icon: const Icon(Icons.refresh, size: 18),
+                tooltip: 'Refresh',
+                onPressed: onRefresh,
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 16,
+            runSpacing: 8,
+            children: <Widget>[
+              _PayoutMetric(label: 'Available', value: _tzs(stats?.availableTzs ?? 0)),
+              _PayoutMetric(label: 'Pending', value: _tzs(stats?.pendingPayoutTzs ?? 0)),
+              _PayoutMetric(label: 'Held', value: _tzs(stats?.heldTzs ?? 0)),
+            ],
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: onOpenWallet,
+              icon: const Icon(Icons.account_balance_wallet_outlined),
+              label: const Text('Open wallet'),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'Recent payouts',
+            style: Theme.of(context).textTheme.titleSmall,
+          ),
+          const SizedBox(height: 8),
+          payoutsAsync.when(
+            loading: () => const Padding(
+              padding: EdgeInsets.symmetric(vertical: 12),
+              child: LinearProgressIndicator(),
+            ),
+            error: (Object error, _) => Text(
+              error.toString(),
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: scheme.error,
+                  ),
+            ),
+            data: (_) {
+              if (payouts.isEmpty) {
+                return Text(
+                  'No payouts yet',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
+                );
+              }
+              return Column(
+                children: payouts.take(3).map((DriverPayout payout) {
+                  return ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(_tzs(payout.amountTzs)),
+                    subtitle: Text(DateFormat('dd MMM, HH:mm').format(payout.requestedAt)),
+                    trailing: _PayoutStatusChip(status: payout.status),
+                    onTap: () => context.push('/driver/payouts/${payout.payoutId}'),
+                  );
+                }).toList(),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PayoutMetric extends StatelessWidget {
+  const _PayoutMetric({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Text(
+          label,
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          value,
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+        ),
+      ],
+    );
+  }
+}
+
+class _PayoutStatusChip extends StatelessWidget {
+  const _PayoutStatusChip({required this.status});
+
+  final String status;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+    final bool completed = status == 'completed';
+    final bool failed = status == 'failed' || status == 'cancelled';
+    final Color color = completed
+        ? scheme.primary
+        : failed
+            ? scheme.error
+            : scheme.tertiary;
+    return Chip(
+      label: Text(status.replaceAll('_', ' ')),
+      visualDensity: VisualDensity.compact,
+      side: BorderSide(color: color.withValues(alpha: 0.4)),
+      labelStyle: TextStyle(color: color, fontSize: 12),
+      backgroundColor: color.withValues(alpha: 0.08),
     );
   }
 }

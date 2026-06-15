@@ -10,6 +10,7 @@ import '../../../../core/errors/app_exception.dart';
 import '../../../../shared/widgets/async_views.dart';
 import '../../../../shared/widgets/primary_button.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
+import '../../../profile/presentation/providers/profile_provider.dart';
 import '../../domain/entities/booking_entity.dart';
 import '../providers/booking_provider.dart';
 
@@ -178,35 +179,57 @@ class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
             BuildContext context,
             void Function(void Function()) setDialogState,
           ) {
+            final String ratingLabel =
+                '$rating star${rating == 1 ? '' : 's'}';
             return AlertDialog(
               title: const Text('Rate this trip'),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: <Widget>[
-                  DropdownButtonFormField<int>(
-                    initialValue: rating,
-                    decoration: const InputDecoration(labelText: 'Rating'),
-                    items: List<DropdownMenuItem<int>>.generate(
-                      5,
-                      (int index) => DropdownMenuItem<int>(
-                        value: index + 1,
-                        child:
-                            Text('${index + 1} star${index == 0 ? '' : 's'}'),
-                      ),
-                    ),
-                    onChanged: (int? value) {
-                      if (value == null) return;
-                      setDialogState(() => rating = value);
-                    },
+                  Text(
+                    ratingLabel,
+                    style: Theme.of(context).textTheme.titleMedium,
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: List<Widget>.generate(5, (int index) {
+                      final int value = index + 1;
+                      return IconButton(
+                        tooltip: '$value star${value == 1 ? '' : 's'}',
+                        onPressed: () {
+                          setDialogState(() => rating = value);
+                        },
+                        icon: Icon(
+                          value <= rating ? Icons.star : Icons.star_border,
+                          color: Theme.of(context).colorScheme.primary,
+                          size: 32,
+                        ),
+                      );
+                    }),
                   ),
                   const SizedBox(height: 12),
                   TextField(
                     controller: commentCtrl,
-                    maxLines: 3,
+                    maxLines: 4,
+                    textCapitalization: TextCapitalization.sentences,
                     decoration: const InputDecoration(
-                      labelText: 'Comment (optional)',
+                      labelText: 'Review (optional)',
+                      hintText: 'Share what went well or what needs attention',
                       border: OutlineInputBorder(),
+                      alignLabelWithHint: true,
                     ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Reviews may be moderated before appearing publicly.',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color:
+                              Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                    textAlign: TextAlign.center,
                   ),
                 ],
               ),
@@ -251,6 +274,143 @@ class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
       if (mounted) setState(() => _busy = false);
       commentCtrl.dispose();
     }
+  }
+
+  Future<void> _saveFavoriteDriver(String driverId) async {
+    setState(() => _busy = true);
+    await ref.read(favoriteDriverActionProvider.notifier).add(driverId);
+    final FavoriteDriverActionState result =
+        ref.read(favoriteDriverActionProvider);
+    if (!mounted) return;
+    if (result.status == FavoriteDriverActionStatus.success) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Driver saved to favorites.')),
+      );
+    } else if (result.status == FavoriteDriverActionStatus.failed) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(result.error ?? 'Could not save driver.')),
+      );
+    }
+    if (mounted) setState(() => _busy = false);
+  }
+
+  Future<void> _blockParticipant({
+    required String userId,
+    required String label,
+  }) async {
+    final TextEditingController reasonCtrl = TextEditingController();
+    final String? reason = await showDialog<String>(
+      context: context,
+      builder: (BuildContext dialogContext) => AlertDialog(
+        title: Text('Block $label?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            Text(
+              'You will not be intentionally matched with this $label again.',
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: reasonCtrl,
+              maxLines: 3,
+              decoration: const InputDecoration(
+                labelText: 'Reason',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () =>
+                Navigator.pop(dialogContext, reasonCtrl.text.trim()),
+            child: const Text('Block'),
+          ),
+        ],
+      ),
+    );
+    reasonCtrl.dispose();
+    if (reason == null) return;
+
+    setState(() => _busy = true);
+    await ref
+        .read(blockedUserActionProvider.notifier)
+        .block(userId, reason: reason.isEmpty ? null : reason);
+    final BlockedUserActionState result = ref.read(blockedUserActionProvider);
+    if (!mounted) return;
+    if (result.status == BlockedUserActionStatus.success) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$label blocked.')),
+      );
+    } else if (result.status == BlockedUserActionStatus.failed) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(result.error ?? 'Could not block $label.')),
+      );
+    }
+    if (mounted) setState(() => _busy = false);
+  }
+
+  Future<void> _reportEmergency() async {
+    final TextEditingController reasonCtrl = TextEditingController();
+    final String? reason = await showDialog<String>(
+      context: context,
+      builder: (BuildContext dialogContext) => AlertDialog(
+        title: const Text('Report safety issue'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            const Text(
+              'This sends a trip safety report to support and may trigger a payout review.',
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: reasonCtrl,
+              maxLines: 3,
+              decoration: const InputDecoration(
+                labelText: 'What happened?',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () =>
+                Navigator.pop(dialogContext, reasonCtrl.text.trim()),
+            child: const Text('Submit report'),
+          ),
+        ],
+      ),
+    );
+    reasonCtrl.dispose();
+    if (reason == null) return;
+
+    setState(() => _busy = true);
+    await ref
+        .read(emergencyReportProvider.notifier)
+        .report(widget.bookingId, reason: reason.isEmpty ? null : reason);
+    final EmergencyReportState result = ref.read(emergencyReportProvider);
+    if (!mounted) return;
+    if (result.status == EmergencyReportStatus.success) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Safety report submitted.')),
+      );
+    } else if (result.status == EmergencyReportStatus.failed) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(result.error ?? 'Could not submit report.')),
+      );
+    }
+    if (mounted) setState(() => _busy = false);
   }
 
   String _friendlyError(Object error, String action) {
@@ -307,6 +467,10 @@ class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
               declineWindowOpen && _declineTimeLeft > Duration.zero;
           final bool canOpenJourney = booking.isJourneyActive ||
               booking.effectiveJourneyState == 'confirmed';
+          final bool canSaveDriver = !isDriver && booking.driverId != null;
+          final String? blockTargetUserId =
+              isDriver ? booking.passengerUserId : booking.driverId;
+          final String blockTargetLabel = isDriver ? 'passenger' : 'driver';
 
           if (declineWindowOpen && _countdownTimer == null) {
             WidgetsBinding.instance.addPostFrameCallback(
@@ -322,6 +486,8 @@ class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
                 _BookingSummaryCard(booking: booking),
                 const SizedBox(height: 16),
                 _BookingStatusTimeline(status: booking.effectiveJourneyState),
+                const SizedBox(height: 16),
+                _PaymentSummaryCard(booking: booking),
                 const SizedBox(height: 16),
                 _BookingActionCard(
                   booking: booking,
@@ -367,6 +533,13 @@ class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
                   ),
                   const SizedBox(height: 12),
                 ],
+                OutlinedButton.icon(
+                  onPressed: () =>
+                      context.push('/bookings/${booking.bookingId}/receipt'),
+                  icon: const Icon(Icons.receipt_long_outlined),
+                  label: const Text('View receipt'),
+                ),
+                const SizedBox(height: 12),
                 if (canDecline) ...<Widget>[
                   OutlinedButton.icon(
                     style: OutlinedButton.styleFrom(
@@ -389,6 +562,48 @@ class _BookingDetailScreenState extends ConsumerState<BookingDetailScreen> {
                     label: 'Cancel booking',
                     loading: _busy,
                     onPressed: _busy ? null : _cancelBooking,
+                  ),
+                  const SizedBox(height: 12),
+                ],
+                if (canSaveDriver) ...<Widget>[
+                  OutlinedButton.icon(
+                    onPressed: () =>
+                        context.push('/drivers/${booking.driverId!}'),
+                    icon: const Icon(Icons.person_outline),
+                    label: const Text('View driver profile'),
+                  ),
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: _busy
+                        ? null
+                        : () => _saveFavoriteDriver(booking.driverId!),
+                    icon: const Icon(Icons.favorite_border),
+                    label: const Text('Save driver'),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+                OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Theme.of(context).colorScheme.error,
+                  ),
+                  onPressed: _busy ? null : _reportEmergency,
+                  icon: const Icon(Icons.report_problem_outlined),
+                  label: const Text('Report safety issue'),
+                ),
+                const SizedBox(height: 12),
+                if (blockTargetUserId != null) ...<Widget>[
+                  OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Theme.of(context).colorScheme.error,
+                    ),
+                    onPressed: _busy
+                        ? null
+                        : () => _blockParticipant(
+                              userId: blockTargetUserId,
+                              label: blockTargetLabel,
+                            ),
+                    icon: const Icon(Icons.block),
+                    label: Text('Block $blockTargetLabel'),
                   ),
                   const SizedBox(height: 12),
                 ],
@@ -579,6 +794,90 @@ class _BookingActionCard extends StatelessWidget {
       return 'This trip is complete. You can review the booking summary and rate it.';
     }
     return 'Check this booking for the latest trip details.';
+  }
+}
+
+class _PaymentSummaryCard extends StatelessWidget {
+  const _PaymentSummaryCard({required this.booking});
+
+  final BookingEntity booking;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+    final String status = booking.paymentStatus.toLowerCase();
+    final bool failed = status == 'failed';
+    final bool refunded =
+        status == 'refunded' || status == 'partially_refunded';
+    final bool complete = status == 'completed' || status == 'confirmed';
+    final Color color = failed
+        ? scheme.error
+        : refunded
+            ? scheme.tertiary
+            : complete
+                ? scheme.primary
+                : scheme.secondary;
+
+    return Card(
+      elevation: 0,
+      child: Padding(
+        padding: const EdgeInsets.all(AppConstants.spaceMd),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                Icon(Icons.payments_outlined, color: color),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Payment',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                  ),
+                ),
+                _BookingPill(
+                  label: booking.paymentStatus.replaceAll('_', ' '),
+                  color: color,
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            _DetailRow(
+              label: 'Amount',
+              value:
+                  'TZS ${NumberFormat('#,###').format(booking.totalPriceTzs)}',
+            ),
+            if (booking.paymentId != null)
+              _DetailRow(label: 'Payment ID', value: booking.paymentId!),
+            const SizedBox(height: 8),
+            Text(
+              _paymentMessage(status),
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _paymentMessage(String status) {
+    if (status == 'completed' || status == 'confirmed') {
+      return 'Payment is posted for this booking.';
+    }
+    if (status == 'refunded') {
+      return 'This booking payment has been refunded.';
+    }
+    if (status == 'partially_refunded') {
+      return 'This booking payment has a partial refund recorded.';
+    }
+    if (status == 'failed') {
+      return 'Payment failed. Check support or retry from the payment flow.';
+    }
+    return 'Payment is still being processed.';
   }
 }
 

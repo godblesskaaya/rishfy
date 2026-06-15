@@ -1,6 +1,8 @@
 import 'package:dio/dio.dart';
 
 import '../models/booking_models.dart';
+import '../models/payment_detail_models.dart';
+import '../models/safety_report_models.dart';
 
 class BookingRemoteDataSource {
   BookingRemoteDataSource(this._dio);
@@ -68,6 +70,12 @@ class BookingRemoteDataSource {
     return res.data?['status'] as String? ?? 'pending';
   }
 
+  Future<PaymentDetailDto> getPaymentDetail(String paymentId) async {
+    final Response<Map<String, dynamic>> res =
+        await _dio.get<Map<String, dynamic>>('/api/v1/payments/$paymentId');
+    return PaymentDetailDto.fromJson(res.data ?? <String, dynamic>{});
+  }
+
   Future<void> cancelBooking(String bookingId, {String? reason}) async {
     await _dio.post<void>(
       '/api/v1/bookings/$bookingId/cancel',
@@ -77,6 +85,30 @@ class BookingRemoteDataSource {
             : reason.trim(),
       },
     );
+  }
+
+  Future<void> reportEmergency(String bookingId, {String? reason}) async {
+    await _dio.post<void>(
+      '/api/v1/bookings/$bookingId/emergency',
+      data: <String, dynamic>{
+        'reason': (reason == null || reason.trim().isEmpty)
+            ? 'EMERGENCY_REPORTED'
+            : reason.trim(),
+      },
+    );
+  }
+
+  Future<List<SafetyReportDto>> listSafetyReports() async {
+    final Response<Map<String, dynamic>> res =
+        await _dio.get<Map<String, dynamic>>(
+      '/api/v1/bookings/safety-reports',
+    );
+    final List<dynamic> raw =
+        res.data?['reports'] as List<dynamic>? ?? <dynamic>[];
+    return raw
+        .whereType<Map<String, dynamic>>()
+        .map(SafetyReportDto.fromJson)
+        .toList();
   }
 
   Future<void> rateTrip({

@@ -29,6 +29,35 @@ const deviceSchema = z.object({
   device_id: z.string().min(1).max(255),
 });
 
+const blockUserSchema = z.object({
+  reason: z.string().max(500).optional(),
+});
+
+const paymentMethodSchema = z.object({
+  label: z.string().max(80).optional(),
+  provider: z.string().min(2).max(40),
+  phone: z.string().min(9).max(20),
+  isDefault: z.boolean().optional(),
+});
+
+const updatePaymentMethodSchema = paymentMethodSchema.partial();
+
+const emergencyContactSchema = z.object({
+  name: z.string().min(1).max(120),
+  phone: z.string().min(9).max(20),
+  relationship: z.string().max(80).optional().nullable(),
+});
+
+const updateEmergencyContactSchema = emergencyContactSchema.partial();
+
+const supportCaseSchema = z.object({
+  subject: z.string().min(3).max(160),
+  message: z.string().min(10).max(4000),
+  category: z.string().min(2).max(60).optional(),
+  priority: z.enum(['low', 'normal', 'high', 'urgent']).optional(),
+  bookingId: z.string().uuid().optional().nullable(),
+});
+
 function handleError(err: unknown, reply: import('fastify').FastifyReply) {
   if (isAppError(err)) {
     return reply.code(err.statusCode).send({ error: err.code, message: err.message });
@@ -141,6 +170,101 @@ export async function userRoutes(app: FastifyInstance, { svc }: { svc: UserServi
     } catch (err) { return handleError(err, reply); }
   });
 
+  app.get('/me/payment-methods', async (req, reply) => {
+    try {
+      const userId = req.headers['x-user-id'] as string;
+      if (!userId) return reply.code(401).send({ error: 'UNAUTHENTICATED' });
+      const methods = await svc.listPaymentMethods(userId);
+      return reply.send({ methods: methods.map(toPaymentMethodDto) });
+    } catch (err) { return handleError(err, reply); }
+  });
+
+  app.post('/me/payment-methods', async (req, reply) => {
+    try {
+      const userId = req.headers['x-user-id'] as string;
+      if (!userId) return reply.code(401).send({ error: 'UNAUTHENTICATED' });
+      const body = paymentMethodSchema.parse(req.body);
+      const method = await svc.addPaymentMethod(userId, body);
+      return reply.code(201).send(toPaymentMethodDto(method));
+    } catch (err) { return handleError(err, reply); }
+  });
+
+  app.patch<{ Params: { methodId: string } }>('/me/payment-methods/:methodId', async (req, reply) => {
+    try {
+      const userId = req.headers['x-user-id'] as string;
+      if (!userId) return reply.code(401).send({ error: 'UNAUTHENTICATED' });
+      const body = updatePaymentMethodSchema.parse(req.body);
+      const method = await svc.updatePaymentMethod(userId, req.params.methodId, body);
+      return reply.send(toPaymentMethodDto(method));
+    } catch (err) { return handleError(err, reply); }
+  });
+
+  app.delete<{ Params: { methodId: string } }>('/me/payment-methods/:methodId', async (req, reply) => {
+    try {
+      const userId = req.headers['x-user-id'] as string;
+      if (!userId) return reply.code(401).send({ error: 'UNAUTHENTICATED' });
+      await svc.deletePaymentMethod(userId, req.params.methodId);
+      return reply.code(204).send();
+    } catch (err) { return handleError(err, reply); }
+  });
+
+  app.get('/me/emergency-contacts', async (req, reply) => {
+    try {
+      const userId = req.headers['x-user-id'] as string;
+      if (!userId) return reply.code(401).send({ error: 'UNAUTHENTICATED' });
+      const contacts = await svc.listEmergencyContacts(userId);
+      return reply.send({ contacts: contacts.map(toEmergencyContactDto) });
+    } catch (err) { return handleError(err, reply); }
+  });
+
+  app.post('/me/emergency-contacts', async (req, reply) => {
+    try {
+      const userId = req.headers['x-user-id'] as string;
+      if (!userId) return reply.code(401).send({ error: 'UNAUTHENTICATED' });
+      const body = emergencyContactSchema.parse(req.body);
+      const contact = await svc.addEmergencyContact(userId, body);
+      return reply.code(201).send(toEmergencyContactDto(contact));
+    } catch (err) { return handleError(err, reply); }
+  });
+
+  app.patch<{ Params: { contactId: string } }>('/me/emergency-contacts/:contactId', async (req, reply) => {
+    try {
+      const userId = req.headers['x-user-id'] as string;
+      if (!userId) return reply.code(401).send({ error: 'UNAUTHENTICATED' });
+      const body = updateEmergencyContactSchema.parse(req.body);
+      const contact = await svc.updateEmergencyContact(userId, req.params.contactId, body);
+      return reply.send(toEmergencyContactDto(contact));
+    } catch (err) { return handleError(err, reply); }
+  });
+
+  app.delete<{ Params: { contactId: string } }>('/me/emergency-contacts/:contactId', async (req, reply) => {
+    try {
+      const userId = req.headers['x-user-id'] as string;
+      if (!userId) return reply.code(401).send({ error: 'UNAUTHENTICATED' });
+      await svc.deleteEmergencyContact(userId, req.params.contactId);
+      return reply.code(204).send();
+    } catch (err) { return handleError(err, reply); }
+  });
+
+  app.get('/me/support-cases', async (req, reply) => {
+    try {
+      const userId = req.headers['x-user-id'] as string;
+      if (!userId) return reply.code(401).send({ error: 'UNAUTHENTICATED' });
+      const cases = await svc.listSupportCases(userId);
+      return reply.send({ cases: cases.map(toSupportCaseDto) });
+    } catch (err) { return handleError(err, reply); }
+  });
+
+  app.post('/me/support-cases', async (req, reply) => {
+    try {
+      const userId = req.headers['x-user-id'] as string;
+      if (!userId) return reply.code(401).send({ error: 'UNAUTHENTICATED' });
+      const body = supportCaseSchema.parse(req.body);
+      const supportCase = await svc.createSupportCase(userId, body);
+      return reply.code(201).send(toSupportCaseDto(supportCase));
+    } catch (err) { return handleError(err, reply); }
+  });
+
   // POST /users/me/devices
   app.post('/me/devices', async (req, reply) => {
     try {
@@ -152,17 +276,148 @@ export async function userRoutes(app: FastifyInstance, { svc }: { svc: UserServi
     } catch (err) { return handleError(err, reply); }
   });
 
+  app.get('/me/blocks', async (req, reply) => {
+    try {
+      const userId = req.headers['x-user-id'] as string;
+      if (!userId) return reply.code(401).send({ error: 'UNAUTHENTICATED' });
+      return reply.send({ blocks: await svc.listBlockedUsers(userId) });
+    } catch (err) { return handleError(err, reply); }
+  });
+
+  app.post<{ Params: { userId: string } }>('/me/blocks/:userId', async (req, reply) => {
+    try {
+      const currentUserId = req.headers['x-user-id'] as string;
+      if (!currentUserId) return reply.code(401).send({ error: 'UNAUTHENTICATED' });
+      const body = blockUserSchema.parse(req.body ?? {});
+      const block = await svc.blockUser(currentUserId, req.params.userId, body.reason);
+      return reply.code(201).send(block);
+    } catch (err) { return handleError(err, reply); }
+  });
+
+  app.delete<{ Params: { userId: string } }>('/me/blocks/:userId', async (req, reply) => {
+    try {
+      const currentUserId = req.headers['x-user-id'] as string;
+      if (!currentUserId) return reply.code(401).send({ error: 'UNAUTHENTICATED' });
+      await svc.unblockUser(currentUserId, req.params.userId);
+      return reply.code(204).send();
+    } catch (err) { return handleError(err, reply); }
+  });
+
+  app.get('/me/favorite-drivers', async (req, reply) => {
+    try {
+      const userId = req.headers['x-user-id'] as string;
+      if (!userId) return reply.code(401).send({ error: 'UNAUTHENTICATED' });
+      return reply.send({ favorites: await svc.listFavoriteDrivers(userId) });
+    } catch (err) { return handleError(err, reply); }
+  });
+
+  app.post<{ Params: { driverId: string } }>('/me/favorite-drivers/:driverId', async (req, reply) => {
+    try {
+      const userId = req.headers['x-user-id'] as string;
+      if (!userId) return reply.code(401).send({ error: 'UNAUTHENTICATED' });
+      const favorite = await svc.addFavoriteDriver(userId, req.params.driverId);
+      return reply.code(201).send(favorite);
+    } catch (err) { return handleError(err, reply); }
+  });
+
+  app.delete<{ Params: { driverId: string } }>('/me/favorite-drivers/:driverId', async (req, reply) => {
+    try {
+      const userId = req.headers['x-user-id'] as string;
+      if (!userId) return reply.code(401).send({ error: 'UNAUTHENTICATED' });
+      await svc.removeFavoriteDriver(userId, req.params.driverId);
+      return reply.code(204).send();
+    } catch (err) { return handleError(err, reply); }
+  });
+
   // GET /users/drivers/:userId — public driver profile
   const publicDriverHandler = async (req: import('fastify').FastifyRequest<{ Params: { userId: string } }>, reply: import('fastify').FastifyReply) => {
     try {
       const result = await svc.getPublicDriver(req.params.userId);
       // Strip PII
       const { phone_number: _, email: __, ...publicUser } = result.user;
-      return reply.send({ user: publicUser, driverProfile: result.driverProfile });
+      return reply.send({
+        user: publicUser,
+        driverProfile: result.driverProfile,
+        vehicles: result.vehicles,
+        activeVehicle: result.activeVehicle,
+        reviews: result.reviews,
+      });
     } catch (err) { return handleError(err, reply); }
   };
 
   app.get<{ Params: { userId: string } }>('/drivers/:userId', publicDriverHandler);
   // Alias for strict Sprint 2 ticket path.
   app.get<{ Params: { userId: string } }>('/drivers/:userId/public', publicDriverHandler);
+}
+
+function toPaymentMethodDto(method: {
+  id: string;
+  label: string;
+  provider: string;
+  phone: string;
+  is_default: boolean;
+  created_at: Date;
+  updated_at: Date;
+}) {
+  return {
+    id: method.id,
+    label: method.label,
+    provider: method.provider,
+    phone: method.phone,
+    isDefault: method.is_default,
+    createdAt: method.created_at,
+    updatedAt: method.updated_at,
+  };
+}
+
+function toEmergencyContactDto(contact: {
+  id: string;
+  name: string;
+  phone: string;
+  relationship: string | null;
+  created_at: Date;
+  updated_at: Date;
+}) {
+  return {
+    id: contact.id,
+    name: contact.name,
+    phone: contact.phone,
+    relationship: contact.relationship,
+    createdAt: contact.created_at,
+    updatedAt: contact.updated_at,
+  };
+}
+
+function toSupportCaseDto(supportCase: {
+  id: string;
+  user_id: string;
+  booking_id: string | null;
+  subject: string;
+  message: string;
+  category: string;
+  status: string;
+  priority: string;
+  last_user_message_at: Date;
+  last_support_response_at: Date | null;
+  resolved_at: Date | null;
+  closed_at: Date | null;
+  created_at: Date;
+  updated_at: Date;
+}) {
+  return {
+    id: supportCase.id,
+    userId: supportCase.user_id,
+    bookingId: supportCase.booking_id,
+    subject: supportCase.subject,
+    message: supportCase.message,
+    category: supportCase.category,
+    status: supportCase.status,
+    priority: supportCase.priority,
+    lastUserMessageAt: supportCase.last_user_message_at,
+    lastSupportResponseAt: supportCase.last_support_response_at,
+    resolvedAt: supportCase.resolved_at,
+    closedAt: supportCase.closed_at,
+    createdAt: supportCase.created_at,
+    updatedAt: supportCase.updated_at,
+  };
 }

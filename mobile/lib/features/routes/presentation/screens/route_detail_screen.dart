@@ -522,6 +522,15 @@ class _RouteDetailBodyState extends ConsumerState<_RouteDetailBody> {
                       value:
                           '${route.driverRating!.toStringAsFixed(1)} / 5.0  ·  ${route.driverName}',
                     ),
+                  if (!isOwnRoute) ...<Widget>[
+                    const SizedBox(height: 8),
+                    OutlinedButton.icon(
+                      onPressed: () =>
+                          context.push('/drivers/${route.driverUserId}'),
+                      icon: const Icon(Icons.person_outline),
+                      label: const Text('View driver profile'),
+                    ),
+                  ],
                   if (route.waypoints.isNotEmpty) ...<Widget>[
                     const SizedBox(height: 12),
                     Text(

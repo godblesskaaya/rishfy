@@ -695,7 +695,7 @@ class _RouteSearchScreenState extends ConsumerState<RouteSearchScreen> {
                             ),
                             const SizedBox(height: 12),
                             Text(
-                              'Max walking distance to pickup',
+                              'Preferred walking distance',
                               style: Theme.of(context).textTheme.bodySmall,
                             ),
                             const SizedBox(height: 6),
@@ -757,8 +757,8 @@ class _RouteSearchScreenState extends ConsumerState<RouteSearchScreen> {
                                     AppConstants.radiusLg),
                               ),
                               child: const Text(
-                                'No routes found. Try adjusting the time, '
-                                'walking distance, or flexibility window.',
+                                'No routes found. Try a wider time window, '
+                                'more seats, or a longer walking preference.',
                                 textAlign: TextAlign.center,
                               ),
                             ),
@@ -1072,6 +1072,18 @@ class _SearchResultCard extends StatelessWidget {
     final String departureTime =
         DateFormat('HH:mm').format(result.driverDepartureTime.toLocal());
     final ColorScheme scheme = Theme.of(context).colorScheme;
+    final Color tradeoffColor = result.walkingExceedsPreference
+        ? scheme.tertiary
+        : scheme.primary;
+    final Color timeTradeoffColor = result.timeExceedsPreference
+        ? scheme.tertiary
+        : scheme.primary;
+    final List<String> reasons = result.matchReasons.take(2).toList();
+    final bool hasTradeoff =
+        result.walkingExceedsPreference || result.timeExceedsPreference;
+    final String routeFitCopy = hasTradeoff
+        ? 'Flexible option. Review walking and pickup time before booking.'
+        : 'Fits your walking preference with route pickup guidance.';
 
     return Card(
       elevation: 0,
@@ -1166,9 +1178,27 @@ class _SearchResultCard extends StatelessWidget {
                 runSpacing: 8,
                 children: <Widget>[
                   _SearchStatChip(
+                    icon: result.matchQuality == 'best'
+                        ? Icons.verified_outlined
+                        : Icons.tune,
+                    iconColor: tradeoffColor,
+                    label: result.matchQualityLabel,
+                  ),
+                  _SearchStatChip(
                     icon: Icons.directions_walk,
+                    iconColor: tradeoffColor,
                     label: result.walkingDistanceLabel,
                   ),
+                  _SearchStatChip(
+                    icon: Icons.flag_outlined,
+                    label: result.finalWalkLabel,
+                  ),
+                  if (result.walkingExceedsPreference)
+                    _SearchStatChip(
+                      icon: Icons.info_outline,
+                      iconColor: tradeoffColor,
+                      label: result.walkingTradeoffLabel,
+                    ),
                   _SearchStatChip(
                     icon: Icons.event_seat,
                     label: '${result.availableSeats} seats',
@@ -1179,10 +1209,33 @@ class _SearchResultCard extends StatelessWidget {
                   ),
                   _SearchStatChip(
                     icon: Icons.schedule,
+                    iconColor: timeTradeoffColor,
                     label: 'Pickup ~$pickupTime',
                   ),
+                  if (result.timeExceedsPreference)
+                    _SearchStatChip(
+                      icon: Icons.more_time,
+                      iconColor: timeTradeoffColor,
+                      label: result.timeTradeoffLabel,
+                    ),
                 ],
               ),
+              if (reasons.isNotEmpty) ...<Widget>[
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: reasons
+                      .map(
+                        (String reason) => _SearchReasonPill(
+                          text: reason,
+                          emphasized: result.walkingExceedsPreference &&
+                              reason.toLowerCase().contains('walking'),
+                        ),
+                      )
+                      .toList(),
+                ),
+              ],
               if (result.suggestedPickupName != null) ...<Widget>[
                 const SizedBox(height: 12),
                 Container(
@@ -1229,7 +1282,7 @@ class _SearchResultCard extends StatelessWidget {
                 children: <Widget>[
                   Expanded(
                     child: Text(
-                      'Best for quick pickup and fixed-route certainty.',
+                      routeFitCopy,
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                             color: scheme.onSurfaceVariant,
                           ),
@@ -1250,6 +1303,52 @@ class _SearchResultCard extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _SearchReasonPill extends StatelessWidget {
+  const _SearchReasonPill({
+    required this.text,
+    this.emphasized = false,
+  });
+
+  final String text;
+  final bool emphasized;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+    final Color color = emphasized ? scheme.tertiary : scheme.secondary;
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 260),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.30)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Icon(
+            emphasized ? Icons.info_outline : Icons.check_circle_outline,
+            size: 14,
+            color: color,
+          ),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              text,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurface,
+                  ),
+            ),
+          ),
+        ],
       ),
     );
   }

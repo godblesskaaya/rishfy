@@ -10,6 +10,15 @@ export interface AdminRoutesOptions {
   repository: AuthRepository;
 }
 
+function normalizeAdminIdentifier(identifier: string): string {
+  const trimmed = identifier.trim();
+  if (trimmed.includes('@') || trimmed.startsWith('+')) {
+    return trimmed;
+  }
+
+  return `+${trimmed}`;
+}
+
 export const adminRoutes: FastifyPluginAsync<AdminRoutesOptions> = async (app, { repository }) => {
   const hashRefreshToken = (token: string): string =>
     createHash('sha256').update(token).digest('hex');
@@ -24,17 +33,25 @@ export const adminRoutes: FastifyPluginAsync<AdminRoutesOptions> = async (app, {
 
   /**
    * POST /api/v1/auth/admin/login
-   * Accepts { phone_number, password } — admin accounts only.
+   * Accepts { identifier, password } or { phone_number, password } — admin accounts only.
    * Returns the shape expected by the Next.js admin panel.
    */
   app.post('/admin/login', async (req, reply) => {
-    const { phone_number, password } = req.body as { phone_number?: string; password?: string };
+    const { identifier, phone_number, password } = req.body as {
+      identifier?: string;
+      phone_number?: string;
+      password?: string;
+    };
+    const loginIdentifier = identifier ?? phone_number;
 
-    if (!phone_number || !password) {
-      return reply.status(400).send({ error: 'MISSING_FIELDS', message: 'phone_number and password are required' });
+    if (!loginIdentifier || !password) {
+      return reply.status(400).send({ error: 'MISSING_FIELDS', message: 'identifier and password are required' });
     }
 
-    const user = await repository.findUserByPhone(phone_number);
+    const normalizedIdentifier = normalizeAdminIdentifier(loginIdentifier);
+    const user = normalizedIdentifier.includes('@')
+      ? await repository.findUserByEmail(normalizedIdentifier)
+      : await repository.findUserByPhone(normalizedIdentifier);
     if (!user) {
       throw new AuthError(401, 'INVALID_CREDENTIALS', 'Invalid credentials');
     }

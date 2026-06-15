@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../../../core/constants/app_logger.dart';
 import '../../../../core/network/dio_client.dart';
 import '../../data/datasources/device_remote_datasource.dart';
 
@@ -47,12 +48,16 @@ final FutureProvider<void> registerDeviceTokenProvider =
       fcmToken: token,
       platform: platform,
     );
-  } catch (_) {}
+  } catch (e, s) {
+    AppLogger.warn('Device token registration failed', error: e, stackTrace: s);
+  }
 
   // Re-register whenever the FCM token rotates.
   messaging.onTokenRefresh.listen((String newToken) async {
     try {
       await ds.refreshToken(deviceId: deviceId!, fcmToken: newToken);
-    } catch (_) {}
+    } catch (e, s) {
+      AppLogger.warn('Device token refresh failed', error: e, stackTrace: s);
+    }
   });
 });

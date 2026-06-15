@@ -199,9 +199,11 @@ describe('user routes integration', () => {
       updated_at: new Date(),
     };
 
-    vi.mocked(pool.query)
-      .mockResolvedValueOnce({ rows: [user], rowCount: 1 } as never)
-      .mockResolvedValueOnce({ rows: [driverProfile], rowCount: 1 } as never);
+	    vi.mocked(pool.query)
+	      .mockResolvedValueOnce({ rows: [user], rowCount: 1 } as never)
+	      .mockResolvedValueOnce({ rows: [driverProfile], rowCount: 1 } as never)
+	      .mockResolvedValueOnce({ rows: [], rowCount: 0 } as never)
+	      .mockResolvedValueOnce({ rows: [], rowCount: 0 } as never);
 
     const res = await app.inject({
       method: 'GET',
@@ -215,11 +217,107 @@ describe('user routes integration', () => {
         full_name: 'Driver Two',
         role: 'driver',
       }),
-      driverProfile: expect.objectContaining({
-        id: 'dp-2',
-      }),
-    });
+	      driverProfile: expect.objectContaining({
+	        id: 'dp-2',
+	      }),
+	      vehicles: [],
+	      activeVehicle: null,
+	      reviews: [],
+	    });
     expect(res.json().user.phone_number).toBeUndefined();
     expect(res.json().user.email).toBeUndefined();
+  });
+
+  it('creates support cases with category-derived priority', async () => {
+    const createdAt = new Date('2026-06-15T08:00:00.000Z');
+    vi.mocked(pool.query).mockResolvedValueOnce({
+      rows: [{
+        id: 'case-1',
+        user_id: 'user-1',
+        booking_id: null,
+        subject: 'Refund follow up',
+        message: 'My refund is still pending after cancellation.',
+        category: 'payment_refund',
+        status: 'open',
+        priority: 'high',
+        last_user_message_at: createdAt,
+        last_support_response_at: null,
+        resolved_at: null,
+        closed_at: null,
+        metadata: {},
+        created_at: createdAt,
+        updated_at: createdAt,
+      }],
+      rowCount: 1,
+    } as never);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/users/me/support-cases',
+      headers: { 'x-user-id': 'user-1' },
+      payload: {
+        subject: 'Refund follow up',
+        message: 'My refund is still pending after cancellation.',
+        category: 'payment refund',
+      },
+    });
+
+    expect(res.statusCode).toBe(201);
+    expect(res.json()).toMatchObject({
+      id: 'case-1',
+      subject: 'Refund follow up',
+      category: 'payment_refund',
+      status: 'open',
+      priority: 'high',
+    });
+    expect(vi.mocked(pool.query).mock.calls[0]?.[1]).toEqual([
+      'user-1',
+      null,
+      'Refund follow up',
+      'My refund is still pending after cancellation.',
+      'payment_refund',
+      'high',
+    ]);
+  });
+
+  it('lists support cases for the authenticated user', async () => {
+    const createdAt = new Date('2026-06-15T09:00:00.000Z');
+    vi.mocked(pool.query).mockResolvedValueOnce({
+      rows: [{
+        id: 'case-2',
+        user_id: 'user-1',
+        booking_id: '11111111-1111-4111-8111-111111111111',
+        subject: 'Trip issue',
+        message: 'The driver arrived at the wrong gate.',
+        category: 'trip',
+        status: 'waiting',
+        priority: 'normal',
+        last_user_message_at: createdAt,
+        last_support_response_at: createdAt,
+        resolved_at: null,
+        closed_at: null,
+        metadata: {},
+        created_at: createdAt,
+        updated_at: createdAt,
+      }],
+      rowCount: 1,
+    } as never);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/v1/users/me/support-cases',
+      headers: { 'x-user-id': 'user-1' },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({
+      cases: [
+        expect.objectContaining({
+          id: 'case-2',
+          bookingId: '11111111-1111-4111-8111-111111111111',
+          status: 'waiting',
+        }),
+      ],
+    });
   });
 });

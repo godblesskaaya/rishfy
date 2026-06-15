@@ -82,6 +82,7 @@ class RouteRemoteDataSource {
         'desired_departure_time':
             params.desiredDepartureTime.toUtc().toIso8601String(),
         'time_flexibility_minutes': params.timeFlexibilityMinutes,
+        'preferred_walking_distance': params.maxWalkingDistanceMeters,
         'max_walking_distance': params.maxWalkingDistanceMeters,
         'seats_needed': params.seatsNeeded,
       },

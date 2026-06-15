@@ -52,8 +52,13 @@ async function main(): Promise<void> {
     topic: TOPIC_RATING_SUBMITTED,
     logger,
     onMessage: async ({ value }) => {
-      await repo.updateRating(value.ratee_id, value.score);
-      logger.info({ ratee_id: value.ratee_id, score: value.score }, 'Rating applied');
+      const result = await repo.recordRating({
+        rateeId: value.ratee_id,
+        raterId: value.rater_id,
+        bookingId: value.booking_id,
+        score: value.score,
+      });
+      logger.info({ ratee_id: value.ratee_id, score: value.score, applied: result.applied }, 'Rating processed');
     },
   });
   logger.info(`Kafka consumer listening on topic: ${TOPIC_RATING_SUBMITTED}`);

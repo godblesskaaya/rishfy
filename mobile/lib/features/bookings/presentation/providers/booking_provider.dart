@@ -5,7 +5,10 @@ import '../../../../core/errors/app_exception.dart';
 import '../../../../core/network/dio_client.dart';
 import '../../data/datasources/booking_remote_datasource.dart';
 import '../../data/models/booking_models.dart';
+import '../../data/models/payment_detail_models.dart';
+import '../../data/models/safety_report_models.dart';
 import '../../domain/entities/booking_entity.dart';
+import '../../../wallet/presentation/providers/wallet_provider.dart';
 
 String _errorMessage(Object e, String fallback) {
   if (e is AppException) return e.message;
@@ -146,53 +149,6 @@ final FutureProviderFamily<List<BookingEntity>, String>
   },
 );
 
-/// Computed weekly stats for the driver from completed bookings.
-class DriverEarningsStats {
-  const DriverEarningsStats({
-    required this.weekTotalTzs,
-    required this.weekTrips,
-    required this.lifetimeTrips,
-  });
-
-  final int weekTotalTzs;
-  final int weekTrips;
-  final int lifetimeTrips;
-}
-
-final Provider<AsyncValue<DriverEarningsStats>> driverEarningsStatsProvider =
-    Provider<AsyncValue<DriverEarningsStats>>((Ref ref) {
-  final AsyncValue<List<BookingEntity>> async =
-      ref.watch(myDriverBookingsProvider);
-  return async.whenData((List<BookingEntity> bookings) {
-    final DateTime now = DateTime.now();
-    final DateTime weekStart =
-        now.subtract(Duration(days: now.weekday - 1)).copyWith(
-              hour: 0,
-              minute: 0,
-              second: 0,
-              millisecond: 0,
-              microsecond: 0,
-            );
-    int weekTotal = 0;
-    int weekTrips = 0;
-    int lifetime = 0;
-    for (final BookingEntity b in bookings) {
-      if (!b.isCompleted) continue;
-      lifetime++;
-      final DateTime ts = b.departureDatetime ?? b.createdAt;
-      if (ts.isAfter(weekStart)) {
-        weekTrips++;
-        weekTotal += b.totalPriceTzs;
-      }
-    }
-    return DriverEarningsStats(
-      weekTotalTzs: weekTotal,
-      weekTrips: weekTrips,
-      lifetimeTrips: lifetime,
-    );
-  });
-});
-
 // ---- Single booking detail ----
 
 final FutureProviderFamily<BookingEntity, String> bookingDetailProvider =
@@ -202,6 +158,69 @@ final FutureProviderFamily<BookingEntity, String> bookingDetailProvider =
   final BookingDto dto = await ds.getBooking(bookingId);
   return dto.toDomain();
 });
+
+final FutureProviderFamily<PaymentDetailDto, String> paymentDetailProvider =
+    FutureProviderFamily<PaymentDetailDto, String>(
+  (Ref ref, String paymentId) async {
+    final BookingRemoteDataSource ds = ref.read(bookingDataSourceProvider);
+    return ds.getPaymentDetail(paymentId);
+  },
+	);
+
+final FutureProvider<List<SafetyReportDto>> safetyReportsProvider =
+    FutureProvider<List<SafetyReportDto>>((Ref ref) async {
+  final BookingRemoteDataSource ds = ref.read(bookingDataSourceProvider);
+  return ds.listSafetyReports();
+});
+
+// ---- Emergency report ----
+
+enum EmergencyReportStatus { idle, loading, success, failed }
+
+class EmergencyReportState {
+  const EmergencyReportState({
+    this.status = EmergencyReportStatus.idle,
+    this.error,
+  });
+
+  final EmergencyReportStatus status;
+  final String? error;
+
+  EmergencyReportState copyWith({
+    EmergencyReportStatus? status,
+    String? error,
+  }) =>
+      EmergencyReportState(
+        status: status ?? this.status,
+        error: error,
+      );
+}
+
+final emergencyReportProvider = StateNotifierProvider.autoDispose<
+    EmergencyReportNotifier, EmergencyReportState>(
+  (Ref ref) => EmergencyReportNotifier(ref.read(bookingDataSourceProvider)),
+);
+
+class EmergencyReportNotifier extends StateNotifier<EmergencyReportState> {
+  EmergencyReportNotifier(this._ds) : super(const EmergencyReportState());
+
+  final BookingRemoteDataSource _ds;
+
+  Future<void> report(String bookingId, {String? reason}) async {
+    state = state.copyWith(status: EmergencyReportStatus.loading, error: null);
+    try {
+      await _ds.reportEmergency(bookingId, reason: reason);
+      state = state.copyWith(status: EmergencyReportStatus.success);
+    } catch (e) {
+      state = state.copyWith(
+        status: EmergencyReportStatus.failed,
+        error: _errorMessage(e, 'Could not submit the emergency report.'),
+      );
+    }
+  }
+
+  void reset() => state = const EmergencyReportState();
+}
 
 // ---- Decline booking (driver only) ----
 
@@ -378,7 +397,7 @@ class JourneyActionNotifier extends StateNotifier<TripActionState> {
     _ref.invalidate(myDriverBookingsProvider);
     _ref.invalidate(activePassengerJourneyProvider);
     _ref.invalidate(activeDriverJourneyProvider);
-    _ref.invalidate(driverEarningsStatsProvider);
+    _ref.invalidate(driverWalletProvider);
   }
 }
 

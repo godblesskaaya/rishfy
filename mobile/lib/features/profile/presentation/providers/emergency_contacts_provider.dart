@@ -1,51 +1,27 @@
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:uuid/uuid.dart';
 
-import '../../../../core/storage/secure_storage.dart';
+import '../../data/datasources/profile_remote_datasource.dart';
 import '../../domain/emergency_contact.dart';
-
-const String _kEmergencyContactsKey = 'emergency_contacts';
 
 final StateNotifierProvider<EmergencyContactsNotifier, List<EmergencyContact>>
     emergencyContactsProvider =
     StateNotifierProvider<EmergencyContactsNotifier, List<EmergencyContact>>(
-  (Ref ref) => EmergencyContactsNotifier(ref.read(secureStorageProvider)),
+  (Ref ref) =>
+      EmergencyContactsNotifier(ref.read(profileRemoteDataSourceProvider)),
 );
 
-class EmergencyContactsNotifier
-    extends StateNotifier<List<EmergencyContact>> {
-  EmergencyContactsNotifier(this._storage)
+class EmergencyContactsNotifier extends StateNotifier<List<EmergencyContact>> {
+  EmergencyContactsNotifier(this._dataSource)
       : super(const <EmergencyContact>[]) {
-    unawaited(_load());
+    unawaited(refresh());
   }
 
-  final SecureStorage _storage;
-  final Uuid _uuid = const Uuid();
+  final ProfileRemoteDataSource _dataSource;
 
-  Future<void> _load() async {
-    final String? raw = await _storage.readString(_kEmergencyContactsKey);
-    if (raw == null || raw.isEmpty) {
-      state = const <EmergencyContact>[];
-      return;
-    }
-    try {
-      final List<dynamic> decoded = jsonDecode(raw) as List<dynamic>;
-      state = decoded
-          .whereType<Map<String, dynamic>>()
-          .map(EmergencyContact.fromJson)
-          .toList();
-    } catch (_) {
-      state = const <EmergencyContact>[];
-    }
-  }
-
-  Future<void> _persist() async {
-    final String raw =
-        jsonEncode(state.map((EmergencyContact c) => c.toJson()).toList());
-    await _storage.writeString(_kEmergencyContactsKey, raw);
+  Future<void> refresh() async {
+    state = await _dataSource.listEmergencyContacts();
   }
 
   Future<EmergencyContact> add({
@@ -53,30 +29,22 @@ class EmergencyContactsNotifier
     required String phone,
     String? relationship,
   }) async {
-    final EmergencyContact contact = EmergencyContact(
-      id: _uuid.v4(),
-      name: name.trim(),
-      phone: phone.trim(),
-      relationship:
-          (relationship == null || relationship.trim().isEmpty)
-              ? null
-              : relationship.trim(),
+    final EmergencyContact contact = await _dataSource.addEmergencyContact(
+      name: name,
+      phone: phone,
+      relationship: relationship,
     );
-    state = <EmergencyContact>[...state, contact];
-    await _persist();
+    await refresh();
     return contact;
   }
 
   Future<void> update(EmergencyContact updated) async {
-    state = state
-        .map((EmergencyContact c) => c.id == updated.id ? updated : c)
-        .toList();
-    await _persist();
+    await _dataSource.updateEmergencyContact(updated);
+    await refresh();
   }
 
   Future<void> remove(String id) async {
+    await _dataSource.deleteEmergencyContact(id);
     state = state.where((EmergencyContact c) => c.id != id).toList();
-    await _persist();
   }
 }
-

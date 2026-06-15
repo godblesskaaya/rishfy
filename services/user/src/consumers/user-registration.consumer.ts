@@ -66,6 +66,11 @@ export async function startUserRegisteredConsumer(options: {
     topic: TOPIC_USER_REGISTERED,
     logger: options.logger,
     onMessage: async ({ value }) => {
+      if (!normalizePhone(value)?.trim()) {
+        options.logger?.warn({ user_id: value.user_id }, 'Skipping user.registered event missing phone_number');
+        return;
+      }
+
       await applyUserRegisteredEvent(options.repo, value);
       options.logger?.info({ user_id: value.user_id }, 'User profile synchronized from auth registration');
     },

@@ -79,6 +79,16 @@ class SearchResultDto {
     required this.estimatedPickupTime,
     required this.availableSeats,
     required this.pricePerSeat,
+    this.walkingPreferenceMeters = 1000,
+    this.expandedWalkingLimitMeters = 1750,
+    this.walkingExceedsPreference = false,
+    this.walkingOverageMeters = 0,
+    this.timeDifferenceMinutes = 0,
+    this.timeExceedsPreference = false,
+    this.timeOverageMinutes = 0,
+    this.matchQuality = 'good',
+    this.matchScore = 0,
+    this.matchReasons = const <String>[],
   });
 
   final String routeId;
@@ -103,6 +113,16 @@ class SearchResultDto {
   final DateTime estimatedPickupTime;
   final int availableSeats;
   final int pricePerSeat;
+  final int walkingPreferenceMeters;
+  final int expandedWalkingLimitMeters;
+  final bool walkingExceedsPreference;
+  final int walkingOverageMeters;
+  final int timeDifferenceMinutes;
+  final bool timeExceedsPreference;
+  final int timeOverageMinutes;
+  final String matchQuality;
+  final int matchScore;
+  final List<String> matchReasons;
 
   factory SearchResultDto.fromJson(Map<String, dynamic> j) {
     final Map<String, dynamic>? pickupPt =
@@ -140,6 +160,24 @@ class SearchResultDto {
       estimatedPickupTime: _parseDateTime(j['estimated_pickup_time']),
       availableSeats: _toInt(j['available_seats']),
       pricePerSeat: _toInt(j['price_per_seat']),
+      walkingPreferenceMeters: _toInt(
+        j['walking_preference_meters'],
+        fallback: 1000,
+      ),
+      expandedWalkingLimitMeters: _toInt(
+        j['expanded_walking_limit_meters'],
+        fallback: 1750,
+      ),
+      walkingExceedsPreference: j['walking_exceeds_preference'] == true,
+      walkingOverageMeters: _toInt(j['walking_overage_meters']),
+      timeDifferenceMinutes: _toInt(j['time_difference_minutes']),
+      timeExceedsPreference: j['time_exceeds_preference'] == true,
+      timeOverageMinutes: _toInt(j['time_overage_minutes']),
+      matchQuality: _readString(j, <String>['match_quality']) ?? 'good',
+      matchScore: _toInt(j['match_score']),
+      matchReasons: (j['match_reasons'] as List<dynamic>? ?? <dynamic>[])
+          .whereType<String>()
+          .toList(),
     );
   }
 
@@ -148,6 +186,41 @@ class SearchResultDto {
       return '${(walkingDistanceToPickup / 1000).toStringAsFixed(1)} km walk';
     }
     return '${walkingDistanceToPickup} m walk';
+  }
+
+  String get finalWalkLabel {
+    if (walkingDistanceFromDropoff >= 1000) {
+      return '${(walkingDistanceFromDropoff / 1000).toStringAsFixed(1)} km final';
+    }
+    return '${walkingDistanceFromDropoff} m final';
+  }
+
+  String get matchQualityLabel {
+    switch (matchQuality) {
+      case 'best':
+        return 'Best fit';
+      case 'flexible':
+        return 'More flexible';
+      default:
+        return 'Good fit';
+    }
+  }
+
+  String get walkingTradeoffLabel {
+    if (!walkingExceedsPreference || walkingOverageMeters <= 0) {
+      return 'Within walk preference';
+    }
+    if (walkingOverageMeters >= 1000) {
+      return '+${(walkingOverageMeters / 1000).toStringAsFixed(1)} km walk';
+    }
+    return '+${walkingOverageMeters} m walk';
+  }
+
+  String get timeTradeoffLabel {
+    if (!timeExceedsPreference || timeOverageMinutes <= 0) {
+      return '${timeDifferenceMinutes} min from request';
+    }
+    return '+${timeOverageMinutes} min time';
   }
 
   String get vehicleLabel {
@@ -375,6 +448,7 @@ class DriverVehicleOption {
     required this.make,
     required this.model,
     required this.plateNumber,
+    this.color,
     this.year,
     this.capacity,
     this.isActive = false,
@@ -384,6 +458,7 @@ class DriverVehicleOption {
   final String make;
   final String model;
   final String plateNumber;
+  final String? color;
   final int? year;
   final int? capacity;
   final bool isActive;
@@ -402,6 +477,7 @@ class DriverVehicleOption {
       model: (j['model'] as String?) ?? '',
       plateNumber:
           (j['plate_number'] ?? j['registration_number'] ?? '') as String,
+      color: _readString(j, <String>['color', 'vehicle_color']),
       year: _toNullableInt(j['year']),
       capacity: _toNullableInt(j['capacity']),
       isActive: (j['is_active'] as bool?) ??

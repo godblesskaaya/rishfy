@@ -10,26 +10,33 @@ import '../../features/auth/presentation/screens/otp_verification_screen.dart';
 import '../../features/auth/presentation/screens/register_screen.dart';
 import '../../features/auth/presentation/screens/splash_screen.dart';
 import '../../features/bookings/presentation/screens/booking_detail_screen.dart';
+import '../../features/bookings/presentation/screens/booking_receipt_screen.dart';
 import '../../features/bookings/presentation/screens/bookings_screen.dart';
 import '../../features/bookings/presentation/screens/create_booking_screen.dart';
+import '../../features/bookings/presentation/screens/safety_reports_screen.dart';
 import '../../features/home/presentation/screens/driver_home_screen.dart';
 import '../../features/home/presentation/screens/passenger_home_screen.dart';
 import '../../features/home/presentation/screens/shell_screen.dart';
 import '../../features/notifications/presentation/providers/notification_provider.dart';
 import '../../features/notifications/presentation/screens/notification_preferences_screen.dart';
 import '../../features/notifications/presentation/screens/notifications_screen.dart';
+import '../../features/profile/presentation/screens/blocked_users_screen.dart';
 import '../../features/profile/presentation/screens/edit_profile_screen.dart';
 import '../../features/profile/presentation/screens/emergency_contacts_screen.dart';
+import '../../features/profile/presentation/screens/favorite_drivers_screen.dart';
 import '../../features/profile/presentation/screens/help_support_screen.dart';
 import '../../features/profile/presentation/screens/legal_screen.dart';
 import '../../features/profile/presentation/screens/payment_methods_screen.dart';
 import '../../features/profile/presentation/screens/profile_screen.dart';
+import '../../features/profile/presentation/screens/public_driver_profile_screen.dart';
 import '../../features/profile/presentation/screens/settings_screen.dart';
 import '../../features/profile/presentation/screens/vehicle_management_screen.dart';
 import '../../features/routes/presentation/screens/post_route_screen.dart';
 import '../../features/routes/presentation/screens/route_detail_screen.dart';
 import '../../features/routes/presentation/screens/route_search_screen.dart';
 import '../../features/trip/presentation/screens/active_trip_screen.dart';
+import '../../features/wallet/presentation/screens/driver_wallet_screen.dart';
+import '../../features/wallet/presentation/screens/payout_detail_screen.dart';
 import '../../shared/providers/active_role_provider.dart';
 import '../constants/app_logger.dart';
 
@@ -229,11 +236,34 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
       ),
       GoRoute(
         parentNavigatorKey: _rootNavKey,
+        path: '/bookings/:bookingId/receipt',
+        builder: (BuildContext context, GoRouterState state) {
+          return BookingReceiptScreen(
+            bookingId: state.pathParameters['bookingId']!,
+          );
+        },
+      ),
+      GoRoute(
+        parentNavigatorKey: _rootNavKey,
         name: 'trip',
         path: '/trip/:bookingId',
         builder: (BuildContext context, GoRouterState state) {
           return ActiveTripScreen(
             bookingId: state.pathParameters['bookingId']!,
+          );
+        },
+      ),
+      GoRoute(
+        parentNavigatorKey: _rootNavKey,
+        path: '/driver/payouts',
+        builder: (_, __) => const DriverWalletScreen(),
+      ),
+      GoRoute(
+        parentNavigatorKey: _rootNavKey,
+        path: '/driver/payouts/:payoutId',
+        builder: (BuildContext context, GoRouterState state) {
+          return PayoutDetailScreen(
+            payoutId: state.pathParameters['payoutId']!,
           );
         },
       ),
@@ -271,6 +301,30 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
         parentNavigatorKey: _rootNavKey,
         path: '/profile/payment-methods',
         builder: (_, __) => const PaymentMethodsScreen(),
+      ),
+      GoRoute(
+        parentNavigatorKey: _rootNavKey,
+        path: '/profile/favorite-drivers',
+        builder: (_, __) => const FavoriteDriversScreen(),
+      ),
+      GoRoute(
+        parentNavigatorKey: _rootNavKey,
+        path: '/profile/blocked-users',
+        builder: (_, __) => const BlockedUsersScreen(),
+      ),
+      GoRoute(
+        parentNavigatorKey: _rootNavKey,
+        path: '/profile/safety-reports',
+        builder: (_, __) => const SafetyReportsScreen(),
+      ),
+      GoRoute(
+        parentNavigatorKey: _rootNavKey,
+        path: '/drivers/:driverId',
+        builder: (BuildContext context, GoRouterState state) {
+          return PublicDriverProfileScreen(
+            driverId: state.pathParameters['driverId']!,
+          );
+        },
       ),
       GoRoute(
         parentNavigatorKey: _rootNavKey,

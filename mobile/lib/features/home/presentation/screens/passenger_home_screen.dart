@@ -153,8 +153,8 @@ class PassengerHomeScreen extends ConsumerWidget {
                   Expanded(
                     child: _QuickAction(
                       icon: Icons.favorite_border,
-                      label: 'Saved\nplaces',
-                      onTap: () {},
+                      label: 'Favorite\ndrivers',
+                      onTap: () => context.push('/profile/favorite-drivers'),
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -162,7 +162,7 @@ class PassengerHomeScreen extends ConsumerWidget {
                     child: _QuickAction(
                       icon: Icons.emergency_outlined,
                       label: 'Emergency\ncontacts',
-                      onTap: () {},
+                      onTap: () => context.push('/profile/emergency-contacts'),
                     ),
                   ),
                 ],

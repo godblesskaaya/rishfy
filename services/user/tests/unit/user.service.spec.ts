@@ -71,3 +71,27 @@ describe('UserService.becomeDriver', () => {
     ).rejects.toThrow(AppError);
   });
 });
+
+describe('UserService social trust guardrails', () => {
+  it('rejects self-blocking', async () => {
+    await expect(new UserService(makePool()).blockUser('user-1', 'user-1')).rejects.toThrow(AppError);
+  });
+
+  it('rejects self-favoriting', async () => {
+    await expect(new UserService(makePool()).addFavoriteDriver('user-1', 'user-1')).rejects.toThrow(AppError);
+  });
+
+  it('requires a driver role before adding a favorite driver', async () => {
+    const pool = makePool();
+    vi.mocked(pool.query).mockResolvedValueOnce({ rows: [{ ...mockUser, id: 'driver-1', role: 'passenger' }], rowCount: 1 } as never);
+
+    await expect(new UserService(pool).addFavoriteDriver('user-1', 'driver-1')).rejects.toThrow(AppError);
+  });
+
+  it('requires a reason when hiding a rating', async () => {
+    await expect(new UserService(makePool()).moderateRating('rating-1', {
+      status: 'hidden',
+      moderatedBy: 'admin-1',
+    })).rejects.toThrow(AppError);
+  });
+});

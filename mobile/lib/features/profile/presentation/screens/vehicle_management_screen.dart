@@ -85,6 +85,34 @@ class _VehicleManagementScreenState
     }
   }
 
+  Future<void> _editVehicle(DriverVehicleOption vehicle) async {
+    final CreateVehicleRequest? request =
+        await showModalBottomSheet<CreateVehicleRequest>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => _AddVehicleSheet(existing: vehicle),
+    );
+    if (request == null) return;
+
+    setState(() => _mutatingVehicle = true);
+    try {
+      await ref
+          .read(profileRemoteDataSourceProvider)
+          .updateVehicle(vehicle.id, request);
+      ref.invalidate(myVehiclesProvider);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Vehicle updated successfully.')),
+      );
+    } catch (error) {
+      await _showError(error);
+    } finally {
+      if (mounted) {
+        setState(() => _mutatingVehicle = false);
+      }
+    }
+  }
+
   Future<void> _setActiveVehicle(String vehicleId) async {
     setState(() => _mutatingVehicle = true);
     try {
@@ -185,6 +213,7 @@ class _VehicleManagementScreenState
                         return _VehicleCard(
                           vehicle: vehicle,
                           busy: _mutatingVehicle,
+                          onEdit: () => _editVehicle(vehicle),
                           onDelete: () => _deleteVehicle(vehicle.id),
                           onSetActive: vehicle.isActive
                               ? null
@@ -323,12 +352,14 @@ class _VehicleCard extends StatelessWidget {
   const _VehicleCard({
     required this.vehicle,
     required this.busy,
+    required this.onEdit,
     required this.onDelete,
     this.onSetActive,
   });
 
   final DriverVehicleOption vehicle;
   final bool busy;
+  final VoidCallback onEdit;
   final VoidCallback onDelete;
   final VoidCallback? onSetActive;
 
@@ -378,6 +409,13 @@ class _VehicleCard extends StatelessWidget {
           const SizedBox(height: AppConstants.spaceMd),
           Row(
             children: <Widget>[
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: busy ? null : onEdit,
+                  child: const Text('Edit'),
+                ),
+              ),
+              const SizedBox(width: AppConstants.spaceSm),
               if (onSetActive != null) ...<Widget>[
                 Expanded(
                   child: FilledButton.tonal(
@@ -511,7 +549,9 @@ class _BecomeDriverSheetState extends State<_BecomeDriverSheet> {
 }
 
 class _AddVehicleSheet extends StatefulWidget {
-  const _AddVehicleSheet();
+  const _AddVehicleSheet({this.existing});
+
+  final DriverVehicleOption? existing;
 
   @override
   State<_AddVehicleSheet> createState() => _AddVehicleSheetState();
@@ -519,12 +559,20 @@ class _AddVehicleSheet extends StatefulWidget {
 
 class _AddVehicleSheetState extends State<_AddVehicleSheet> {
   final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
-  final TextEditingController _makeCtrl = TextEditingController();
-  final TextEditingController _modelCtrl = TextEditingController();
-  final TextEditingController _yearCtrl = TextEditingController();
-  final TextEditingController _colorCtrl = TextEditingController();
-  final TextEditingController _plateCtrl = TextEditingController();
-  final TextEditingController _capacityCtrl = TextEditingController(text: '4');
+  late final TextEditingController _makeCtrl =
+      TextEditingController(text: widget.existing?.make ?? '');
+  late final TextEditingController _modelCtrl =
+      TextEditingController(text: widget.existing?.model ?? '');
+  late final TextEditingController _yearCtrl = TextEditingController(
+    text: widget.existing?.year?.toString() ?? '',
+  );
+  late final TextEditingController _colorCtrl =
+      TextEditingController(text: widget.existing?.color ?? '');
+  late final TextEditingController _plateCtrl =
+      TextEditingController(text: widget.existing?.plateNumber ?? '');
+  late final TextEditingController _capacityCtrl = TextEditingController(
+    text: widget.existing?.capacity?.toString() ?? '4',
+  );
 
   @override
   void dispose() {
@@ -569,7 +617,7 @@ class _AddVehicleSheetState extends State<_AddVehicleSheet> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
               Text(
-                'Add vehicle',
+                widget.existing == null ? 'Add vehicle' : 'Edit vehicle',
                 style: Theme.of(context).textTheme.titleLarge,
               ),
               const SizedBox(height: AppConstants.spaceLg),
@@ -645,7 +693,9 @@ class _AddVehicleSheetState extends State<_AddVehicleSheet> {
               const SizedBox(height: AppConstants.spaceLg),
               FilledButton(
                 onPressed: _submit,
-                child: const Text('Save vehicle'),
+                child: Text(
+                  widget.existing == null ? 'Save vehicle' : 'Update vehicle',
+                ),
               ),
             ],
           ),

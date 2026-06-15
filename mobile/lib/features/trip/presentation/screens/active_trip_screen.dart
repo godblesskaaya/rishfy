@@ -138,6 +138,70 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
     super.dispose();
   }
 
+  Future<void> _showTripEmergencyDialog(BookingEntity booking) async {
+    final TextEditingController reasonCtrl = TextEditingController();
+    final String? reason = await showDialog<String>(
+      context: context,
+      builder: (BuildContext dialogContext) => AlertDialog(
+        title: const Text('Trip emergency'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            const Text(
+              'If you are in immediate danger, contact emergency services first. '
+              'You can also submit a trip safety report to support.',
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: reasonCtrl,
+              maxLines: 3,
+              decoration: const InputDecoration(
+                labelText: 'What happened?',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () {
+              Navigator.pop(dialogContext);
+              unawaited(showEmergencyDialog(context));
+            },
+            child: const Text('Emergency contacts'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () =>
+                Navigator.pop(dialogContext, reasonCtrl.text.trim()),
+            child: const Text('Submit report'),
+          ),
+        ],
+      ),
+    );
+    reasonCtrl.dispose();
+    if (reason == null) return;
+
+    await ref
+        .read(emergencyReportProvider.notifier)
+        .report(booking.bookingId, reason: reason.isEmpty ? null : reason);
+    final EmergencyReportState result = ref.read(emergencyReportProvider);
+    if (!mounted) return;
+    if (result.status == EmergencyReportStatus.success) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Emergency report submitted.')),
+      );
+    } else if (result.status == EmergencyReportStatus.failed) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(result.error ?? 'Could not submit report.')),
+      );
+    }
+  }
+
   DriverTrackingState _trackingWithDriverPosition(
     BookingEntity booking,
     DriverTrackingState tracking,
@@ -523,6 +587,8 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
     final DriverBroadcastState driverBroadcast =
         ref.watch(driverBroadcastProvider);
     final TripActionState actionState = ref.watch(journeyActionProvider);
+    final EmergencyReportState emergencyState =
+        ref.watch(emergencyReportProvider);
 
     ref.listen<TripActionState>(journeyActionProvider,
         (TripActionState? previous, TripActionState next) async {
@@ -649,6 +715,7 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
                 effectiveTracking,
                 route,
                 actionState,
+                emergencyState,
               )
             : _buildPassengerView(
                 context,
@@ -656,6 +723,7 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
                 effectiveTracking,
                 route,
                 actionState,
+                emergencyState,
               );
       },
     );
@@ -667,6 +735,7 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
     DriverTrackingState tracking,
     RouteEntity? route,
     TripActionState actionState,
+    EmergencyReportState emergencyState,
   ) {
     final DriverLocationUpdate? driverUpdate = tracking.latest;
     final LatLng initialPosition = _initialCameraTarget(booking, tracking);
@@ -686,7 +755,9 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
           IconButton(
             icon: const Icon(Icons.emergency, color: Colors.red),
             tooltip: 'Emergency',
-            onPressed: () => unawaited(showEmergencyDialog(context)),
+            onPressed: emergencyState.status == EmergencyReportStatus.loading
+                ? null
+                : () => unawaited(_showTripEmergencyDialog(booking)),
           ),
         ],
       ),
@@ -795,6 +866,7 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
     DriverTrackingState tracking,
     RouteEntity? route,
     TripActionState actionState,
+    EmergencyReportState emergencyState,
   ) {
     final LatLng initialPosition = _initialCameraTarget(booking, tracking);
 
@@ -805,7 +877,9 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen> {
           IconButton(
             icon: const Icon(Icons.emergency, color: Colors.red),
             tooltip: 'Emergency',
-            onPressed: () => unawaited(showEmergencyDialog(context)),
+            onPressed: emergencyState.status == EmergencyReportStatus.loading
+                ? null
+                : () => unawaited(_showTripEmergencyDialog(booking)),
           ),
         ],
       ),
@@ -1359,6 +1433,18 @@ class _PassengerJourneyPanel extends StatelessWidget {
         PrimaryButton(
           label: 'Open booking summary',
           onPressed: () => context.push('/bookings/${booking.bookingId}'),
+        ),
+      );
+      details.add(const SizedBox(height: 8));
+      details.add(
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            onPressed: () =>
+                context.push('/bookings/${booking.bookingId}/receipt'),
+            icon: const Icon(Icons.receipt_long_outlined),
+            label: const Text('View receipt'),
+          ),
         ),
       );
     } else if (!booking.isJourneyActive &&
