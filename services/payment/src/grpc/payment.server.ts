@@ -6,6 +6,8 @@ import { logger } from '../logger.js';
 import { PaymentService } from '../services/payment.service.js';
 import { PaymentRepository } from '../repositories/payment.repository.js';
 import { SettlementRepository } from '../repositories/settlement.repository.js';
+import { LedgerRepository } from '../repositories/ledger.repository.js';
+import { LedgerPostingService } from '../services/ledger.service.js';
 import { pgPool } from '../db.js';
 
 const PROTO_PATH = path.resolve(process.cwd(), 'shared/protos/payment.proto');
@@ -25,7 +27,8 @@ const PaymentServiceDef = (pkg['v1'] as Record<string, unknown>)['PaymentService
 
 const paymentRepo = new PaymentRepository(pgPool);
 const settlementRepo = new SettlementRepository(pgPool);
-const svc = new PaymentService(paymentRepo);
+const ledger = new LedgerPostingService(new LedgerRepository(pgPool));
+const svc = new PaymentService(paymentRepo, ledger);
 
 type Handler<Req, Res> = grpc.handleUnaryCall<Req, Res>;
 
@@ -132,7 +135,7 @@ const refundPayment: Handler<RefundReq, unknown> = async (call, callback) => {
     }
     callback(null, {
       payment: { paymentId: result.payment.id, status: result.payment.status.toUpperCase() },
-      refundReference: result.payment.provider_reference ?? '',
+      refundReference: result.refundReference,
       refundedNow: { amountTzs: String(result.refundedAmount) },
     });
   } catch (err) {

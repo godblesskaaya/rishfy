@@ -27,6 +27,14 @@ const statusConfig: Record<
   processing: { variant: 'warning', label: 'Processing' },
   failed: { variant: 'destructive', label: 'Failed' },
   refunded: { variant: 'secondary', label: 'Refunded' },
+  manual_required: { variant: 'warning', label: 'Manual required' },
+  requested: { variant: 'warning', label: 'Requested' },
+
+  // Support
+  open: { variant: 'warning', label: 'Open' },
+  waiting: { variant: 'default', label: 'Waiting' },
+  resolved: { variant: 'success', label: 'Resolved' },
+  closed: { variant: 'secondary', label: 'Closed' },
 
   // Routes
   draft: { variant: 'secondary', label: 'Draft' },

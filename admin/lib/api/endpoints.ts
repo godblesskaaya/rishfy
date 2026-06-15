@@ -6,7 +6,13 @@ import type {
   ListResponse,
   PaginationParams,
   Payment,
+  Payout,
+  ReconciliationMatchStatus,
+  ReconciliationRecord,
+  Refund,
+  ModeratedReview,
   Route,
+  SupportCase,
   User,
   Vehicle,
 } from '@/types/api';
@@ -160,6 +166,126 @@ export const paymentsApi = {
     const { data } = await apiClient.post<{ success: boolean }>(
       `/payments/${paymentId}/refund`,
       { amount, reason },
+    );
+    return data;
+  },
+};
+
+export const payoutsApi = {
+  list: async (params: PaginationParams & { status?: string }) => {
+    const { data } = await apiClient.get<ListResponse<Payout>>('/payouts', {
+      params,
+    });
+    return data;
+  },
+
+  approve: async (payoutId: string) => {
+    const { data } = await apiClient.post<Payout>(`/payouts/${payoutId}/approve`);
+    return data;
+  },
+
+  complete: async (payoutId: string, providerReference: string) => {
+    const { data } = await apiClient.post<Payout>(`/payouts/${payoutId}/complete`, {
+      providerReference,
+    });
+    return data;
+  },
+
+  fail: async (payoutId: string, failureReason: string) => {
+    const { data } = await apiClient.post<Payout>(`/payouts/${payoutId}/fail`, {
+      failureReason,
+    });
+    return data;
+  },
+};
+
+export const refundsApi = {
+  list: async (params: PaginationParams & { status?: Refund['status'] }) => {
+    const { data } = await apiClient.get<ListResponse<Refund>>('/refunds', {
+      params,
+    });
+    return data;
+  },
+
+  complete: async (refundId: string, providerReference: string) => {
+    const { data } = await apiClient.post<{ payment: Payment; refund: Refund }>(
+      `/refunds/${refundId}/complete`,
+      { providerReference },
+    );
+    return data;
+  },
+};
+
+export const reconciliationApi = {
+  listPayments: async (params: { status?: ReconciliationMatchStatus; limit?: number; offset?: number }) => {
+    const { data } = await apiClient.get<{ items: ReconciliationRecord[] }>(
+      '/reconciliation/provider-payments',
+      { params },
+    );
+    return data;
+  },
+
+  importPayments: async (records: Array<{
+    provider: string;
+    providerReference: string;
+    amountTzs: number;
+    providerStatus: string;
+    occurredAt?: string;
+  }>) => {
+    const { data } = await apiClient.post<{
+      summary: Record<string, number>;
+      items: ReconciliationRecord[];
+    }>('/reconciliation/provider-payments', { records });
+    return data;
+  },
+};
+
+export const moderationApi = {
+  listReviews: async (params: { status?: 'pending' | 'approved' | 'hidden'; limit?: number; offset?: number }) => {
+    const { data } = await apiClient.get<{ reviews: ModeratedReview[]; total: number }>(
+      '/admin/reviews',
+      { params },
+    );
+    return data;
+  },
+
+  moderateReview: async (
+    ratingId: string,
+    body: { status: 'approved' | 'hidden'; hidden_reason?: string },
+  ) => {
+    const { data } = await apiClient.post<ModeratedReview>(
+      `/admin/reviews/${ratingId}/moderate`,
+      body,
+    );
+    return data;
+  },
+};
+
+export const supportApi = {
+  listCases: async (params: {
+    status?: SupportCase['status'];
+    priority?: SupportCase['priority'];
+    limit?: number;
+    offset?: number;
+  }) => {
+    const { data } = await apiClient.get<{ cases: SupportCase[]; total: number }>(
+      '/admin/support-cases',
+      { params },
+    );
+    return data;
+  },
+
+  updateCase: async (
+    caseId: string,
+    body: {
+      status?: SupportCase['status'];
+      priority?: SupportCase['priority'];
+      support_responded?: boolean;
+    },
+  ) => {
+    const { data } = await apiClient.patch<SupportCase>(
+      `/admin/support-cases/${caseId}`,
+      body,
     );
     return data;
   },

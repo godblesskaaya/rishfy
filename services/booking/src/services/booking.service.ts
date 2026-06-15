@@ -539,6 +539,10 @@ export class BookingService {
     return this.normalizeBooking(await this.repo.findByCode(code));
   }
 
+  async listSafetyReportsForUser(userId: string) {
+    return this.repo.listSafetyReportsForUser(userId);
+  }
+
   async listMyBookings(userId: string, role: 'passenger' | 'driver', limit = 20, offset = 0): Promise<BookingRow[]> {
     if (role === 'driver') return this.repo.listByDriver(userId, limit, offset);
     return this.repo.listByPassenger(userId, limit, offset);

@@ -26,7 +26,7 @@ export interface ListResponse<T> {
 // User
 // =============================================================================
 
-export type UserRole = 'passenger' | 'driver' | 'admin' | 'support';
+export type UserRole = 'passenger' | 'driver' | 'admin';
 export type UserStatus = 'active' | 'suspended' | 'deleted';
 
 export interface User {
@@ -199,6 +199,84 @@ export interface Payment {
   initiated_at: string;
   completed_at: string | null;
   refunded_amount: number;
+}
+
+export interface Refund {
+  refund_id: string;
+  payment_id: string;
+  booking_id: string;
+  user_id: string;
+  amount_tzs: number;
+  status: 'requested' | 'processing' | 'completed' | 'failed' | 'manual_required';
+  reason: string;
+  policy: string;
+  provider_reference: string | null;
+  failure_reason: string | null;
+  requested_by: string;
+  requested_at: string;
+  completed_at: string | null;
+  failed_at: string | null;
+}
+
+export type PayoutStatus = 'pending_review' | 'processing' | 'completed' | 'failed' | 'cancelled';
+
+export interface Payout {
+  payoutId: string;
+  driverUserId: string;
+  amountTzs: number;
+  status: PayoutStatus;
+  payoutMethod: string;
+  payoutPhone: string;
+  providerReference: string | null;
+  requestedAt: string;
+  completedAt: string | null;
+}
+
+export type ReconciliationMatchStatus = 'matched' | 'unmatched' | 'amount_mismatch' | 'status_mismatch';
+
+export interface ReconciliationRecord {
+  id: string;
+  provider: string;
+  recordType: 'payment' | 'refund' | 'payout';
+  providerReference: string;
+  amountTzs: number;
+  providerStatus: string;
+  occurredAt: string | null;
+  matchStatus: ReconciliationMatchStatus;
+  matchedPaymentId: string | null;
+  mismatchReason: string | null;
+  importedAt: string;
+}
+
+export interface ModeratedReview {
+  id: string;
+  ratee_id: string;
+  rater_id: string;
+  booking_id: string;
+  score: number;
+  comment: string | null;
+  moderation_status: 'pending' | 'approved' | 'hidden';
+  moderated_by: string | null;
+  moderated_at: string | null;
+  hidden_reason: string | null;
+  created_at: string;
+}
+
+export interface SupportCase {
+  id: string;
+  user_id: string;
+  booking_id: string | null;
+  subject: string;
+  message: string;
+  category: string;
+  status: 'open' | 'waiting' | 'resolved' | 'closed';
+  priority: 'low' | 'normal' | 'high' | 'urgent';
+  last_user_message_at: string;
+  last_support_response_at: string | null;
+  resolved_at: string | null;
+  closed_at: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 // =============================================================================

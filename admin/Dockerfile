@@ -12,7 +12,7 @@ ENV NODE_ENV=production
 # ---- Dependencies ------------------------------------------------
 FROM base AS deps
 COPY package.json package-lock.json* ./
-RUN npm ci --ignore-scripts && npm cache clean --force
+RUN npm ci --include=dev --ignore-scripts && npm cache clean --force
 
 # ---- Development image -------------------------------------------
 FROM base AS development

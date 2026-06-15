@@ -155,7 +155,7 @@ export default function LatraPage() {
           <CardTitle>Trip report</CardTitle>
           <CardDescription>
             Completed trips in the selected date range. This is the exact data
-            submitted to LATRA's monitoring API.
+            submitted to LATRA&apos;s monitoring API.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">

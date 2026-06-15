@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
   serviceMock,
+  latraServiceMock,
   scheduleExpiryMock,
   removeJobMock,
 } = vi.hoisted(() => ({
@@ -22,6 +23,12 @@ const {
     listMyBookings: vi.fn(),
     listDriverRouteOperations: vi.fn(),
     getBooking: vi.fn(),
+  },
+  latraServiceMock: {
+    listTrips: vi.fn(),
+    getComplianceStats: vi.fn(),
+    mockOAuthToken: vi.fn(),
+    mockVerifyVehicle: vi.fn(),
   },
   scheduleExpiryMock: vi.fn(),
   removeJobMock: vi.fn(),
@@ -55,6 +62,10 @@ vi.mock('../../src/repositories/booking.repository.js', () => ({
 
 vi.mock('../../src/services/booking.service.js', () => ({
   BookingService: vi.fn().mockImplementation(() => serviceMock),
+}));
+
+vi.mock('../../src/services/latra.service.js', () => ({
+  LatraComplianceService: vi.fn().mockImplementation(() => latraServiceMock),
 }));
 
 vi.mock('../../src/jobs/booking-expiry.worker.js', () => ({
@@ -221,6 +232,130 @@ describe('booking routes integration', () => {
 
     expect(res.statusCode).toBe(409);
     expect(res.json()).toMatchObject({ error: 'INVALID_STATE' });
+  });
+
+  it('GET /latra/trips returns completed trip report for admins', async () => {
+    latraServiceMock.listTrips.mockResolvedValue({
+      trips: [
+        {
+          trip_id: 'trip-1',
+          origin_coordinates: '39.2,-6.8',
+          end_coordinates: '39.3,-6.7',
+          start_time: '2026-06-01 08:00:00',
+          end_time: '2026-06-01 08:30:00',
+          total_fare_amount: 5000,
+          trip_distance: 12000,
+          rating: 5,
+          driver_earning: 4250,
+          driver_license_number: 'DL-1',
+          vehicle_registration: 'T123ABC',
+          validation_status: 'complete',
+          missing_fields: [],
+          warnings: [],
+        },
+      ],
+      incomplete: [],
+      summary: { total: 1, complete: 1, incomplete: 0 },
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/v1/latra/trips?startDate=2026-06-01&endDate=2026-06-30',
+      headers: { 'x-user-role': 'admin' },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ summary: { total: 1, complete: 1 } });
+    expect(latraServiceMock.listTrips).toHaveBeenCalledWith({
+      startDate: '2026-06-01',
+      endDate: '2026-06-30',
+    });
+  });
+
+  it('GET /latra/trips rejects non-admin access', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/v1/latra/trips?startDate=2026-06-01&endDate=2026-06-30',
+      headers: { 'x-user-role': 'driver' },
+    });
+
+    expect(res.statusCode).toBe(403);
+    expect(latraServiceMock.listTrips).not.toHaveBeenCalled();
+  });
+
+  it('GET /latra/compliance-stats returns admin compliance KPIs', async () => {
+    latraServiceMock.getComplianceStats.mockResolvedValue({
+      total_licensed_vehicles: 3,
+      total_trips_this_month: 10,
+      reporting_compliance_rate: 0.8,
+      last_report_submitted_at: null,
+      missing: {
+        coordinates: 1,
+        times: 0,
+        ratings: 2,
+        driver_license_or_vehicle: 1,
+      },
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/v1/latra/compliance-stats',
+      headers: { 'x-user-role': 'admin' },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      total_licensed_vehicles: 3,
+      reporting_compliance_rate: 0.8,
+    });
+  });
+
+  it('POST /mock/latra/oauth/token returns a mock OAuth token', async () => {
+    latraServiceMock.mockOAuthToken.mockReturnValue({
+      access_token: 'mock-latra-access-token',
+      token_type: 'Bearer',
+      expires_in: 3600,
+      mock: true,
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/mock/latra/oauth/token',
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ access_token: 'mock-latra-access-token', mock: true });
+  });
+
+  it('POST /mock/latra/vehicle-verification validates a vehicle through mock LATRA', async () => {
+    latraServiceMock.mockVerifyVehicle.mockReturnValue({
+      registration_number: 'T123ABC',
+      verified: true,
+      status: 'valid',
+      mock: true,
+      latra_license_number: 'MOCK-LATRA-T123ABC',
+      expires_at: '2027-06-14',
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/mock/latra/vehicle-verification',
+      payload: { registration_number: 'T123ABC' },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ verified: true, mock: true });
+  });
+
+  it('POST /mock/latra/report-submissions accepts dry-run report payloads', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/mock/latra/report-submissions',
+      payload: { trips: [{ trip_id: 'trip-1' }] },
+    });
+
+    expect(res.statusCode).toBe(202);
+    expect(res.json()).toMatchObject({ accepted: true, mock: true, received_records: 1 });
   });
 
   it('POST /bookings/:id/start-trip moves the booking into the driver approach phase', async () => {

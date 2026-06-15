@@ -7,10 +7,21 @@ import IORedis from 'ioredis';
 import { config } from '../config.js';
 import { logger } from '../logger.js';
 import { z } from 'zod';
+import { LatraComplianceService } from '../services/latra.service.js';
 
 const service = new BookingService(new BookingRepository(pgPool));
+const latraService = new LatraComplianceService(new BookingRepository(pgPool));
 const redis = new IORedis(config.REDIS_URL, { maxRetriesPerRequest: null });
 const uuidParamSchema = z.object({ routeId: z.string().uuid() });
+const latraDateRangeSchema = z.object({
+  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  cursor: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(500).optional(),
+});
+const latraVehicleSchema = z.object({
+  registration_number: z.string().min(3).max(20),
+});
 
 export async function bookingRoutes(app: FastifyInstance): Promise<void> {
   // POST /api/v1/bookings — create booking (saga step 1)
@@ -109,6 +120,98 @@ export async function bookingRoutes(app: FastifyInstance): Promise<void> {
     const { routeId } = parse.data;
     const bookings = await service.listDriverRouteOperations(routeId, userId);
     return reply.send({ bookings });
+  });
+
+  // GET /api/v1/bookings/safety-reports
+  app.get('/api/v1/bookings/safety-reports', async (req, reply) => {
+    const userId = req.headers['x-user-id'] as string;
+    if (!userId) return reply.status(401).send({ error: 'UNAUTHORIZED' });
+
+    try {
+      const reports = await service.listSafetyReportsForUser(userId);
+      return reply.send({
+        reports: reports.map((report) => ({
+          reportId: report.id,
+          bookingId: report.booking_id,
+          routeId: report.route_id,
+          passengerId: report.passenger_id,
+          driverId: report.driver_id,
+          bookingStatus: report.booking_status,
+          journeyState: report.journey_state,
+          paymentStatus: report.payment_status,
+          pickupName: report.pickup_name,
+          dropoffName: report.dropoff_name,
+          reportedBy: report.payload?.reportedBy,
+          reporterRole: report.payload?.reporterRole,
+          reason: report.payload?.reason,
+          status: report.payment_status === 'paid' ? 'under_review' : 'submitted',
+          createdAt: report.created_at,
+        })),
+      });
+    } catch (err) {
+      logger.error({ err }, 'GET /bookings/safety-reports failed');
+      return reply.status(500).send({ error: 'INTERNAL_ERROR' });
+    }
+  });
+
+  // GET /api/v1/latra/trips?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD
+  app.get('/api/v1/latra/trips', async (req, reply) => {
+    const userRole = req.headers['x-user-role'] as string | undefined;
+    if (userRole !== 'admin') return reply.status(403).send({ error: 'FORBIDDEN' });
+    const parsed = latraDateRangeSchema.safeParse(req.query);
+    if (!parsed.success) {
+      return reply.status(400).send({ error: 'VALIDATION_ERROR', issues: parsed.error.issues });
+    }
+
+    try {
+      return reply.send(await latraService.listTrips(parsed.data));
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === 'VALIDATION_ERROR') return reply.status(400).send({ error: 'VALIDATION_ERROR' });
+      logger.error({ err }, 'GET /latra/trips failed');
+      return reply.status(500).send({ error: 'INTERNAL_ERROR' });
+    }
+  });
+
+  // GET /api/v1/latra/compliance-stats
+  app.get('/api/v1/latra/compliance-stats', async (req, reply) => {
+    const userRole = req.headers['x-user-role'] as string | undefined;
+    if (userRole !== 'admin') return reply.status(403).send({ error: 'FORBIDDEN' });
+
+    try {
+      return reply.send(await latraService.getComplianceStats());
+    } catch (err) {
+      logger.error({ err }, 'GET /latra/compliance-stats failed');
+      return reply.status(500).send({ error: 'INTERNAL_ERROR' });
+    }
+  });
+
+  // POST /api/v1/mock/latra/oauth/token
+  app.post('/api/v1/mock/latra/oauth/token', async (_req, reply) => {
+    if (config.NODE_ENV === 'production') return reply.status(404).send({ error: 'NOT_FOUND' });
+    return reply.send(latraService.mockOAuthToken());
+  });
+
+  // POST /api/v1/mock/latra/vehicle-verification
+  app.post('/api/v1/mock/latra/vehicle-verification', async (req, reply) => {
+    if (config.NODE_ENV === 'production') return reply.status(404).send({ error: 'NOT_FOUND' });
+    const parsed = latraVehicleSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return reply.status(400).send({ error: 'VALIDATION_ERROR', issues: parsed.error.issues });
+    }
+    return reply.send(latraService.mockVerifyVehicle(parsed.data.registration_number));
+  });
+
+  // POST /api/v1/mock/latra/report-submissions
+  app.post('/api/v1/mock/latra/report-submissions', async (req, reply) => {
+    if (config.NODE_ENV === 'production') return reply.status(404).send({ error: 'NOT_FOUND' });
+    const payload = req.body as { trips?: unknown[] } | undefined;
+    return reply.status(202).send({
+      accepted: true,
+      mock: true,
+      received_records: Array.isArray(payload?.trips) ? payload.trips.length : 0,
+      submitted_at: new Date().toISOString(),
+    });
   });
 
   // GET /api/v1/bookings/:id

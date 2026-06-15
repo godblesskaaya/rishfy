@@ -14,6 +14,7 @@ const configSchema = z.object({
 
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().url().optional(),
 
+  USER_SERVICE_GRPC_URL: z.string().default('user-service:50052'),
   ROUTE_SERVICE_GRPC_URL: z.string().default('route-service:50053'),
   PAYMENT_SERVICE_GRPC_URL: z.string().default('payment-service:50055'),
   LOCATION_SERVICE_GRPC_URL: z.string().default('location-service:50056'),

@@ -6,9 +6,13 @@ import {
   LayoutDashboard,
   Map,
   Receipt,
+  Scale,
   Settings,
+  ShieldAlert,
   ShieldCheck,
+  LifeBuoy,
   Users,
+  Wallet,
 } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -43,11 +47,16 @@ const navGroups: Array<{ label: string; items: NavItem[] }> = [
       { href: '/routes', label: 'Routes', icon: Map },
       { href: '/bookings', label: 'Bookings', icon: Receipt },
       { href: '/payments', label: 'Payments', icon: CreditCard },
+      { href: '/refunds', label: 'Refunds', icon: Receipt },
+      { href: '/payouts', label: 'Payouts', icon: Wallet },
+      { href: '/reconciliation', label: 'Reconciliation', icon: Scale },
+      { href: '/support', label: 'Support', icon: LifeBuoy },
     ],
   },
   {
     label: 'Compliance',
     items: [
+      { href: '/moderation', label: 'Moderation', icon: ShieldAlert },
       { href: '/latra', label: 'LATRA Reports', icon: ShieldCheck },
     ],
   },

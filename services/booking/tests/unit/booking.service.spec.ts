@@ -61,6 +61,7 @@ const {
   publishBookingEmergency,
   publishBookingJourneyCompleted,
   publishBookingNoShow,
+  publishBookingRated,
   publishDriverArrivedPickup,
   publishPassengerBoarded,
   publishPassengerDroppedOff,
@@ -143,6 +144,42 @@ beforeEach(() => {
 });
 
 describe('BookingService.cancelByPassengerWithRefund', () => {
+  it.each([
+    ['confirmed'],
+    ['driver_approaching'],
+    ['driver_arrived'],
+  ] as const)(
+    'applies LATRA no-charge cancellation policy before boarding when state is %s',
+    async (journeyState) => {
+      const repo = makeRepo();
+      const cancellable = { ...baseBooking, journey_state: journeyState };
+      const cancelled = {
+        ...cancellable,
+        status: 'passenger_cancelled' as const,
+        journey_state: 'cancelled' as const,
+      };
+      repo.findById.mockResolvedValue(cancellable);
+      repo.cancelByPassenger.mockResolvedValue(cancelled);
+      repo.markPaymentRefunded.mockResolvedValue({ ...cancelled, payment_status: 'refunded' as const });
+      vi.mocked(refundPayment).mockResolvedValue({
+        refundReference: 'RF-LATRA',
+        refundedAmountTzs: 10000,
+        paymentStatus: 'REFUNDED',
+      });
+
+      const svc = new BookingService(repo as never);
+      const result = await svc.cancelByPassengerWithRefund('booking-1', 'passenger-1', 'PASSENGER_CANCELLED');
+
+      expect(repo.cancelByPassenger).toHaveBeenCalledWith('booking-1', 'PASSENGER_CANCELLED');
+      expect(vi.mocked(refundPayment)).toHaveBeenCalledWith('payment-1', 'passenger-1', 'PASSENGER_CANCELLED');
+      expect(result.refund).toMatchObject({
+        attempted: true,
+        applied: true,
+        refundedAmountTzs: 10000,
+      });
+    },
+  );
+
   it('orchestrates refund for paid bookings before boarding', async () => {
     const repo = makeRepo();
     const cancellable = { ...baseBooking, journey_state: 'driver_arrived' as const };
@@ -302,6 +339,47 @@ describe('BookingService journey actions', () => {
     expect(result.status).toBe('completed');
     expect(repo.completeJourney).toHaveBeenCalledWith('booking-1');
     expect(vi.mocked(publishBookingJourneyCompleted)).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('BookingService.submitRating', () => {
+  it('stores first passenger rating and publishes one rating event', async () => {
+    const repo = makeRepo();
+    const completed = { ...baseBooking, status: 'completed' as const, journey_state: 'completed' as const };
+    const rated = { ...completed, passenger_rating: 5, passenger_review: 'Good ride' };
+    repo.findById.mockResolvedValue(completed);
+    repo.submitRating.mockResolvedValue(rated);
+
+    const svc = new BookingService(repo as never);
+    const result = await svc.submitRating('booking-1', 'passenger-1', 5, 'Good ride');
+
+    expect(result.passenger_rating).toBe(5);
+    expect(repo.submitRating).toHaveBeenCalledWith('booking-1', true, 5, 'Good ride');
+    expect(vi.mocked(publishBookingRated)).toHaveBeenCalledWith({
+      bookingId: 'booking-1',
+      raterId: 'passenger-1',
+      ratedId: 'driver-1',
+      rating: 5,
+      raterRole: 'passenger',
+      timestamp: expect.any(String),
+    });
+  });
+
+  it('rejects duplicate ratings without publishing another rating event', async () => {
+    const repo = makeRepo();
+    const completed = {
+      ...baseBooking,
+      status: 'completed' as const,
+      journey_state: 'completed' as const,
+      passenger_rating: 5,
+    };
+    repo.findById.mockResolvedValue(completed);
+    repo.submitRating.mockResolvedValue(null);
+
+    const svc = new BookingService(repo as never);
+    await expect(svc.submitRating('booking-1', 'passenger-1', 4, 'Changed')).rejects.toMatchObject({ code: 'INVALID_STATE' });
+
+    expect(vi.mocked(publishBookingRated)).not.toHaveBeenCalled();
   });
 });
 

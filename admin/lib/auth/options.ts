@@ -7,14 +7,14 @@ import { apiClient } from '@/lib/api/client';
  * Admin authentication via the Rishfy auth-service.
  *
  * Flow:
- *   1. Admin enters phone + password (admin accounts have passwords, unlike regular users)
+ *   1. Admin enters email or phone + password (admin accounts have passwords, unlike regular users)
  *   2. NextAuth calls auth-service /api/v1/auth/admin/login
  *   3. Receives JWT tokens + user profile
  *   4. Stores in encrypted NextAuth session (JWT strategy)
  *   5. Uses access token for subsequent backend calls
  *
  * Note: Regular mobile users authenticate via phone + OTP.
- * Admin accounts use phone + password for desktop/CLI convenience.
+ * Admin accounts use email or phone + password for desktop/CLI convenience.
  */
 
 interface AdminLoginResponse {
@@ -27,7 +27,7 @@ interface AdminLoginResponse {
     last_name: string;
     phone_number: string;
     email?: string;
-    role: 'admin' | 'support';
+    role: 'admin';
     permissions: string[];
   };
 }
@@ -47,11 +47,11 @@ export const authOptions: NextAuthOptions = {
     CredentialsProvider({
       name: 'credentials',
       credentials: {
-        phoneNumber: { label: 'Phone', type: 'text' },
+        identifier: { label: 'Email or phone', type: 'text' },
         password: { label: 'Password', type: 'password' },
       },
       async authorize(credentials) {
-        if (!credentials?.phoneNumber || !credentials.password) {
+        if (!credentials?.identifier || !credentials.password) {
           return null;
         }
 
@@ -59,15 +59,15 @@ export const authOptions: NextAuthOptions = {
           const response = await apiClient.post<AdminLoginResponse>(
             '/api/v1/auth/admin/login',
             {
-              phone_number: credentials.phoneNumber,
+              identifier: credentials.identifier,
               password: credentials.password,
             },
           );
 
           const data = response.data;
 
-          // Only admin/support roles can use this dashboard.
-          if (!['admin', 'support'].includes(data.user.role)) {
+          // Only admin users can use this dashboard.
+          if (data.user.role !== 'admin') {
             return null;
           }
 

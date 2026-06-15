@@ -35,6 +35,21 @@ function callUnary<T>(method: string, req: Record<string, unknown>): Promise<T> 
 }
 
 export interface ReserveSeatsResult { success: boolean; seatsRemaining: number; reservationId: string; failureReason: string }
+export interface RouteComplianceSnapshot {
+  routeId: string;
+  driverUserId: string;
+  vehicleId: string;
+  distanceMeters: number;
+}
+
+export async function getRouteComplianceSnapshot(routeId: string): Promise<RouteComplianceSnapshot | null> {
+  try {
+    return await callUnary<RouteComplianceSnapshot>('getRoute', { routeId });
+  } catch (err) {
+    logger.warn({ err, routeId }, 'getRoute gRPC failed for LATRA export');
+    return null;
+  }
+}
 
 export async function reserveSeats(routeId: string, seatCount: number, bookingId: string): Promise<ReserveSeatsResult> {
   try {

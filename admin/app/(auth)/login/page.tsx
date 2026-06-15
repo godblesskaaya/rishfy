@@ -2,9 +2,10 @@
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Car, Loader2 } from 'lucide-react';
+import type { Route } from 'next';
 import { signIn } from 'next-auth/react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { toast } from 'sonner';
 import { z } from 'zod';
@@ -22,19 +23,30 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
 const loginSchema = z.object({
-  phoneNumber: z
+  identifier: z
     .string()
-    .min(10, 'Phone number is required')
-    .regex(/^\+?[0-9]{10,15}$/, 'Invalid phone number format'),
+    .min(5, 'Email or phone number is required')
+    .refine(
+      (value) => value.includes('@') || /^\+?[0-9]{10,15}$/.test(value),
+      'Enter a valid email or phone number',
+    ),
   password: z.string().min(8, 'Password must be at least 8 characters'),
 });
 
 type LoginForm = z.infer<typeof loginSchema>;
 
-export default function LoginPage() {
+function getSafeCallbackUrl(callbackUrl: string | null): Route {
+  if (!callbackUrl || !callbackUrl.startsWith('/') || callbackUrl.startsWith('//')) {
+    return '/overview';
+  }
+
+  return callbackUrl as Route;
+}
+
+function LoginPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const callbackUrl = searchParams.get('callbackUrl') ?? '/overview';
+  const callbackUrl = getSafeCallbackUrl(searchParams.get('callbackUrl'));
   const [submitting, setSubmitting] = useState(false);
 
   const {
@@ -43,21 +55,21 @@ export default function LoginPage() {
     formState: { errors },
   } = useForm<LoginForm>({
     resolver: zodResolver(loginSchema),
-    defaultValues: { phoneNumber: '+255', password: '' },
+    defaultValues: { identifier: '', password: '' },
   });
 
   async function onSubmit(data: LoginForm) {
     setSubmitting(true);
     try {
       const result = await signIn('credentials', {
-        phoneNumber: data.phoneNumber,
+        identifier: data.identifier,
         password: data.password,
         redirect: false,
       });
 
       if (result?.error) {
         toast.error('Invalid credentials', {
-          description: 'Please check your phone number and password.',
+          description: 'Please check your email or phone number and password.',
         });
         return;
       }
@@ -97,17 +109,17 @@ export default function LoginPage() {
           <form onSubmit={handleSubmit(onSubmit)}>
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="phoneNumber">Phone number</Label>
+                <Label htmlFor="identifier">Email or phone number</Label>
                 <Input
-                  id="phoneNumber"
-                  type="tel"
-                  placeholder="+255 712 345 678"
+                  id="identifier"
+                  type="text"
+                  placeholder="admin@rishfy.co.tz or +255700000001"
                   autoComplete="username"
-                  {...register('phoneNumber')}
+                  {...register('identifier')}
                 />
-                {errors.phoneNumber && (
+                {errors.identifier && (
                   <p className="text-sm text-destructive">
-                    {errors.phoneNumber.message}
+                    {errors.identifier.message}
                   </p>
                 )}
               </div>
@@ -140,5 +152,13 @@ export default function LoginPage() {
         </Card>
       </div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginPageContent />
+    </Suspense>
   );
 }

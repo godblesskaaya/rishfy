@@ -61,6 +61,25 @@ interface StartTripGrpcResponse {
   };
 }
 
+interface TripTraceGrpcResponse {
+  trip?: {
+    distanceMeters?: number;
+    distance_meters?: number;
+    durationSeconds?: number;
+    duration_seconds?: number;
+  };
+  totalDistanceMeters?: number;
+  total_distance_meters?: number;
+  locationPointsRecorded?: number;
+  location_points_recorded?: number;
+}
+
+export interface TrackedTripSnapshot {
+  distanceMeters: number;
+  durationSeconds: number;
+  locationPointsRecorded: number;
+}
+
 export async function startTrackedTrip(params: {
   bookingId: string;
   routeId: string;
@@ -112,5 +131,31 @@ export async function completeTrackedTrip(params: {
     });
   } catch (err) {
     logger.warn({ err, tripId: params.tripId }, 'completeTrackedTrip gRPC failed');
+  }
+}
+
+export async function getTrackedTripSnapshot(tripId: string): Promise<TrackedTripSnapshot | null> {
+  try {
+    const response = await callUnary<TripTraceGrpcResponse>('getTripTrace', { tripId });
+    const distance =
+      response.totalDistanceMeters ??
+      response.total_distance_meters ??
+      response.trip?.distanceMeters ??
+      response.trip?.distance_meters ??
+      0;
+    return {
+      distanceMeters: distance,
+      durationSeconds:
+        response.trip?.durationSeconds ??
+        response.trip?.duration_seconds ??
+        0,
+      locationPointsRecorded:
+        response.locationPointsRecorded ??
+        response.location_points_recorded ??
+        0,
+    };
+  } catch (err) {
+    logger.warn({ err, tripId }, 'getTripTrace gRPC failed for LATRA export');
+    return null;
   }
 }

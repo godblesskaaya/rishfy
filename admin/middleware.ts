@@ -18,8 +18,8 @@ export default withAuth(
         // Check for refresh token errors
         if (token.error === 'RefreshAccessTokenError') return false;
 
-        // Only admin/support roles allowed
-        const allowedRoles = ['admin', 'support'];
+        // Only admin role is currently supported by auth-service.
+        const allowedRoles = ['admin'];
         return allowedRoles.includes(token.role as string);
       },
     },

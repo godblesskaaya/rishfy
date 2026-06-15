@@ -72,6 +72,58 @@ export interface BookingRow {
   no_show_at: Date | null;
 }
 
+export interface SafetyReportRow {
+  id: string;
+  booking_id: string;
+  route_id: string;
+  passenger_id: string;
+  driver_id: string;
+  booking_status: BookingRow['status'];
+  journey_state: JourneyState | null;
+  payment_status: BookingRow['payment_status'];
+  pickup_name: string | null;
+  dropoff_name: string | null;
+  payload: {
+    reportedBy?: string;
+    reporterRole?: 'passenger' | 'driver';
+    reason?: string;
+  } | null;
+  created_at: Date;
+}
+
+export interface LatraTripSourceRow {
+  booking_id: string;
+  trip_id: string | null;
+  route_id: string;
+  passenger_id: string;
+  driver_id: string;
+  pickup_lat: number | null;
+  pickup_lng: number | null;
+  dropoff_lat: number | null;
+  dropoff_lng: number | null;
+  pickup_point_lat: number | null;
+  pickup_point_lng: number | null;
+  dropoff_point_lat: number | null;
+  dropoff_point_lng: number | null;
+  trip_started_at: Date | null;
+  trip_completed_at: Date | null;
+  completed_at: Date | null;
+  journey_completed_at: Date | null;
+  total_price: string;
+  driver_earnings: string;
+  passenger_rating: number | null;
+  driver_rating: number | null;
+  created_at: Date;
+}
+
+export interface LatraComplianceStatsRow {
+  completed_trips_this_month: number;
+  reportable_trips_this_month: number;
+  trips_missing_coordinates: number;
+  trips_missing_times: number;
+  trips_missing_rating: number;
+}
+
 function normalizeJourneyState(journeyState: JourneyState | null): JourneyState | null {
   return journeyState === 'boarded' ? 'in_transit' : journeyState;
 }
@@ -405,7 +457,7 @@ export class BookingRepository {
     const reviewCol = raterIsPassenger ? 'passenger_review' : 'driver_review';
     const { rows } = await this.pool.query<BookingRow>(
       `UPDATE bookings SET ${col}=$2, ${reviewCol}=$3, updated_at=now()
-       WHERE id=$1 AND status='completed' RETURNING ${BOOKING_RETURNING}`,
+       WHERE id=$1 AND status='completed' AND ${col} IS NULL RETURNING ${BOOKING_RETURNING}`,
       [id, rating, review],
     );
     return normalizeBookingRow(rows[0] ?? null);
@@ -416,6 +468,105 @@ export class BookingRepository {
       'INSERT INTO booking_events (booking_id, event_type, payload) VALUES ($1,$2,$3)',
       [bookingId, eventType, JSON.stringify(payload)],
     );
+  }
+
+  async listSafetyReportsForUser(userId: string): Promise<SafetyReportRow[]> {
+    const { rows } = await this.pool.query<SafetyReportRow>(
+      `SELECT be.id::text,
+              be.booking_id,
+              b.route_id,
+              b.passenger_id,
+              b.driver_id,
+              b.status AS booking_status,
+              b.journey_state,
+              b.payment_status,
+              b.pickup_name,
+              b.dropoff_name,
+              be.payload,
+              be.created_at
+       FROM booking_events be
+       JOIN bookings b ON b.id = be.booking_id
+       WHERE be.event_type='booking.emergency'
+         AND (b.passenger_id=$1 OR b.driver_id=$1)
+       ORDER BY be.created_at DESC`,
+      [userId],
+    );
+    return rows;
+  }
+
+  async listCompletedTripsForLatraReport(params: {
+    startDate: Date;
+    endDate: Date;
+    limit: number;
+    offset: number;
+  }): Promise<LatraTripSourceRow[]> {
+    const { rows } = await this.pool.query<LatraTripSourceRow>(
+      `SELECT b.id AS booking_id,
+              b.trip_id,
+              b.route_id,
+              b.passenger_id,
+              b.driver_id,
+              b.pickup_lat,
+              b.pickup_lng,
+              b.dropoff_lat,
+              b.dropoff_lng,
+              ST_Y(b.pickup_point::geometry) AS pickup_point_lat,
+              ST_X(b.pickup_point::geometry) AS pickup_point_lng,
+              ST_Y(b.dropoff_point::geometry) AS dropoff_point_lat,
+              ST_X(b.dropoff_point::geometry) AS dropoff_point_lng,
+              b.trip_started_at,
+              b.trip_completed_at,
+              b.completed_at,
+              b.journey_completed_at,
+              b.total_price,
+              b.driver_earnings,
+              b.passenger_rating,
+              b.driver_rating,
+              b.created_at
+       FROM bookings b
+       WHERE b.status = 'completed'
+         AND COALESCE(b.completed_at, b.journey_completed_at, b.trip_completed_at, b.updated_at) >= $1
+         AND COALESCE(b.completed_at, b.journey_completed_at, b.trip_completed_at, b.updated_at) < $2
+       ORDER BY COALESCE(b.completed_at, b.journey_completed_at, b.trip_completed_at, b.updated_at) ASC, b.id ASC
+       LIMIT $3 OFFSET $4`,
+      [params.startDate, params.endDate, params.limit, params.offset],
+    );
+    return rows;
+  }
+
+  async getLatraComplianceStats(monthStart: Date, nextMonthStart: Date): Promise<LatraComplianceStatsRow> {
+    const { rows } = await this.pool.query<LatraComplianceStatsRow>(
+      `SELECT COUNT(*)::int AS completed_trips_this_month,
+              COUNT(*) FILTER (
+                WHERE (pickup_point IS NOT NULL OR (pickup_lat IS NOT NULL AND pickup_lng IS NOT NULL))
+                  AND (dropoff_point IS NOT NULL OR (dropoff_lat IS NOT NULL AND dropoff_lng IS NOT NULL))
+                  AND COALESCE(trip_started_at, confirmed_at, created_at) IS NOT NULL
+                  AND COALESCE(trip_completed_at, completed_at, journey_completed_at) IS NOT NULL
+              )::int AS reportable_trips_this_month,
+              COUNT(*) FILTER (
+                WHERE (pickup_point IS NULL AND (pickup_lat IS NULL OR pickup_lng IS NULL))
+                   OR (dropoff_point IS NULL AND (dropoff_lat IS NULL OR dropoff_lng IS NULL))
+              )::int AS trips_missing_coordinates,
+              COUNT(*) FILTER (
+                WHERE COALESCE(trip_started_at, confirmed_at, created_at) IS NULL
+                   OR COALESCE(trip_completed_at, completed_at, journey_completed_at) IS NULL
+              )::int AS trips_missing_times,
+              COUNT(*) FILTER (
+                WHERE passenger_rating IS NULL AND driver_rating IS NULL
+              )::int AS trips_missing_rating
+       FROM bookings
+       WHERE status = 'completed'
+         AND COALESCE(completed_at, journey_completed_at, trip_completed_at, updated_at) >= $1
+         AND COALESCE(completed_at, journey_completed_at, trip_completed_at, updated_at) < $2`,
+      [monthStart, nextMonthStart],
+    );
+    return rows[0] ?? {
+      completed_trips_this_month: 0,
+      reportable_trips_this_month: 0,
+      trips_missing_coordinates: 0,
+      trips_missing_times: 0,
+      trips_missing_rating: 0,
+    };
   }
 
   async markPaymentRefunded(id: string, policy: string): Promise<BookingRow> {
