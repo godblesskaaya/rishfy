@@ -42,6 +42,20 @@ export class NotificationService {
 
   async dispatch(params: DispatchParams): Promise<void> {
     const lang = params.lang ?? 'en';
+    const eventType = params.sourceEventType ?? params.templateKey;
+    const category = categoryFor(eventType);
+    const enabled = isCriticalNotification(eventType)
+      ? true
+      : await this.repo.isCategoryEnabled(params.userId, category);
+    if (!enabled) {
+      logger.info({
+        userId: params.userId,
+        category,
+        templateKey: params.templateKey,
+        sourceEventType: params.sourceEventType,
+      }, 'Notification skipped by user preference');
+      return;
+    }
     await Promise.all(
       params.channels.map(async (channel) => {
         const tmpl = await this.repo.getTemplate(params.templateKey, lang, channel);
@@ -134,4 +148,35 @@ export class NotificationService {
       removeOnFail: 5000,
     });
   }
+}
+
+function isCriticalNotification(type: string): boolean {
+  const normalized = type.toLowerCase().replaceAll('.', '_');
+  return normalized.includes('emergency') ||
+    normalized.includes('sos') ||
+    normalized.includes('safety') ||
+    normalized.includes('no_show') ||
+    normalized.startsWith('system_critical');
+}
+
+function categoryFor(type: string): 'bookings' | 'trips' | 'payments' | 'promotions' | 'system' {
+  const normalized = type.toLowerCase().replaceAll('.', '_');
+  if (normalized.startsWith('booking_')) return 'bookings';
+  if (normalized.startsWith('trip_') ||
+      normalized.includes('journey') ||
+      normalized.includes('boarded') ||
+      normalized.includes('dropoff') ||
+      normalized.includes('arrived')) {
+    return 'trips';
+  }
+  if (normalized.startsWith('payment_') ||
+      normalized.includes('refund') ||
+      normalized.includes('payout') ||
+      normalized.includes('settlement')) {
+    return 'payments';
+  }
+  if (normalized.startsWith('promo_') || normalized.startsWith('marketing_')) {
+    return 'promotions';
+  }
+  return 'system';
 }

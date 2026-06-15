@@ -5,6 +5,7 @@ const createMock = vi.fn();
 const markDeliveredMock = vi.fn();
 const markFailedMock = vi.fn();
 const markSkippedMock = vi.fn();
+const isCategoryEnabledMock = vi.fn();
 const pushSendMock = vi.fn();
 const smsSendMock = vi.fn();
 const inAppSendMock = vi.fn();
@@ -42,6 +43,7 @@ vi.mock('../../src/repositories/notification.repository.js', () => ({
     markDelivered = markDeliveredMock;
     markFailed = markFailedMock;
     markSkipped = markSkippedMock;
+    isCategoryEnabled = isCategoryEnabledMock;
   },
 }));
 vi.mock('../../src/channels/push.adapter.js', () => ({
@@ -72,6 +74,7 @@ beforeEach(() => {
   markDeliveredMock.mockResolvedValue(undefined);
   markFailedMock.mockResolvedValue(undefined);
   markSkippedMock.mockResolvedValue(undefined);
+  isCategoryEnabledMock.mockResolvedValue(true);
   smsSendMock.mockResolvedValue({ status: 'sent', providerMessageId: 'sms-1' });
   inAppSendMock.mockResolvedValue({ status: 'sent' });
 });
@@ -95,6 +98,48 @@ describe('NotificationService.dispatch', () => {
     expect(markSkippedMock).toHaveBeenCalledWith('notif-1', 'Push adapter is not configured');
     expect(markDeliveredMock).not.toHaveBeenCalled();
     expect(markFailedMock).not.toHaveBeenCalled();
+  });
+
+  it('skips delivery when the user disables the notification category', async () => {
+    isCategoryEnabledMock.mockResolvedValue(false);
+
+    await new NotificationService().dispatch({
+      userId: 'user-1',
+      templateKey: 'payment_completed',
+      channels: ['push'],
+      vars: {},
+      fallbackBody: 'Paid',
+      sourceEventType: 'payment.completed',
+    });
+
+    expect(isCategoryEnabledMock).toHaveBeenCalledWith('user-1', 'payments');
+    expect(createMock).not.toHaveBeenCalled();
+    expect(pushSendMock).not.toHaveBeenCalled();
+  });
+
+  it('delivers emergency notifications even when the related category is disabled', async () => {
+    isCategoryEnabledMock.mockResolvedValue(false);
+    pushSendMock.mockResolvedValue({ status: 'sent', providerMessageId: 'push-1' });
+
+    await new NotificationService().dispatch({
+      userId: 'user-1',
+      templateKey: 'booking.emergency',
+      channels: ['push'],
+      vars: {},
+      fallbackTitle: 'Emergency alert',
+      fallbackBody: 'A passenger triggered an emergency alert.',
+      sourceEventType: 'booking.emergency',
+    });
+
+    expect(isCategoryEnabledMock).not.toHaveBeenCalled();
+    expect(createMock).toHaveBeenCalledWith(expect.objectContaining({
+      userId: 'user-1',
+      templateKey: 'booking.emergency',
+      channel: 'push',
+      sourceEventType: 'booking.emergency',
+    }));
+    expect(pushSendMock).toHaveBeenCalled();
+    expect(markDeliveredMock).toHaveBeenCalledWith('notif-1', 'push-1');
   });
 
   it('marks failed deliveries when the channel adapter reports a send failure', async () => {

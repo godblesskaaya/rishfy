@@ -5,6 +5,7 @@ import { pgPool } from '../db.js';
 
 const repo = new NotificationRepository(pgPool);
 const deviceRepo = new DeviceTokenRepository(pgPool);
+const notificationCategories = ['bookings', 'trips', 'payments', 'promotions', 'system'] as const;
 
 export async function notificationRoutes(app: FastifyInstance): Promise<void> {
   const listMyNotifications = async (req: import('fastify').FastifyRequest, reply: import('fastify').FastifyReply) => {
@@ -38,6 +39,41 @@ export async function notificationRoutes(app: FastifyInstance): Promise<void> {
     if (!userId) return reply.status(401).send({ error: 'UNAUTHORIZED' });
     await repo.markAllRead(userId);
     return reply.status(204).send();
+  });
+
+  app.get('/api/v1/notifications/preferences', async (req, reply) => {
+    const userId = req.headers['x-user-id'] as string;
+    if (!userId) return reply.status(401).send({ error: 'UNAUTHORIZED' });
+    const { rows } = await pgPool.query<{ category: string; enabled: boolean }>(
+      'SELECT category, enabled FROM notification_preferences WHERE user_id=$1',
+      [userId],
+    );
+    const stored = new Map(rows.map((row) => [row.category, row.enabled]));
+    return reply.send({
+      preferences: notificationCategories.map((category) => ({
+        category,
+        enabled: stored.get(category) ?? true,
+      })),
+    });
+  });
+
+  app.put('/api/v1/notifications/preferences/:category', async (req, reply) => {
+    const userId = req.headers['x-user-id'] as string;
+    if (!userId) return reply.status(401).send({ error: 'UNAUTHORIZED' });
+    const { category } = req.params as { category: string };
+    if (!notificationCategories.includes(category as (typeof notificationCategories)[number])) {
+      return reply.status(400).send({ error: 'VALIDATION_ERROR' });
+    }
+    const { enabled = true } = req.body as { enabled?: boolean };
+    const { rows } = await pgPool.query<{ category: string; enabled: boolean }>(
+      `INSERT INTO notification_preferences (user_id, category, enabled)
+       VALUES ($1,$2,$3)
+       ON CONFLICT (user_id, category)
+       DO UPDATE SET enabled=EXCLUDED.enabled, updated_at=now()
+       RETURNING category, enabled`,
+      [userId, category, enabled],
+    );
+    return reply.send(rows[0]);
   });
 
   // POST /api/v1/devices — register FCM device token

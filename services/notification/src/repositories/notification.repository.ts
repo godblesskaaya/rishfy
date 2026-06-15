@@ -123,4 +123,12 @@ export class NotificationRepository {
     );
     return parseInt(rows[0]?.count ?? '0');
   }
+
+  async isCategoryEnabled(userId: string, category: string): Promise<boolean> {
+    const { rows } = await this.pool.query<{ enabled: boolean }>(
+      'SELECT enabled FROM notification_preferences WHERE user_id=$1 AND category=$2',
+      [userId, category],
+    );
+    return rows[0]?.enabled ?? true;
+  }
 }
