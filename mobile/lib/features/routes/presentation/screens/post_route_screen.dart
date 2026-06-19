@@ -378,7 +378,12 @@ class _PostRouteScreenState extends ConsumerState<PostRouteScreen> {
   // ── Submit ───────────────────────────────────────────────────────────────────
 
   Future<void> _submit(List<DriverVehicleOption> vehicleOptions) async {
-    final PreviewRouteState previewState = ref.read(previewRouteProvider);
+    PreviewRouteState previewState = ref.read(previewRouteProvider);
+    if (previewState.status != PreviewRouteStatus.success) {
+      await _preview();
+      if (!mounted) return;
+      previewState = ref.read(previewRouteProvider);
+    }
     if (previewState.status != PreviewRouteStatus.success) return;
 
     final bool useManualVehicle = vehicleOptions.isEmpty || _manualVehicleEntry;

@@ -158,8 +158,14 @@ class _CreateBookingScreenState extends ConsumerState<CreateBookingScreen> {
           ),
         );
     final CreateBookingState s = ref.read(createBookingProvider);
-    if (s.status == CreateBookingStatus.awaitingPayment && mounted) {
-      _startPolling();
+    if (s.paymentResponse != null &&
+        mounted &&
+        (s.status == CreateBookingStatus.awaitingPayment ||
+            s.status == CreateBookingStatus.completed ||
+            s.status == CreateBookingStatus.failed)) {
+      if (s.status == CreateBookingStatus.awaitingPayment) {
+        _startPolling();
+      }
       await _showPaymentOverlay(
         context,
         ussdCode: s.paymentResponse?.ussdCode,

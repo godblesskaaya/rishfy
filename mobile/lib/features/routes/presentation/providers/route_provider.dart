@@ -534,12 +534,13 @@ class CreateRouteState {
 
 final createRouteProvider =
     StateNotifierProvider.autoDispose<CreateRouteNotifier, CreateRouteState>(
-  (Ref ref) => CreateRouteNotifier(ref.read(routeDataSourceProvider)),
+  (Ref ref) => CreateRouteNotifier(ref, ref.read(routeDataSourceProvider)),
 );
 
 class CreateRouteNotifier extends StateNotifier<CreateRouteState> {
-  CreateRouteNotifier(this._ds) : super(const CreateRouteState());
+  CreateRouteNotifier(this._ref, this._ds) : super(const CreateRouteState());
 
+  final Ref _ref;
   final RouteRemoteDataSource _ds;
 
   Future<void> submit(CreateRouteRequest req) async {
@@ -550,6 +551,7 @@ class CreateRouteNotifier extends StateNotifier<CreateRouteState> {
         status: CreateRouteStatus.success,
         createdRoute: dto.toDomain(),
       );
+      _ref.invalidate(myRoutesProvider);
     } catch (e) {
       state = CreateRouteState(
         status: CreateRouteStatus.failed,

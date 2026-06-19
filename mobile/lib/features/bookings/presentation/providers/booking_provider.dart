@@ -68,10 +68,19 @@ class CreateBookingNotifier extends StateNotifier<CreateBookingState> {
     state = state.copyWith(status: CreateBookingStatus.loading, error: null);
     try {
       final InitiatePaymentResponse resp = await _ds.createBooking(req);
+      final String paymentStatus = resp.status.toLowerCase();
+      final bool paymentDone =
+          paymentStatus == 'completed' || paymentStatus == 'confirmed';
+      final bool paymentFailed = paymentStatus == 'failed';
       state = state.copyWith(
-        status: CreateBookingStatus.awaitingPayment,
+        status: paymentDone
+            ? CreateBookingStatus.completed
+            : paymentFailed
+                ? CreateBookingStatus.failed
+                : CreateBookingStatus.awaitingPayment,
         paymentResponse: resp,
-        paymentStatus: resp.status,
+        paymentStatus: paymentStatus,
+        error: paymentFailed ? 'Payment failed. Please try again.' : null,
       );
     } catch (e) {
       state = state.copyWith(
