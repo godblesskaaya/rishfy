@@ -137,10 +137,99 @@ const baseRefund = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  providerMock.name = 'azampay';
   providerMock.initiatePayment.mockReset();
   providerMock.verifyCallback.mockReset();
   providerMock.parseCallback.mockReset();
   providerMock.refund.mockReset();
+});
+
+describe('PaymentService.initiatePayment', () => {
+  it('simulates a completed provider callback for mock payments', async () => {
+    const repo = makeRepo();
+    const ledger = makeLedger();
+    const pendingPayment = { ...basePayment, status: 'pending', provider: 'mock', provider_reference: null };
+    const completedPayment = { ...pendingPayment, status: 'completed', provider_reference: 'MOCK-1' };
+
+    providerMock.name = 'mock';
+    providerMock.initiatePayment.mockResolvedValue({
+      providerReference: 'MOCK-1',
+      instructions: '[MOCK] Approve payment',
+      expiresInSeconds: 120,
+    });
+    providerMock.verifyCallback.mockReturnValue(true);
+    providerMock.parseCallback.mockImplementation(({ rawBody }: { rawBody: string }) => {
+      const payload = JSON.parse(rawBody) as { internalReference: string; providerReference: string };
+      return {
+        internalReference: payload.internalReference,
+        providerReference: payload.providerReference,
+        status: 'completed',
+      };
+    });
+    repo.create.mockResolvedValue(pendingPayment);
+    repo.findByInternalRef.mockResolvedValue(pendingPayment);
+    repo.markCompleted.mockResolvedValue(completedPayment);
+    repo.findById.mockResolvedValue(completedPayment);
+
+    const svc = new PaymentService(repo as never, ledger as never);
+    const result = await svc.initiatePayment({
+      bookingId: 'booking-1',
+      userId: 'user-1',
+      amountTzs: 10000,
+      method: 'mpesa_tz',
+      payerPhone: '+255700000001',
+      idempotencyKey: 'idem-1',
+    });
+
+    expect(result.payment.status).toBe('completed');
+    expect(repo.markCompleted).toHaveBeenCalledWith('payment-1', 'MOCK-1');
+    expect(repo.enqueueOutboxEvent).toHaveBeenCalledWith(expect.objectContaining({
+      eventKey: 'payment:payment-1:initiated',
+      topic: 'payment.initiated',
+    }));
+    expect(repo.enqueueOutboxEvent).toHaveBeenCalledWith(expect.objectContaining({
+      eventKey: 'payment:payment-1:completed',
+      topic: 'payment.completed',
+    }));
+    expect(ledger.recordPaymentCapturedForPayment).toHaveBeenCalledWith(expect.objectContaining({
+      paymentId: 'payment-1',
+      bookingId: 'booking-1',
+      idempotencyKey: 'payment:payment-1:captured',
+    }));
+    expect(repo.saveCallback).toHaveBeenCalledWith(
+      'payment-1',
+      'mock',
+      expect.stringContaining('"internalReference":"INT-1"'),
+      '',
+      true,
+    );
+  });
+
+  it('does not mark a payment failed when post-initiation side effects fail', async () => {
+    const repo = makeRepo();
+    const pendingPayment = { ...basePayment, status: 'pending', provider_reference: null };
+
+    providerMock.initiatePayment.mockResolvedValue({
+      providerReference: 'TX-1',
+      instructions: 'Approve payment',
+      expiresInSeconds: 120,
+    });
+    repo.create.mockResolvedValue(pendingPayment);
+    repo.enqueueOutboxEvent.mockRejectedValueOnce(new Error('outbox down'));
+
+    const svc = new PaymentService(repo as never);
+    await expect(svc.initiatePayment({
+      bookingId: 'booking-1',
+      userId: 'user-1',
+      amountTzs: 10000,
+      method: 'mpesa_tz',
+      payerPhone: '+255700000001',
+      idempotencyKey: 'idem-1',
+    })).rejects.toThrow('outbox down');
+
+    expect(providerMock.initiatePayment).toHaveBeenCalledTimes(1);
+    expect(repo.markFailed).not.toHaveBeenCalled();
+  });
 });
 
 describe('PaymentService.processCallback', () => {

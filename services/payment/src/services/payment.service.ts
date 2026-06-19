@@ -90,8 +90,9 @@ export class PaymentService {
       expiresAt,
     });
 
+    let result: Awaited<ReturnType<PaymentProvider['initiatePayment']>>;
     try {
-      const result = await this.provider.initiatePayment({
+      result = await this.provider.initiatePayment({
         bookingId: params.bookingId,
         userId: params.userId,
         amountTzs: params.amountTzs,
@@ -100,21 +101,6 @@ export class PaymentService {
         idempotencyKey: params.idempotencyKey,
         internalReference: payment.internal_reference,
       });
-
-      if (result.providerReference) {
-        await this.repo.setProviderReference(payment.id, result.providerReference);
-      }
-
-      await this.repo.enqueueOutboxEvent(buildPaymentInitiatedEvent({
-        paymentId: payment.id,
-        bookingId: payment.booking_id,
-        userId: payment.user_id,
-        amountTzs: payment.amount_tzs,
-        provider: payment.provider,
-        timestamp: new Date().toISOString(),
-      }));
-
-      return { payment, instructions: result.instructions, expiresInSeconds: result.expiresInSeconds };
     } catch (err) {
       logger.error({ err, paymentId: payment.id }, 'Provider initiatePayment failed');
       const failed = await this.repo.markFailed(payment.id, 'PROVIDER_ERROR', String(err));
@@ -130,6 +116,35 @@ export class PaymentService {
       }));
       throw err;
     }
+
+    if (result.providerReference) {
+      await this.repo.setProviderReference(payment.id, result.providerReference);
+    }
+
+    await this.repo.enqueueOutboxEvent(buildPaymentInitiatedEvent({
+      paymentId: payment.id,
+      bookingId: payment.booking_id,
+      userId: payment.user_id,
+      amountTzs: payment.amount_tzs,
+      provider: payment.provider,
+      timestamp: new Date().toISOString(),
+    }));
+
+    if (this.provider.name === 'mock') {
+      await this.processCallback('mock', JSON.stringify({
+        internalReference: payment.internal_reference,
+        providerReference: result.providerReference,
+        success: true,
+      }), '');
+      const completed = await this.repo.findById(payment.id);
+      return {
+        payment: completed ?? payment,
+        instructions: result.instructions,
+        expiresInSeconds: result.expiresInSeconds,
+      };
+    }
+
+    return { payment, instructions: result.instructions, expiresInSeconds: result.expiresInSeconds };
   }
 
   async processCallback(provider: string, rawBody: string, signature: string): Promise<{ paymentId: string; newStatus: string }> {

@@ -75,6 +75,21 @@ export interface PaymentOutboxEventRow {
   updated_at: Date;
 }
 
+function normalizePaymentRow(row: PaymentRow): PaymentRow {
+  return {
+    ...row,
+    amount_tzs: Number(row.amount_tzs),
+    refunded_amount_tzs: Number(row.refunded_amount_tzs),
+  };
+}
+
+function normalizeRefundRow(row: RefundRow): RefundRow {
+  return {
+    ...row,
+    amount_tzs: Number(row.amount_tzs),
+  };
+}
+
 export class PaymentRepository {
   constructor(private readonly pool: Pool) {}
 
@@ -99,17 +114,17 @@ export class PaymentRepository {
       [data.bookingId, data.userId, data.idempotencyKey, data.amountTzs,
        data.method, data.provider, internalRef, data.payerPhone, data.expiresAt],
     );
-    return rows[0]!;
+    return normalizePaymentRow(rows[0]!);
   }
 
   async findById(id: string): Promise<PaymentRow | null> {
     const { rows } = await this.pool.query<PaymentRow>('SELECT * FROM payments WHERE id = $1', [id]);
-    return rows[0] ?? null;
+    return rows[0] ? normalizePaymentRow(rows[0]) : null;
   }
 
   async findByInternalRef(ref: string): Promise<PaymentRow | null> {
     const { rows } = await this.pool.query<PaymentRow>('SELECT * FROM payments WHERE internal_reference = $1', [ref]);
-    return rows[0] ?? null;
+    return rows[0] ? normalizePaymentRow(rows[0]) : null;
   }
 
   async findByBookingId(bookingId: string): Promise<PaymentRow | null> {
@@ -117,7 +132,7 @@ export class PaymentRepository {
       'SELECT * FROM payments WHERE booking_id = $1 ORDER BY initiated_at DESC LIMIT 1',
       [bookingId],
     );
-    return rows[0] ?? null;
+    return rows[0] ? normalizePaymentRow(rows[0]) : null;
   }
 
   async markCompleted(id: string, providerReference: string): Promise<PaymentRow> {
@@ -126,7 +141,7 @@ export class PaymentRepository {
        WHERE id=$1 RETURNING *`,
       [id, providerReference],
     );
-    return rows[0]!;
+    return normalizePaymentRow(rows[0]!);
   }
 
   async markFailed(id: string, code: string, message: string): Promise<PaymentRow> {
@@ -135,7 +150,7 @@ export class PaymentRepository {
        WHERE id=$1 RETURNING *`,
       [id, code, message],
     );
-    return rows[0]!;
+    return normalizePaymentRow(rows[0]!);
   }
 
   async markRefunded(id: string, amountTzs: number, partial: boolean): Promise<PaymentRow> {
@@ -146,7 +161,7 @@ export class PaymentRepository {
        WHERE id=$1 RETURNING *`,
       [id, newStatus, amountTzs],
     );
-    return rows[0]!;
+    return normalizePaymentRow(rows[0]!);
   }
 
   async createRefund(data: {
@@ -172,7 +187,7 @@ export class PaymentRepository {
         data.requestedBy,
       ],
     );
-    return rows[0]!;
+    return normalizeRefundRow(rows[0]!);
   }
 
   async markRefundCompleted(id: string, providerReference: string): Promise<RefundRow> {
@@ -182,7 +197,7 @@ export class PaymentRepository {
        WHERE id=$1 RETURNING *`,
       [id, providerReference],
     );
-    return rows[0]!;
+    return normalizeRefundRow(rows[0]!);
   }
 
   async markRefundFailed(id: string, failureReason: string): Promise<RefundRow> {
@@ -192,7 +207,7 @@ export class PaymentRepository {
        WHERE id=$1 RETURNING *`,
       [id, failureReason],
     );
-    return rows[0]!;
+    return normalizeRefundRow(rows[0]!);
   }
 
   async markRefundManualRequired(id: string, failureReason: string): Promise<RefundRow> {
@@ -202,7 +217,7 @@ export class PaymentRepository {
        WHERE id=$1 RETURNING *`,
       [id, failureReason],
     );
-    return rows[0]!;
+    return normalizeRefundRow(rows[0]!);
   }
 
   async listRefundsForPayment(paymentId: string): Promise<RefundRow[]> {
@@ -213,7 +228,7 @@ export class PaymentRepository {
        ORDER BY requested_at DESC, id DESC`,
       [paymentId],
     );
-    return rows;
+    return rows.map(normalizeRefundRow);
   }
 
   async findRefundById(id: string): Promise<RefundRow | null> {
@@ -221,7 +236,7 @@ export class PaymentRepository {
       'SELECT * FROM refunds WHERE id=$1',
       [id],
     );
-    return rows[0] ?? null;
+    return rows[0] ? normalizeRefundRow(rows[0]) : null;
   }
 
   async listRefunds(params: {
@@ -249,7 +264,7 @@ export class PaymentRepository {
       [...values, params.limit, params.offset],
     );
     return {
-      items: rows,
+      items: rows.map(normalizeRefundRow),
       totalCount: Number(count.rows[0]?.total_count ?? 0),
     };
   }
@@ -278,7 +293,7 @@ export class PaymentRepository {
       'SELECT * FROM payments WHERE user_id=$1 ORDER BY initiated_at DESC LIMIT $2 OFFSET $3',
       [userId, limit, offset],
     );
-    return rows;
+    return rows.map(normalizePaymentRow);
   }
 
   async list(params: { status?: string; limit: number; offset: number }): Promise<PaymentListResult> {
@@ -306,7 +321,7 @@ export class PaymentRepository {
     );
 
     return {
-      items: rows,
+      items: rows.map(normalizePaymentRow),
       totalCount: Number(count.rows[0]?.total_count ?? 0),
     };
   }
