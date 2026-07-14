@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -6,6 +8,8 @@ import 'core/localization/app_localizations.dart';
 import 'core/router/app_router.dart';
 import 'core/theme/app_theme.dart';
 import 'features/auth/presentation/providers/biometric_lock_provider.dart';
+import 'features/bookings/presentation/providers/booking_provider.dart';
+import 'features/notifications/presentation/providers/notification_provider.dart';
 import 'shared/providers/locale_provider.dart';
 
 class RishfyApp extends ConsumerStatefulWidget {
@@ -36,6 +40,9 @@ class _RishfyAppState extends ConsumerState<RishfyApp>
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive) {
       ref.read(biometricLockProvider.notifier).lock();
+    } else if (state == AppLifecycleState.resumed) {
+      invalidateBookingRemoteStateFromWidget(ref);
+      unawaited(ref.read(notificationProvider.notifier).load());
     }
   }
 

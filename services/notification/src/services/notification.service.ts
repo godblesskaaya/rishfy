@@ -44,6 +44,7 @@ export class NotificationService {
     const lang = params.lang ?? 'en';
     const eventType = params.sourceEventType ?? params.templateKey;
     const category = categoryFor(eventType);
+    const data = notificationData(params);
     const enabled = isCriticalNotification(eventType)
       ? true
       : await this.repo.isCategoryEnabled(params.userId, category);
@@ -75,7 +76,7 @@ export class NotificationService {
           channel,
           title,
           body,
-          data: params.data,
+          data,
           sourceEventType: params.sourceEventType,
           sourceEventId: params.sourceEventId,
         });
@@ -88,7 +89,7 @@ export class NotificationService {
             userId: params.userId,
             title,
             body,
-            data: params.data,
+            data,
             fcmToken: params.fcmToken,
             phone: params.phone,
           });
@@ -148,6 +149,18 @@ export class NotificationService {
       removeOnFail: 5000,
     });
   }
+}
+
+function notificationData(params: DispatchParams): Record<string, unknown> {
+  const data = {
+    type: params.templateKey,
+    template_key: params.templateKey,
+    event_type: params.sourceEventType ?? params.templateKey,
+    ...(params.data ?? {}),
+  };
+  return Object.fromEntries(
+    Object.entries(data).filter(([, value]) => value !== undefined && value !== null),
+  );
 }
 
 function isCriticalNotification(type: string): boolean {

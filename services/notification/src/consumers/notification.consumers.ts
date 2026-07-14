@@ -193,6 +193,21 @@ function getJourneyContext(payload: EventPayload): {
   };
 }
 
+function journeyData(
+  d: ReturnType<typeof getJourneyContext>,
+  journeyState: string,
+): Record<string, unknown> {
+  return {
+    bookingId: d.bookingId,
+    routeId: d.routeId,
+    tripId: d.tripId,
+    passengerId: d.passengerId,
+    driverId: d.driverId,
+    journeyState,
+    timestamp: d.timestamp,
+  };
+}
+
 export async function startNotificationConsumers(redis: IORedis): Promise<void> {
   const consumer = await getConsumer('notification-service');
   await consumer.subscribe({ topics: TOPICS, fromBeginning: false });
@@ -231,6 +246,10 @@ async function routeEvent(topic: string, payload: EventPayload, redis: IORedis):
       },
       sourceEventType: eventType,
       sourceEventId: d.bookingId,
+      data: {
+        bookingId: d.bookingId,
+        driverId: d.driverId,
+      },
     });
 
     await enq({
@@ -264,6 +283,10 @@ async function routeEvent(topic: string, payload: EventPayload, redis: IORedis):
       fallbackBody: 'Your booking was declined by the driver. Your seat has been released - please search again.',
       sourceEventType: eventType,
       sourceEventId: d.bookingId,
+      data: {
+        bookingId: d.bookingId,
+        driverId: d.driverId,
+      },
     });
     return;
   }
@@ -281,6 +304,9 @@ async function routeEvent(topic: string, payload: EventPayload, redis: IORedis):
       },
       sourceEventType: eventType,
       sourceEventId: d.bookingId,
+      data: {
+        bookingId: d.bookingId,
+      },
     });
     return;
   }
@@ -294,6 +320,9 @@ async function routeEvent(topic: string, payload: EventPayload, redis: IORedis):
       vars: { confirmation_code: d.confirmationCode ?? '' },
       sourceEventType: eventType,
       sourceEventId: d.bookingId,
+      data: {
+        bookingId: d.bookingId,
+      },
     });
     return;
   }
@@ -311,6 +340,10 @@ async function routeEvent(topic: string, payload: EventPayload, redis: IORedis):
         },
         sourceEventType: eventType,
         sourceEventId: d.bookingId,
+        data: {
+          bookingId: d.bookingId,
+          driverId: d.driverId,
+        },
       });
     } else if (d.cancelledBy === 'passenger') {
       await enq({
@@ -324,6 +357,10 @@ async function routeEvent(topic: string, payload: EventPayload, redis: IORedis):
         },
         sourceEventType: eventType,
         sourceEventId: d.bookingId,
+        data: {
+          bookingId: d.bookingId,
+          driverId: d.driverId,
+        },
       });
     }
     return;
@@ -384,11 +421,58 @@ async function routeEvent(topic: string, payload: EventPayload, redis: IORedis):
       sourceEventType: eventType,
       sourceEventId: d.bookingId ?? d.tripId ?? envelopeEventId,
       data: {
-        bookingId: d.bookingId,
-        routeId: d.routeId,
-        tripId: d.tripId,
-        driverId: d.driverId,
-        timestamp: d.timestamp,
+        ...journeyData(d, 'boarded'),
+      },
+    });
+    return;
+  }
+
+  if (topic === 'driver.arrived_pickup') {
+    const d = getJourneyContext(payload);
+    if (!d.passengerId) {
+      logger.warn({ topic, payload }, 'Skipping pickup arrival notification without passenger id');
+      return;
+    }
+
+    await enq({
+      userId: d.passengerId,
+      templateKey: 'driver.arrived',
+      channels: ['push', 'in_app'],
+      vars: {
+        driver_name: 'your driver',
+        pickup_address: d.pickupName ?? 'your pickup point',
+      },
+      fallbackTitle: 'Driver arrived',
+      fallbackBody: 'Your driver has arrived at {{pickup_address}}.',
+      sourceEventType: eventType,
+      sourceEventId: d.bookingId ?? d.tripId ?? envelopeEventId,
+      data: {
+        ...journeyData(d, 'driver_arrived'),
+      },
+    });
+    return;
+  }
+
+  if (topic === 'passenger.dropped_off') {
+    const d = getJourneyContext(payload);
+    if (!d.passengerId) {
+      logger.warn({ topic, payload }, 'Skipping dropoff notification without passenger id');
+      return;
+    }
+
+    await enq({
+      userId: d.passengerId,
+      templateKey: 'passenger.dropped_off',
+      channels: ['push', 'in_app'],
+      vars: {
+        dropoff_name: d.dropoffName ?? 'your drop-off point',
+      },
+      fallbackTitle: 'You have been dropped off',
+      fallbackBody: 'Continue from {{dropoff_name}} to your final destination.',
+      sourceEventType: eventType,
+      sourceEventId: d.bookingId ?? d.tripId ?? envelopeEventId,
+      data: {
+        ...journeyData(d, 'dropped_off'),
       },
     });
     return;
@@ -409,13 +493,25 @@ async function routeEvent(topic: string, payload: EventPayload, redis: IORedis):
       sourceEventType: eventType,
       sourceEventId: d.bookingId ?? d.tripId ?? envelopeEventId,
       data: {
-        bookingId: d.bookingId,
-        routeId: d.routeId,
-        tripId: d.tripId,
-        driverId: d.driverId,
-        timestamp: d.timestamp,
+        ...journeyData(d, 'completed'),
       },
     });
+
+    if (d.driverId) {
+      await enq({
+        userId: d.driverId,
+        templateKey: 'driver.trip_completed',
+        channels: ['push', 'in_app'],
+        vars: {},
+        fallbackTitle: 'Trip completed',
+        fallbackBody: 'The passenger completed the journey. Your earnings will update shortly.',
+        sourceEventType: eventType,
+        sourceEventId: d.bookingId ?? d.tripId ?? envelopeEventId,
+        data: {
+          ...journeyData(d, 'completed'),
+        },
+      });
+    }
     return;
   }
 
@@ -448,6 +544,7 @@ async function routeEvent(topic: string, payload: EventPayload, redis: IORedis):
         bookingId,
         tripId,
         driverId,
+        journeyState: 'driver_arrived',
         arrivalLat: pickNumber(d, ['arrivalLat', 'arrival_lat']),
         arrivalLng: pickNumber(d, ['arrivalLng', 'arrival_lng']),
         pickupLat: pickNumber(d, ['pickupLat', 'pickup_lat']),
@@ -478,11 +575,7 @@ async function routeEvent(topic: string, payload: EventPayload, redis: IORedis):
       sourceEventType: eventType,
       sourceEventId: d.bookingId ?? d.tripId ?? envelopeEventId,
       data: {
-        bookingId: d.bookingId,
-        routeId: d.routeId,
-        tripId: d.tripId,
-        driverId: d.driverId,
-        timestamp: d.timestamp,
+        ...journeyData(d, 'waiting_for_driver'),
       },
     });
     return;
@@ -505,11 +598,7 @@ async function routeEvent(topic: string, payload: EventPayload, redis: IORedis):
       sourceEventType: eventType,
       sourceEventId: d.bookingId ?? d.tripId ?? envelopeEventId,
       data: {
-        bookingId: d.bookingId,
-        routeId: d.routeId,
-        tripId: d.tripId,
-        driverId: d.driverId,
-        timestamp: d.timestamp,
+        ...journeyData(d, 'no_show'),
       },
     });
     return;
@@ -529,9 +618,7 @@ async function routeEvent(topic: string, payload: EventPayload, redis: IORedis):
   }
 
   if (
-    topic === 'driver.arrived_pickup'
-    || topic === 'passenger.dropped_off'
-    || topic === 'passenger.walking_to_destination'
+    topic === 'passenger.walking_to_destination'
   ) {
     const d = getJourneyContext(payload);
     logger.debug({
