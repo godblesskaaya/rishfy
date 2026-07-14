@@ -160,4 +160,38 @@ describe('NotificationService.dispatch', () => {
     expect(markFailedMock).toHaveBeenCalledWith('notif-1', 'provider down');
     expect(markDeliveredMock).not.toHaveBeenCalled();
   });
+
+  it('adds routing metadata to stored and pushed notification data', async () => {
+    pushSendMock.mockResolvedValue({ status: 'sent', providerMessageId: 'push-1' });
+
+    await new NotificationService().dispatch({
+      userId: 'user-1',
+      templateKey: 'driver.trip_completed',
+      channels: ['push'],
+      vars: {},
+      fallbackBody: 'Trip completed',
+      sourceEventType: 'booking.journey_completed',
+      data: {
+        bookingId: 'booking-1',
+        routeId: undefined,
+      },
+    });
+
+    expect(createMock).toHaveBeenCalledWith(expect.objectContaining({
+      data: {
+        type: 'driver.trip_completed',
+        template_key: 'driver.trip_completed',
+        event_type: 'booking.journey_completed',
+        bookingId: 'booking-1',
+      },
+    }));
+    expect(pushSendMock).toHaveBeenCalledWith(expect.objectContaining({
+      data: {
+        type: 'driver.trip_completed',
+        template_key: 'driver.trip_completed',
+        event_type: 'booking.journey_completed',
+        bookingId: 'booking-1',
+      },
+    }));
+  });
 });

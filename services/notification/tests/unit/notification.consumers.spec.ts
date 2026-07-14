@@ -56,6 +56,8 @@ describe('Notification consumers', () => {
         'booking.no_show',
         'driver.location_updated',
         'driver.arrived',
+        'driver.arrived_pickup',
+        'passenger.dropped_off',
       ]),
     }));
     expect(eachMessageHandler).toBeTruthy();
@@ -157,6 +159,116 @@ describe('Notification consumers', () => {
         templateKey: 'trip.started',
         sourceEventType: 'passenger.boarded',
         sourceEventId: 'booking-1',
+      }),
+    );
+  });
+
+  it('routes driver.arrived_pickup to the driver.arrived notification template', async () => {
+    await startNotificationConsumers({} as never);
+
+    await eachMessageHandler!({
+      topic: 'driver.arrived_pickup',
+      message: {
+        value: Buffer.from(JSON.stringify({
+          bookingId: 'booking-1',
+          routeId: 'route-1',
+          passengerId: 'passenger-1',
+          driverId: 'driver-1',
+          tripId: 'trip-1',
+          pickupName: 'Kariakoo',
+          timestamp: '2026-05-22T12:00:00.000Z',
+        })),
+      },
+    });
+
+    expect(enqueueMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        userId: 'passenger-1',
+        templateKey: 'driver.arrived',
+        channels: ['push', 'in_app'],
+        sourceEventType: 'driver.arrived_pickup',
+        sourceEventId: 'booking-1',
+        data: expect.objectContaining({
+          bookingId: 'booking-1',
+          routeId: 'route-1',
+          driverId: 'driver-1',
+          journeyState: 'driver_arrived',
+        }),
+      }),
+    );
+  });
+
+  it('routes passenger.dropped_off to a passenger push notification', async () => {
+    await startNotificationConsumers({} as never);
+
+    await eachMessageHandler!({
+      topic: 'passenger.dropped_off',
+      message: {
+        value: Buffer.from(JSON.stringify({
+          bookingId: 'booking-1',
+          routeId: 'route-1',
+          passengerId: 'passenger-1',
+          driverId: 'driver-1',
+          tripId: 'trip-1',
+          dropoffName: 'Mbezi',
+        })),
+      },
+    });
+
+    expect(enqueueMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        userId: 'passenger-1',
+        templateKey: 'passenger.dropped_off',
+        channels: ['push', 'in_app'],
+        sourceEventType: 'passenger.dropped_off',
+        sourceEventId: 'booking-1',
+        data: expect.objectContaining({
+          bookingId: 'booking-1',
+          routeId: 'route-1',
+          journeyState: 'dropped_off',
+        }),
+      }),
+    );
+  });
+
+  it('notifies the driver when a journey is completed', async () => {
+    await startNotificationConsumers({} as never);
+
+    await eachMessageHandler!({
+      topic: 'booking.journey_completed',
+      message: {
+        value: Buffer.from(JSON.stringify({
+          bookingId: 'booking-1',
+          routeId: 'route-1',
+          passengerId: 'passenger-1',
+          driverId: 'driver-1',
+          tripId: 'trip-1',
+        })),
+      },
+    });
+
+    expect(enqueueMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        userId: 'passenger-1',
+        templateKey: 'trip.completed',
+      }),
+    );
+    expect(enqueueMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        userId: 'driver-1',
+        templateKey: 'driver.trip_completed',
+        channels: ['push', 'in_app'],
+        sourceEventType: 'booking.journey_completed',
+        sourceEventId: 'booking-1',
+        data: expect.objectContaining({
+          bookingId: 'booking-1',
+          routeId: 'route-1',
+          journeyState: 'completed',
+        }),
       }),
     );
   });

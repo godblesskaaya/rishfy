@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -174,12 +176,72 @@ final FutureProviderFamily<PaymentDetailDto, String> paymentDetailProvider =
     final BookingRemoteDataSource ds = ref.read(bookingDataSourceProvider);
     return ds.getPaymentDetail(paymentId);
   },
-	);
+);
 
 final FutureProvider<List<SafetyReportDto>> safetyReportsProvider =
     FutureProvider<List<SafetyReportDto>>((Ref ref) async {
   final BookingRemoteDataSource ds = ref.read(bookingDataSourceProvider);
   return ds.listSafetyReports();
+});
+
+void invalidateBookingRemoteState(
+  Ref ref, {
+  String? bookingId,
+  String? routeId,
+  bool includeWallet = true,
+}) {
+  final String? normalizedBookingId = _nonEmptyId(bookingId);
+  final String? normalizedRouteId = _nonEmptyId(routeId);
+  if (normalizedBookingId != null) {
+    ref.invalidate(bookingDetailProvider(normalizedBookingId));
+  }
+  if (normalizedRouteId != null) {
+    ref.invalidate(driverRouteBookingsProvider(normalizedRouteId));
+  }
+  ref.invalidate(myBookingsProvider);
+  ref.invalidate(myDriverBookingsProvider);
+  ref.invalidate(activePassengerJourneyProvider);
+  ref.invalidate(activeDriverJourneyProvider);
+  if (includeWallet) {
+    ref.invalidate(driverWalletProvider);
+  }
+}
+
+void invalidateBookingRemoteStateFromWidget(
+  WidgetRef ref, {
+  String? bookingId,
+  String? routeId,
+  bool includeWallet = true,
+}) {
+  final String? normalizedBookingId = _nonEmptyId(bookingId);
+  final String? normalizedRouteId = _nonEmptyId(routeId);
+  if (normalizedBookingId != null) {
+    ref.invalidate(bookingDetailProvider(normalizedBookingId));
+  }
+  if (normalizedRouteId != null) {
+    ref.invalidate(driverRouteBookingsProvider(normalizedRouteId));
+  }
+  ref.invalidate(myBookingsProvider);
+  ref.invalidate(myDriverBookingsProvider);
+  ref.invalidate(activePassengerJourneyProvider);
+  ref.invalidate(activeDriverJourneyProvider);
+  if (includeWallet) {
+    ref.invalidate(driverWalletProvider);
+  }
+}
+
+String? _nonEmptyId(String? value) {
+  final String? trimmed = value?.trim();
+  return trimmed == null || trimmed.isEmpty ? null : trimmed;
+}
+
+final AutoDisposeProvider<void> bookingSyncAutoRefreshProvider =
+    Provider.autoDispose<void>((Ref ref) {
+  final Timer timer = Timer.periodic(
+    const Duration(seconds: 30),
+    (_) => invalidateBookingRemoteState(ref),
+  );
+  ref.onDispose(timer.cancel);
 });
 
 // ---- Emergency report ----
@@ -386,7 +448,7 @@ class JourneyActionNotifier extends StateNotifier<TripActionState> {
     );
     try {
       await operation();
-      _invalidateBookingSurfaces(bookingId);
+      invalidateBookingRemoteState(_ref, bookingId: bookingId);
       state = state.copyWith(
         status: TripActionStatus.success,
         action: actionLabel,
@@ -400,14 +462,6 @@ class JourneyActionNotifier extends StateNotifier<TripActionState> {
     }
   }
 
-  void _invalidateBookingSurfaces(String bookingId) {
-    _ref.invalidate(bookingDetailProvider(bookingId));
-    _ref.invalidate(myBookingsProvider);
-    _ref.invalidate(myDriverBookingsProvider);
-    _ref.invalidate(activePassengerJourneyProvider);
-    _ref.invalidate(activeDriverJourneyProvider);
-    _ref.invalidate(driverWalletProvider);
-  }
 }
 
 BookingEntity? _selectActiveJourney(List<BookingEntity> bookings) {

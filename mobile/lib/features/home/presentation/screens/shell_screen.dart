@@ -9,6 +9,7 @@ import '../../../../core/localization/app_localizations.dart';
 import '../../../../shared/providers/active_role_provider.dart';
 import '../../../auth/domain/entities/user.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
+import '../../../bookings/presentation/providers/booking_provider.dart';
 import '../../../notifications/presentation/providers/notification_provider.dart';
 import '../../../profile/domain/emergency_contact.dart';
 import '../../../profile/presentation/providers/emergency_contacts_provider.dart';
@@ -74,6 +75,7 @@ class ShellScreen extends ConsumerWidget {
     final AppLocalizations l = AppLocalizations.of(context);
     final NotificationInteractionState notificationInteraction =
         ref.watch(notificationInteractionProvider);
+    ref.watch(bookingSyncAutoRefreshProvider);
 
     ref.listen<NotificationInteractionState>(
       notificationInteractionProvider,

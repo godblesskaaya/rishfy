@@ -5,6 +5,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/network/dio_client.dart';
+import '../../../bookings/presentation/providers/booking_provider.dart';
 import '../../data/models/notification_models.dart';
 
 String? _readPayloadString(
@@ -365,6 +366,7 @@ class NotificationInteractionNotifier
   }
 
   void _handleForeground(RemoteMessage message) {
+    _syncRemoteState(message);
     unawaited(_ref.read(notificationProvider.notifier).load());
     final String? route = notificationRouteFor(
       type: _messageType(message),
@@ -385,6 +387,7 @@ class NotificationInteractionNotifier
   }
 
   void _handleOpenedApp(RemoteMessage message) {
+    _syncRemoteState(message);
     unawaited(_ref.read(notificationProvider.notifier).load());
     final String? route = notificationRouteFor(
       type: _messageType(message),
@@ -395,6 +398,18 @@ class NotificationInteractionNotifier
     }
 
     state = state.copyWith(pendingRoute: route);
+  }
+
+  void _syncRemoteState(RemoteMessage message) {
+    final Map<String, dynamic> data = message.data;
+    invalidateBookingRemoteState(
+      _ref,
+      bookingId: _readPayloadString(
+        data,
+        <String>['booking_id', 'bookingId', 'entity_id', 'entityId'],
+      ),
+      routeId: _readPayloadString(data, <String>['route_id', 'routeId']),
+    );
   }
 
   String _messageType(RemoteMessage message) {
